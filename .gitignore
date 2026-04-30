@@ -1,0 +1,23 @@
+# Cerebrate 脑虫 .gitignore
+
+# 环境配置 (包含 API 密钥)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 记忆数据 (运行时数据，不入库)
+memory/personal/
+memory/swarm/
+memory/knowledge/
+memory/agents/
+memory/evolution/
+memory/.queue/
+memory/.archived/
+memory/_semantic_index*.json
+
+# IDE
+.vscode/
+.idea/

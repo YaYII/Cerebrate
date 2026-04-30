@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git --version)",
+      "Bash(gh --version)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Read(//home/yangying/Documents/project/**)",
+      "Bash(claude --version)",
+      "Read(//home/yangying/Documents/**)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(apt list *)",
+      "Bash(sudo apt *)",
+      "Bash(sudo -S apt install python3-pip -y)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(pip3 list *)",
+      "Bash(echo \"EXIT: $?\")"
+    ]
+  }
+}
