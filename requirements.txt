@@ -1,10 +1,12 @@
-# Cerebrate v3.0 虫群记忆系统依赖
-# 核心: Python 标准库 + JSON 文件存储 (零外部依赖)
+# Cerebrate v4.x 虫群记忆系统依赖
 
-# 可选: LLM 增强 (脑虫的灵魂与免疫系统)
-# pip install anthropic
-# anthropic>=0.30.0
+# 核心: ChromaDB 向量存储 + BGE 语义嵌入
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
 
-# 可选: OpenAI 备选 LLM 提供商
-# pip install openai
-# openai>=1.0.0
+# 可选: LLM 增强（免疫系统、总结、标签建议）
+anthropic>=0.30.0
+openai>=1.0.0
+
+# 开发/测试
+pytest>=8.0.0

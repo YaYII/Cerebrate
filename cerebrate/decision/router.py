@@ -33,6 +33,7 @@ class DecisionRouter:
             category=context.get("category"),
             tags=context.get("tags"),
             limit=5,
+            project_id=context.get("project_id"),
         )
         if swarm_results:
             result["route"].append("swarm")
@@ -49,6 +50,7 @@ class DecisionRouter:
             kb_results = self.mm.lookup_knowledge(
                 query=query,
                 exact_policy=context.get("exact_policy", False),
+                project_id=context.get("project_id"),
             )
             if kb_results:
                 result["route"].append("knowledge_base")

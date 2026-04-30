@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import config
-from .storage.atomic import atomic_write_json
+from .storage.atomic import FileLock, atomic_write_json
 
 
 class BatchProcessor:
@@ -41,7 +41,7 @@ class BatchProcessor:
             "params": params,
         }
         req_file = self.requests_path / f"{request_id}.json"
-        req_file.write_text(json.dumps(request, ensure_ascii=False, indent=2))
+        atomic_write_json(req_file, request)
         return request_id
 
     def get_result(self, request_id: str) -> Optional[dict]:
@@ -53,31 +53,32 @@ class BatchProcessor:
 
     def process_pending(self, limit: int = 50) -> int:
         """处理所有待处理请求，返回处理数量"""
-        req_files = sorted(self.requests_path.glob("*.json"))
-        processed = 0
+        with FileLock(self.queue_path / ".process.lock", timeout=30.0):
+            req_files = sorted(self.requests_path.glob("*.json"))
+            processed = 0
 
-        for req_file in req_files[:limit]:
-            try:
-                result = self._process_one(req_file)
-                result_file = self.results_path / f"{result['request_id']}.result.json"
-                atomic_write_json(result_file, result)
-                req_file.rename(self.processed_path / req_file.name)
-                processed += 1
-            except Exception as e:
-                # 写入错误结果
+            for req_file in req_files[:limit]:
                 try:
-                    req_data = json.loads(req_file.read_text())
-                    rid = req_data.get("request_id", req_file.stem)
-                    error_result = {
-                        "request_id": rid, "status": "error",
-                        "error": str(e), "elapsed_ms": 0,
-                    }
-                    result_file = self.results_path / f"{rid}.result.json"
-                    atomic_write_json(result_file, error_result)
+                    result = self._process_one(req_file)
+                    result_file = self.results_path / f"{result['request_id']}.result.json"
+                    atomic_write_json(result_file, result)
                     req_file.rename(self.processed_path / req_file.name)
-                except Exception:
-                    pass
-        return processed
+                    processed += 1
+                except Exception as e:
+                    # 写入错误结果
+                    try:
+                        req_data = json.loads(req_file.read_text())
+                        rid = req_data.get("request_id", req_file.stem)
+                        error_result = {
+                            "request_id": rid, "status": "error",
+                            "error": str(e), "elapsed_ms": 0,
+                        }
+                        result_file = self.results_path / f"{rid}.result.json"
+                        atomic_write_json(result_file, error_result)
+                        req_file.rename(self.processed_path / req_file.name)
+                    except Exception:
+                        pass
+            return processed
 
     def _process_one(self, req_file: Path) -> dict:
         start = time.time()
