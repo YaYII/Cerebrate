@@ -1,13 +1,9 @@
 # Cerebrate 脑虫 .gitignore
 
-# 环境配置 (包含 API 密钥)
+# ───────── 环境配置 (包含 API 密钥) ─────────
 .env
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-
+# ───────── 运行时数据 ─────────
 # 记忆数据 (运行时数据，不入库)
 memory/personal/
 memory/swarm/
@@ -17,7 +13,37 @@ memory/evolution/
 memory/.queue/
 memory/.archived/
 memory/_semantic_index*.json
+memory/_semantic_index.kb_index.json
+# ChromaDB 向量数据库运行时数据
+memory/chroma_data/
 
-# IDE
+# ───────── 编译产物 / 二进制文件 ─────────
+__pycache__/
+*.py[cod]
+*.so
+*.dll
+*.dylib
+*.exe
+*.class
+
+# ───────── 打包构建 ─────────
+*.egg-info/
+dist/
+build/
+*.whl
+*.egg/
+
+# ───────── IDE / 编辑器 ─────────
 .vscode/
 .idea/
+.claude/settings.local.json
+
+# ───────── OS 系统文件 ─────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ───────── 日志 ─────────
+*.log
