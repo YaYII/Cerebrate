@@ -65,7 +65,7 @@ def cmd_stats(args):
 
     def human():
         print("=" * 55)
-        print("  Cerebrate 虫群记忆系统 v3.1")
+        print("  Cerebrate 脑虫记忆系统 v4")
         print("=" * 55)
         print(f"  健康: {sense['health']}  |  世代: {mind.generation}")
         print(f"  虫群记忆: {sense['total_memories']} 条")

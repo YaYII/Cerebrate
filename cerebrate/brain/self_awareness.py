@@ -1,4 +1,4 @@
-"""虫群自我意识 v3.1 — 动态注册表 + 持久化状态"""
+"""脑虫自我意识 v4 — 动态注册表 + 持久化状态"""
 import json
 from datetime import datetime, timezone
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""智能体注册表 v3.1 — 内存缓存 + 原子写入"""
+"""智能体注册表 v4 — 单位战绩 + 原子写入"""
 import json
 from datetime import datetime, timezone
 from pathlib import Path
