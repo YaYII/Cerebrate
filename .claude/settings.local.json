@@ -15,7 +15,8 @@
       "Bash(sudo -S apt install python3-pip -y)",
       "Bash(echo \"exit=$?\")",
       "Bash(pip3 list *)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(git:*)"
     ]
   }
 }
