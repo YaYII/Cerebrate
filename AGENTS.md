@@ -13,6 +13,8 @@ Cerebrate 现在明确分为三个根级项目：
   - 不能直接写群体记忆，不能直接晋升 doctrine。
 - **记忆内核**：`memory/`
   - 服务端内部器官，包含 swarm、personal、knowledge、evolution、embedding 和 storage。
+  - 当前唯一搜索/索引主链路是 `EmbeddingEngine` + `ChromaStore`；BGE 可用时使用 BGE，不可用时使用本地 deterministic hash embedding。
+  - 运行时 Chroma collection 按 embedding 模式隔离，例如 `swarm_memories_hash`。
   - 客户端不得直接依赖或写入。
 
 旧 `cerebrate/` 包已废弃并删除。`cerebrate.py` 只是仓库开发入口：`serve/migrate` 分发到服务端 CLI，其余命令分发到客户端 CLI。
@@ -104,6 +106,15 @@ python3 cerebrate.py events --url http://127.0.0.1:8765 --cursor 0
 - 直接篡改共识结果
 
 晋升必须由服务端进化、免疫和共识裁决完成。
+
+## 记忆内核规则
+
+- `memory/swarm.py`：群体记忆与生命周期，服务端写入候选经验、隔离内容、复用反馈。
+- `memory/knowledge.py`：权威知识库，保存策略/文档类知识。
+- `memory/personal.py`：个人上下文缓存与持久化。
+- `memory/embedding.py`：向量化引擎，BGE 优先，本地 hash 保底。
+- `memory/storage.py`：ChromaDB 向量存储和仍被事件/状态文件使用的原子 JSON 写入。
+- 旧 TF-IDF `SemanticIndex` 已删除，不再维护 `_semantic_index.json` 或重建语义索引入口。
 
 ## 脑虫裁决与 LLM
 

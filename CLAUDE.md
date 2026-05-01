@@ -12,7 +12,7 @@
 Cerebrate 采用脑虫服务架构，包含三个清晰的顶层模块：
 - **server/** — 脑虫服务端（权威记忆中枢，`python3 cerebrate.py serve`）
 - **client/** — CLI 瘦客户端，向脑虫服务端发送 HTTP 请求
-- **memory/** — 记忆系统（群体记忆、个人记忆、知识库、进化、存储）
+- **memory/** — 服务端内部记忆系统（群体记忆、个人记忆、知识库、进化、embedding、Chroma 向量存储）
 - 共享根模块：`config.py`、`protocol.py`、`migrate.py`
 - 所有命令返回 v5 协议 JSON：`{"status":"ok","data":{...},"meta":{"protocol":"v5"}}`
 
@@ -20,6 +20,7 @@ Cerebrate 采用脑虫服务架构，包含三个清晰的顶层模块：
 - 共享层：`from config import config`、`from protocol import err, ok`
 - 跨模块：`from memory.manager import MemoryManager`、`from server.api import BrainAPI`、`from client.http import BrainClient`
 - 模块内：`from .swarm import SwarmMemory`
+- 旧 `memory.semantic` / `_semantic_index.json` 已删除；不要重新引入 TF-IDF 双轨索引。
 
 ## 会话协议
 

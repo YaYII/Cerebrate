@@ -17,6 +17,9 @@
 
 - `memory/`
 - 这是服务端内部器官，不是客户端项目。
+- 使用 `EmbeddingEngine` + `ChromaStore` 作为唯一向量记忆链路。
+- 无网络或 BGE 不可用时自动使用本地 deterministic hash embedding。
+- 旧 TF-IDF `SemanticIndex` 已删除；运行时 Chroma 是可重建索引，长期交接记忆保存在 `memory/seeds/*.jsonl`。
 
 兼容入口：
 
