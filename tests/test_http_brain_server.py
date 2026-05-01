@@ -224,8 +224,10 @@ class HttpBrainServerTests(unittest.TestCase):
         self.assertIn("data", payload)
 
     def test_rest_endpoints_and_event_log(self):
-        from client.http import BrainClient
-        client_sense = BrainClient(self.base_url).get("/v1/sense")
+        # 测试：直接 HTTP GET /v1/sense（不再依赖 client/ 模块）
+        req = Request(f"{self.base_url}/v1/sense", headers={"Accept": "application/json"})
+        with urlopen(req, timeout=5) as resp:
+            client_sense = json.loads(resp.read().decode("utf-8"))
         self.assert_v5_ok(client_sense)
 
         registered = self.post("/v1/agents/register", {
