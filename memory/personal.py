@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..storage.chroma_store import ChromaStore
-from ..config import config
+from .storage import ChromaStore
+from config import config
 
 
 class PersonalMemory:
@@ -21,7 +21,7 @@ class PersonalMemory:
         self._load_all_to_cache()
 
     def _init_store(self):
-        from ..embedding import get_embedding_engine
+        from .embedding import get_embedding_engine
         engine = get_embedding_engine(config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "personal_memories", engine)
 

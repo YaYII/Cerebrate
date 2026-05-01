@@ -11,6 +11,8 @@ import os
 import re
 from typing import Optional
 
+from ..config import config
+
 
 class CerebrateLLM:
     """脑虫的 LLM 大脑 — 可选的智能增强层，无 API Key 时回退到规则引擎"""
@@ -19,10 +21,10 @@ class CerebrateLLM:
         self._client = None
         self._available = None
         self._sdk_available = None  # SDK 是否可导入（与 API Key 存在分开管理）
-        self._provider = os.environ.get("CEREBRATE_LLM_PROVIDER", "anthropic")
-        self._model = os.environ.get("CEREBRATE_LLM_MODEL", "claude-sonnet-4-6")
-        self._immune_enabled = os.environ.get("CEREBRATE_IMMUNE_ENABLED", "true").lower() == "true"
-        self._immune_threshold = float(os.environ.get("CEREBRATE_IMMUNE_THRESHOLD", "0.7"))
+        self._provider = config.llm_provider
+        self._model = config.llm_model
+        self._immune_enabled = config.immune_enabled
+        self._immune_threshold = config.immune_threshold
 
     def is_available(self) -> bool:
         """检查 LLM 是否可用（仅检查 API Key 是否存在）"""

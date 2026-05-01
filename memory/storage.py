@@ -1,13 +1,77 @@
-"""ChromaDB 存储层 — 向量数据库统一封装
+"""存储层 — ChromaDB 向量存储 + 原子文件操作"""
 
-管理 ChromaDB collections，集成嵌入引擎，提供 add/search/get/update/delete API。
-"""
-import logging
-import os
+# ==================== 原子文件操作 ====================
+
+import json as _json
+import os as _os
+import tempfile as _tempfile
+import time as _time
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+
+def atomic_write_json(path: Path, data: dict, indent: int = 2) -> None:
+    """原子写入 JSON 文件: 写临时文件 → fsync → os.replace"""
+    tmp_fd, tmp_path = _tempfile.mkstemp(
+        suffix=".tmp", prefix=f".{path.name}.", dir=path.parent
+    )
+    try:
+        with _os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            _os.fsync(f.fileno())
+    except Exception:
+        _os.unlink(tmp_path)
+        raise
+    _os.replace(tmp_path, path)
+
+
+class FileLock:
+    """基于 O_CREAT | O_EXCL 的文件 advisory lock"""
+
+    def __init__(self, lock_path: Path, timeout: float = 5.0):
+        self.lock_path = lock_path
+        self.timeout = timeout
+        self._fd: Optional[int] = None
+
+    def __enter__(self):
+        deadline = _time.time() + self.timeout
+        while True:
+            try:
+                self._fd = _os.open(
+                    str(self.lock_path),
+                    _os.O_CREAT | _os.O_EXCL | _os.O_RDWR,
+                )
+                return self
+            except FileExistsError:
+                if _time.time() > deadline:
+                    raise TimeoutError(
+                        f"无法在 {self.timeout}s 内获取锁: {self.lock_path}"
+                    )
+                _time.sleep(0.05)
+
+    def __exit__(self, *args):
+        if self._fd is not None:
+            _os.close(self._fd)
+            try:
+                _os.unlink(str(self.lock_path))
+            except OSError:
+                pass
+
+
+def locked_atomic_write(path: Path, data: dict, timeout: float = 5.0) -> None:
+    """带文件锁的原子写入"""
+    lock_path = Path(str(path) + ".lock")
+    with FileLock(lock_path, timeout):
+        atomic_write_json(path, data)
+
+
+# ==================== ChromaDB 向量存储 ====================
+
+import logging as _logging
+import os as _chroma_os
+
+_chroma_logger = _logging.getLogger(__name__)
 
 
 class _CerebrateEmbeddingFunction:
@@ -43,7 +107,7 @@ class ChromaStore:
 
     def _init(self):
         import chromadb
-        os.makedirs(self.persist_dir, exist_ok=True)
+        _chroma_os.makedirs(self.persist_dir, exist_ok=True)
         self._client = chromadb.PersistentClient(
             path=str(self.persist_dir),
             settings=chromadb.Settings(anonymized_telemetry=False),
@@ -65,7 +129,7 @@ class ChromaStore:
             )
         except Exception:
             # embedding function 不匹配：重建 collection
-            logger.warning(
+            _chroma_logger.warning(
                 "Collection %s embedding function mismatch, recreating...",
                 self.collection_name,
             )

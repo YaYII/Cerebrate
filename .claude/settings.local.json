@@ -16,7 +16,8 @@
       "Bash(echo \"exit=$?\")",
       "Bash(pip3 list *)",
       "Bash(echo \"EXIT: $?\")",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(ls:*)"
     ]
   }
 }

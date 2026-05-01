@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..storage.chroma_store import ChromaStore
+from .storage import ChromaStore
 from .decay import calculate_decay, boost_from_reuse
-from ..config import config
+from config import config
 
 
 LIFE_STAGES = {"nutrient", "memory", "verified_skill", "doctrine", "quarantined", "archived"}
@@ -25,7 +25,7 @@ class SwarmMemory:
         self._init_store()
 
     def _init_store(self):
-        from ..embedding import get_embedding_engine
+        from .embedding import get_embedding_engine
         engine = get_embedding_engine(config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "swarm_memories", engine)
 
@@ -41,7 +41,7 @@ class SwarmMemory:
     def _flush_stats(self):
         """将统计计数器刷到磁盘"""
         import json
-        from ..storage.atomic import atomic_write_json
+        from .storage import atomic_write_json
         atomic_write_json(self.storage_path / "_stats.json", self._stats)
 
     def flush(self):
@@ -124,7 +124,7 @@ class SwarmMemory:
             where = {"$and": conditions}
 
         # 向量搜索
-        from ..embedding import get_embedding_engine
+        from .embedding import get_embedding_engine
         engine = get_embedding_engine()
         q_emb = engine.encode_query(query_text) if engine.mode == "bge" else None
 

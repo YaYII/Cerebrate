@@ -45,17 +45,20 @@ class EventLog:
         if not self.events_file.exists():
             return []
         events = []
-        for line in self.events_file.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if int(event.get("event_id", 0)) > cursor:
-                events.append(event)
-            if len(events) >= limit:
-                break
+        # 流式读取，不一次性加载整个文件到内存
+        with self.events_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    event = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if int(event.get("event_id", 0)) > cursor:
+                    events.append(event)
+                if len(events) >= limit:
+                    break
         return events
 
     def latest_id(self) -> int:

@@ -8,7 +8,7 @@ from typing import Optional
 from .personal import PersonalMemory
 from .swarm import SwarmMemory
 from .knowledge import KnowledgeBase
-from ..config import config
+from config import config
 
 
 class MemoryManager:
@@ -24,7 +24,7 @@ class MemoryManager:
     @property
     def agents(self):
         if self._agent_registry is None:
-            from ..agents.registry import AgentRegistry
+            from server.agents import AgentRegistry
             self._agent_registry = AgentRegistry(config.agents_path)
         return self._agent_registry
 
@@ -99,7 +99,7 @@ class MemoryManager:
             "outcome": "",
             "feedback": "",
         }
-        from ..storage.atomic import atomic_write_json
+        from .storage import atomic_write_json
         atomic_write_json(config.usage_path / f"{usage_id}.json", record)
         self.agents.record_action(agent_id, "memory_use_started",
                                   record["project_id"], "started",
@@ -118,7 +118,7 @@ class MemoryManager:
             "outcome": outcome,
             "feedback": feedback,
         })
-        from ..storage.atomic import atomic_write_json
+        from .storage import atomic_write_json
         atomic_write_json(usage_file, record)
         self.mark_swarm_reused(record["memory_id"], success=outcome == "success",
                                feedback=feedback)

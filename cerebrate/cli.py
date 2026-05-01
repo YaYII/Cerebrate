@@ -119,6 +119,25 @@ def cmd_evolve(args):
     _out(_client(args).post("/v1/evolve", {}))
 
 
+def cmd_migrate(args):
+    from cerebrate.migrate import migrate_all, export_seeds, reindex_from_seeds
+    if args.export_seeds:
+        _out({"status": "ok", "data": export_seeds(), "meta": {"protocol": "v5"}})
+    elif args.reindex:
+        _out({"status": "ok", "data": reindex_from_seeds(args.dry_run), "meta": {"protocol": "v5"}})
+    elif args.swarm_only:
+        result = {"swarm": _migrate_swarm(args.dry_run)}
+        _out({"status": "ok", "data": result, "meta": {"protocol": "v5"}})
+    else:
+        result = migrate_all(args.dry_run)
+        _out({"status": "ok", "data": result, "meta": {"protocol": "v5"}})
+
+
+def _migrate_swarm(dry_run: bool) -> int:
+    from cerebrate.migrate import migrate_swarm
+    return migrate_swarm(dry_run)
+
+
 def _add_client_common(parser):
     parser.add_argument("--url", default=config.server_url or "http://127.0.0.1:8765")
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -215,6 +234,13 @@ def main():
     p = sub.add_parser("evolve", help="ask Brain Server to run evolution")
     _add_client_common(p)
     p.set_defaults(func=cmd_evolve)
+
+    p = sub.add_parser("migrate", help="migrate JSON memories to ChromaDB / export seeds / reindex")
+    p.add_argument("--dry-run", action="store_true", help="preview without executing")
+    p.add_argument("--swarm-only", action="store_true", help="only migrate swarm memories")
+    p.add_argument("--export-seeds", action="store_true", help="export ChromaDB memories to JSONL seed files")
+    p.add_argument("--reindex", action="store_true", help="rebuild ChromaDB index from seed files")
+    p.set_defaults(func=cmd_migrate)
 
     args = parser.parse_args()
     if not hasattr(args, "func"):

@@ -104,8 +104,8 @@ class DecisionRouter:
         """判断是否涉及政策/规则查询"""
         policy_keywords = [
             "政策", "规则", "规定", "policy", "rule", "条款",
-            "退货", "退款", "退款", "保证", "保修", "协议", "合同",
-            "退款", "条件", "标准", "合规", "compliance",
+            "退货", "退款", "保证", "保修", "协议", "合同",
+            "条件", "标准", "合规", "compliance",
         ]
         query_lower = query.lower()
         if any(kw in query_lower for kw in policy_keywords):

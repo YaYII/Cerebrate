@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..storage.chroma_store import ChromaStore
-from ..config import config
+from .storage import ChromaStore
+from config import config
 
 
 class KnowledgeBase:
@@ -20,7 +20,7 @@ class KnowledgeBase:
         self._build_hash_index()
 
     def _init_store(self):
-        from ..embedding import get_embedding_engine
+        from .embedding import get_embedding_engine
         engine = get_embedding_engine(config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "knowledge_base", engine)
 
@@ -98,7 +98,7 @@ class KnowledgeBase:
         elif len(conditions) > 1:
             where = {"$and": conditions}
 
-        from ..embedding import get_embedding_engine
+        from .embedding import get_embedding_engine
         engine = get_embedding_engine()
         q_emb = engine.encode_query(query) if engine.mode == "bge" else None
 
