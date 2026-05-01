@@ -9,43 +9,55 @@
 你的接口是 JSON 原生的。所有 CLI 命令返回 JSON。
 
 ## 架构
-Cerebrate 采用脑虫服务架构，包含三个清晰的顶层模块：
+Cerebrate 采用脑虫服务架构：
 - **server/** — 脑虫服务端（权威记忆中枢，`python3 cerebrate.py serve`）
-- **client/** — CLI 瘦客户端，向脑虫服务端发送 HTTP 请求
+- **clients/node/** — Node.js 零依赖客户端（`node clients/node/dist/cli.js <cmd> --url <url>`）
 - **memory/** — 服务端内部记忆系统（群体记忆、个人记忆、知识库、进化、embedding、Chroma 向量存储）
 - 共享根模块：`config.py`、`protocol.py`、`migrate.py`
 - 所有命令返回 v5 协议 JSON：`{"status":"ok","data":{...},"meta":{"protocol":"v5"}}`
 
 ## 导入规则
 - 共享层：`from config import config`、`from protocol import err, ok`
-- 跨模块：`from memory.manager import MemoryManager`、`from server.api import BrainAPI`、`from client.http import BrainClient`
+- 跨模块：`from memory.manager import MemoryManager`、`from server.api import BrainAPI`
 - 模块内：`from .swarm import SwarmMemory`
-- 旧 `memory.semantic` / `_semantic_index.json` 已删除；不要重新引入 TF-IDF 双轨索引。
+
+## 客户端命令别名
+
+在终端中设置别名简化调用：
+```bash
+cerebrate() { node /Users/yingyang/Documents/project/Cerebrate/clients/node/dist/cli.js "$@" --url "${CEREBRATE_URL:-http://127.0.0.1:8765}"; }
+```
+
+以下文档中 `cerebrate` 均指此 Node.js 客户端。
 
 ## 会话协议
 
 ### 会话启动时
 ```bash
-python3 cerebrate.py sense
-python3 cerebrate.py doctrines
-python3 cerebrate.py llm status
+cerebrate sense
+cerebrate doctrines
 ```
 解析：`sense.data.warnings` → 如果非空，向用户报告。
 存储：`doctrines.data.doctrines` → 作为权威架构指南使用。
 
 ### 遇到问题时
 ```bash
-python3 cerebrate.py query "<问题描述>" --user yangying --agent claude-code
+cerebrate query "<问题描述>" --user yangying --agent claude-code
 ```
+返回的 `data.task` 包含：
+- `action`: `reuse_memory` | `verify_reference` | `solve_fresh` | `cite_policy`
+- `instructions`: 具体操作步骤
+- `next_commands`: 下一步要调用的命令列表
+
 决策矩阵：
-- `found == true && swarm_result.score > 0.5` → 复用方案，然后通过 `use` 上报结果
-- `found == true && swarm_result.score > 0.2` → 参考方案，独立验证后通过 `use` 上报
-- `found == false || swarm_result.score < 0.2` → 从零解决
-- `policy_result != null` → 作为权威参考引用
+- `recommendation == "reuse"` → 直接复用，按 `task.instructions` 执行
+- `recommendation == "verify"` → 参考验证，独立核实后执行
+- `recommendation == "new_experience"` → 从零解决，完成后提交新记忆
+- `recommendation == "cite_policy"` → 作为权威参考引用
 
 ### 方案完成时
 ```bash
-python3 cerebrate.py propose \
+cerebrate propose \
   --title "<一句话摘要>" \
   --content "<做了什么以及为什么>" \
   --category <类别> \
@@ -59,15 +71,15 @@ python3 cerebrate.py propose \
 ### 记忆复用时
 ```bash
 # 开始复用记忆时
-python3 cerebrate.py use start --memory-id <id> --agent claude-code --problem "<当前问题>"
+cerebrate use-start --memory-id <id> --agent claude-code --problem "<当前问题>"
 
 # 复用完成时
-python3 cerebrate.py use finish --usage-id <id> --outcome success|partial|failure --feedback "<备注>"
+cerebrate use-finish --usage-id <id> --outcome success|partial|failure --feedback "<备注>"
 ```
 
 ### 学习到用户偏好时
 ```bash
-python3 cerebrate.py propose \
+cerebrate propose \
   --title "用户偏好: <键>" \
   --content "<偏好详情>" \
   --category config \
@@ -79,28 +91,26 @@ python3 cerebrate.py propose \
 
 ### 会话结束时
 ```bash
-python3 cerebrate.py evolve
+cerebrate evolve
 ```
 
 ## 命令参考
 
 | 命令 | 用途 |
 |---------|---------|
-| `serve` | 启动权威脑虫服务端 |
+| `serve` | 启动权威脑虫服务端（Python: `python3 cerebrate.py serve`） |
 | `register --id X --type Y` | 向脑虫服务端注册 AI 智能体 |
 | `sense` | 健康检查 → `{health, warnings[], total_memories, total_agents}` |
-| `query "<问题>" --user X --agent Y` | 搜索群体记忆 → `{found, swarm_result, policy_result, personal, recommendation}` |
+| `query "<问题>" --user X --agent Y` | 搜索群体记忆 → `{found, swarm_result, policy_result, personal, recommendation, task}` |
 | `propose --title --content --category --tags --agent --problem --solution` | 提交候选记忆；服务端决定生命周期 |
-| `use start --memory-id --agent --problem` | 开始追踪记忆复用 |
-| `use finish --usage-id --outcome` | 完成记忆复用，反馈成功/部分成功/失败 |
+| `use-start --memory-id --agent --problem` | 开始追踪记忆复用 |
+| `use-finish --usage-id --outcome` | 完成记忆复用，反馈成功/部分成功/失败 |
 | `vote --memory-id --agent --vote support\|oppose\|abstain` | 提交共识投票 |
-| `consensus --memory-id X` | 读取服务端对某条记忆的共识快照 |
-| `brain assess` | 运行元认知评估 |
-| `llm status` | 查看 LLM/免疫模式（`rule-only` 或 `llm-assisted`） |
 | `events --cursor N --limit M` | 读取持久化服务端事件日志 |
 | `doctrines` | 读取权威教条 |
-| `memory get --memory-id X` | 读取指定记忆 |
+| `memory-get --memory-id X` | 读取指定记忆 |
 | `evolve` | 请求脑虫服务端运行进化（去重 + 技能提取 + 衰减） |
+| `help` | 获取 API 发现文档 |
 
 ## 类别
 `coding`（编码） `debugging`（调试） `architecture`（架构） `devops`（运维） `performance`（性能） `security`（安全） `testing`（测试） `config`（配置）
