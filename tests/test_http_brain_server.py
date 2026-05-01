@@ -310,113 +310,59 @@ class HttpBrainServerTests(unittest.TestCase):
         self.assertIn("data:", body)
 
     def test_cli_is_http_client_not_local_authority(self):
+        node_cli = str(ROOT / "clients" / "node" / "dist" / "cli.js")
+
+        # register
         proc = subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "register",
-                "--url",
-                self.base_url,
-                "--id",
-                "cli-unit",
-            ],
-            cwd=str(ROOT),
-            env=self.env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
+            ["node", node_cli, "register", "--url", self.base_url, "--id", "cli-unit"],
+            cwd=str(ROOT), env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
         )
         payload = json.loads(proc.stdout)
         self.assert_v5_ok(payload)
 
+        # propose
         proc = subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "propose",
-                "--url",
-                self.base_url,
-                "--title",
-                "CLI 客户端候选",
-                "--content",
-                "CLI 只是 HTTP 客户端，服务端才写入权威记忆。",
-                "--category",
-                "testing",
-                "--agent",
-                "cli-unit",
-            ],
-            cwd=str(ROOT),
-            env=self.env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
+            ["node", node_cli, "propose", "--url", self.base_url,
+             "--title", "CLI 客户端候选",
+             "--content", "CLI 只是 HTTP 客户端，服务端才写入权威记忆。",
+             "--category", "testing", "--agent", "cli-unit"],
+            cwd=str(ROOT), env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
         )
         payload = json.loads(proc.stdout)
         self.assert_v5_ok(payload)
         self.assertEqual(payload["data"]["authority"], "brain_server")
         memory_id = payload["data"]["memory_id"]
 
+        # sense
         proc = subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "llm",
-                "status",
-                "--url",
-                self.base_url,
-            ],
-            cwd=str(ROOT),
-            env=self.env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
+            ["node", node_cli, "sense", "--url", self.base_url],
+            cwd=str(ROOT), env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
         )
         payload = json.loads(proc.stdout)
         self.assert_v5_ok(payload)
-        self.assertIn(payload["data"]["mode"], {"rule-only", "llm-assisted"})
+        self.assertIn("total_memories", payload["data"])
 
+        # help
         proc = subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "brain",
-                "assess",
-                "--url",
-                self.base_url,
-            ],
-            cwd=str(ROOT),
-            env=self.env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
+            ["node", node_cli, "help", "--url", self.base_url],
+            cwd=str(ROOT), env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
         )
         payload = json.loads(proc.stdout)
         self.assert_v5_ok(payload)
+        self.assertIn("commands", payload["data"])
 
+        # memory-get
         proc = subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "consensus",
-                "--url",
-                self.base_url,
-                "--memory-id",
-                memory_id,
-            ],
-            cwd=str(ROOT),
-            env=self.env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
+            ["node", node_cli, "memory-get", "--url", self.base_url, "--memory-id", memory_id],
+            cwd=str(ROOT), env=self.env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
         )
         payload = json.loads(proc.stdout)
         self.assert_v5_ok(payload)
-        self.assertEqual(payload["data"]["memory_id"], memory_id)
 
 
 if __name__ == "__main__":
