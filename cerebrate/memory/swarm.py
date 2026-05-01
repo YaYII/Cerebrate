@@ -1,4 +1,4 @@
-"""虫群共享记忆层 v4.0 — ChromaDB 向量存储 + 元数据过滤 + 衰减评分"""
+"""虫群共享记忆层 v5 — 服务端权威内核 + ChromaDB 向量存储"""
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""个人记忆层 v4.0 — ChromaDB 持久化 + 内存缓存"""
+"""个人记忆层 v5 — 服务端用户上下文 + ChromaDB 持久化"""
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional

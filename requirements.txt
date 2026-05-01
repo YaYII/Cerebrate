@@ -1,4 +1,4 @@
-# Cerebrate v4.x 虫群记忆系统依赖
+# Cerebrate v5 脑虫服务端依赖
 
 # 核心: ChromaDB 向量存储 + BGE 语义嵌入
 chromadb>=0.5.0

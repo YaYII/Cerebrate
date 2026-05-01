@@ -1,4 +1,4 @@
-"""进化引擎 v4.0 — 向量去重 + 技能持久化 + 衰减清理"""
+"""进化引擎 v5 — 服务端驱动的技能持久化与教条沉淀"""
 import json
 import math
 from datetime import datetime, timezone

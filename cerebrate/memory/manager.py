@@ -172,8 +172,9 @@ class MemoryManager:
         return self.agents.list_active()
 
     def record_agent_action(self, agent_id: str, action_type: str,
-                            project_id: str = "", outcome: str = "success"):
-        self.agents.record_action(agent_id, action_type, project_id, outcome)
+                            project_id: str = "", outcome: str = "success",
+                            details: Optional[dict] = None):
+        self.agents.record_action(agent_id, action_type, project_id, outcome, details)
 
     # ==================== 统计与维护 ====================
 

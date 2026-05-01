@@ -47,10 +47,10 @@ class CerebrateConfig:
     knowledge_path: Path = field(init=False)
     evolution_path: Path = field(init=False)
     agents_path: Path = field(init=False)
-    queue_path: Path = field(init=False)
     archive_path: Path = field(init=False)
     seeds_path: Path = field(init=False)
     usage_path: Path = field(init=False)
+    events_path: Path = field(init=False)
 
     # 项目上下文
     current_project_id: str = field(
@@ -80,7 +80,7 @@ class CerebrateConfig:
     # 语义搜索配置
     semantic_index_path: Path = field(init=False)
 
-    # ChromaDB 向量数据库配置 (v4.0)
+    # ChromaDB 向量数据库配置 (v5)
     chroma_path: Path = field(init=False)
     embedding_model: str = field(
         default_factory=lambda: os.environ.get("CEREBRATE_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
@@ -98,16 +98,21 @@ class CerebrateConfig:
         default_factory=lambda: os.environ.get("CEREBRATE_USE_CHROMA", "true").lower() == "true"
     )
 
+    # HTTP Brain Server
+    server_host: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_HOST", "127.0.0.1"))
+    server_port: int = field(default_factory=lambda: int(os.environ.get("CEREBRATE_SERVER_PORT", "8765")))
+    server_url: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_URL", ""))
+
     def __post_init__(self):
         self.personal_path = self.memory_root / "personal"
         self.swarm_path = self.memory_root / "swarm"
         self.knowledge_path = self.memory_root / "knowledge"
         self.evolution_path = self.memory_root / "evolution"
         self.agents_path = self.memory_root / "agents"
-        self.queue_path = self.memory_root / ".queue"
         self.archive_path = self.memory_root / ".archived"
         self.seeds_path = self.memory_root / "seeds"
         self.usage_path = self.memory_root / "usage"
+        self.events_path = self.memory_root / "events"
         self.semantic_index_path = self.memory_root / "_semantic_index.json"
         self.chroma_path = self.memory_root / "chroma_data"
 

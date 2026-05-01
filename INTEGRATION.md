@@ -1,121 +1,115 @@
-# Cerebrate v4 接入指南
+# Cerebrate v5 接入指南
 
-Cerebrate 是文件系统驱动的脑虫记忆中枢。AI 编程工具可以直接调用 CLI，或通过 JSON 文件队列接入。v4 是严格 JSON 协议：成功结果只读 `data`，错误只读 `error`。
+## 哪个是服务端，哪个是客户端？
 
-## 30 秒接入
+服务端：
 
-```bash
-cd /path/to/Cerebrate
+- `cerebrate/server/`
+- 这是脑虫中央处理器。
+- 所有群体记忆、事件日志、共识和进化都由服务端控制。
 
-python3 cerebrate.py agent register \
-  --id my-agent \
-  --type cli \
-  --capabilities "code_generation,debugging"
+客户端：
 
-python3 cerebrate.py sense
+- `cerebrate/client/`
+- `cerebrate.py`
+- 这是 AI 单位访问服务端的工具，不拥有权威记忆。
 
-python3 cerebrate.py query "如何修复离线向量查询失败" --user yangying
-```
+底层记忆内核：
 
-成功响应:
-```json
-{"status":"ok","data":{},"meta":{"protocol":"v4"}}
-```
+- `cerebrate/memory/`
+- `cerebrate/brain/`
+- `cerebrate/decision/`
+- `cerebrate/storage/`
 
-失败响应:
-```json
-{"status":"error","error":{"code":500,"message":"...","details":{}},"meta":{"protocol":"v4"}}
-```
+这些是服务端使用的内部器官，不是客户端项目。
 
-## 推荐工作流
-
-1. 会话开始：`agent register` + `sense`
-2. 遇到问题：`query`
-3. 若 `data.recommendation` 是 `reuse` 或 `verify`：调用 `use start`
-4. 任务结束：调用 `use finish`
-5. 新经验：调用 `share --validate`
-6. 会话结束：`batch process`，必要时 `evolve`
-
-## 查询和复用反馈
+## 启动服务端
 
 ```bash
-python3 cerebrate.py query "问题描述" --user yangying --project cerebrate
+python3 cerebrate.py serve --host 127.0.0.1 --port 8765
 ```
 
-`data.recommendation`:
-- `reuse`: 可直接复用
-- `verify`: 参考但需要独立验证
-- `new_experience`: 新问题，解决后应分享
+## AI 单位接入
 
-开始复用:
+```bash
+python3 cerebrate.py register --url http://127.0.0.1:8765 --id my-agent --capabilities "debugging,coding"
+python3 cerebrate.py sense --url http://127.0.0.1:8765
+python3 cerebrate.py query --url http://127.0.0.1:8765 "问题描述" --agent my-agent
+```
+
+提交候选经验：
+
+```bash
+python3 cerebrate.py propose \
+  --url http://127.0.0.1:8765 \
+  --title "修复离线查询" \
+  --content "BGE 不可用时服务端使用 deterministic hash embedding" \
+  --category debugging \
+  --agent my-agent \
+  --solution "服务端保证 embedding function 总是存在"
+```
+
+复用反馈：
+
 ```bash
 python3 cerebrate.py use start \
+  --url http://127.0.0.1:8765 \
   --memory-id <memory_id> \
   --agent my-agent \
   --problem "问题描述"
-```
 
-结束复用:
-```bash
 python3 cerebrate.py use finish \
+  --url http://127.0.0.1:8765 \
   --usage-id <usage_id> \
   --outcome success \
   --feedback "方案有效"
 ```
 
-## 分享记忆
+共识投票：
 
 ```bash
-python3 cerebrate.py share \
-  --title "修复离线查询" \
-  --content "BGE 不可用时使用 deterministic hash embedding" \
-  --category debugging \
-  --tags "embedding,offline" \
+python3 cerebrate.py vote \
+  --url http://127.0.0.1:8765 \
+  --memory-id <memory_id> \
   --agent my-agent \
-  --problem "无网络时 Chroma query 崩溃" \
-  --solution "为 ChromaStore 始终提供 embedding function" \
-  --validate
+  --vote support \
+  --evidence "有测试或复现证据"
 ```
 
-被免疫系统判定低质量或危险的内容会进入 `quarantined` 生命周期，不会污染正常查询结果。
+## 重要原则
 
-## 记忆生命周期
+单个 AI 单位不能篡改群体记忆。
 
-- `nutrient`: 养分种子，待吸收
-- `memory`: 正常经验
-- `verified_skill`: 进化提炼出的高可信技能
-- `doctrine`: 跨项目稳定教条
-- `quarantined`: 被免疫系统隔离
-- `archived`: 已归档
+客户端提交的是：
 
-## 离线 embedding
+- 战报
+- 候选记忆
+- 使用反馈
+- 共识投票
 
-默认策略是：本地可用 BGE 优先，否则回退到 deterministic hash embedding。默认不会联网下载模型。需要允许下载时设置：
+服务端决定：
+
+- 是否隔离
+- 是否吸收
+- 是否晋升为 `verified_skill`
+- 是否固化为 `doctrine`
+
+共识不是简单多数。脑虫需要结合来源可信度、证据质量、复用成功率、失败反馈、时间衰减和冲突检测。
+
+## 事件日志
+
+服务端将事实追加到 `memory/events/events.jsonl`。
+
+读取事件：
 
 ```bash
-CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD=true
+python3 cerebrate.py events --url http://127.0.0.1:8765 --cursor 0
 ```
 
-## 种子导出与重建索引
+SSE：
 
-运行时 ChromaDB 是可重建索引。长期养分使用 JSONL：
-
-```bash
-python3 cerebrate.py migrate --export-seeds
-python3 cerebrate.py migrate --reindex
+```http
+GET /v1/events/stream?cursor=0
 ```
 
-## IPC 队列
-
-提交请求到：
-`memory/.queue/requests/<request_id>.json`
-
-读取结果：
-`memory/.queue/results/<request_id>.result.json`
-
-批处理：
-```bash
-python3 cerebrate.py batch process --limit 50
-```
-
-支持命令：`query`, `share`, `remember`, `recall`, `store-kb`, `stats`, `sense`, `evolve`, `register`。
+连接只是神经信号，事件日志才是脑组织。

@@ -1,4 +1,4 @@
-"""脑虫自我意识 v4 — 动态注册表 + 持久化状态"""
+"""脑虫自我意识 v5 — 动态注册表 + 持久化状态"""
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,7 +80,7 @@ class CerebrateMind:
             health = "newborn"
             warnings.append("虫群记忆为空，需要播种初始经验")
         if total_agents == 0:
-            warnings.append("没有注册的智能体，执行 python3 cerebrate.py agent register --id claude-code")
+            warnings.append("没有注册的智能体，客户端应执行 python3 cerebrate.py register --id <agent>")
         if len(agent_ids) <= 1:
             warnings.append("只有一个智能体活跃，虫群多样性不足")
 

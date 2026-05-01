@@ -1,159 +1,96 @@
-# Cerebrate Protocol v4 — 脑虫系统 AI Agent 通信规范
+# Cerebrate Protocol v5 — Brain Server First
 
-## Protocol Overview
+## 项目边界
 
-Cerebrate 是 JSON-native 的脑虫记忆 CLI。每个 AI 是虫群单位，所有经验先进入脑虫，再由免疫、复用反馈和进化流程决定吸收、隔离、提炼或归档。
+Cerebrate 现在明确分为两层：
 
-所有命令默认只在 stdout 输出 JSON。不要在 agent 代码中使用 `--human`。
+- **服务端项目**：`cerebrate/server/`
+  - 脑虫中央处理器，唯一权威入口。
+  - 负责记忆写入、事件日志、免疫隔离、复用反馈、共识投票、进化和 doctrine 输出。
+- **客户端项目**：`cerebrate/client/` + `cerebrate.py`
+  - 给 AI 作战单位访问服务端。
+  - 只能提交请求、候选经验、复用反馈和投票。
+  - 不能直接写群体记忆，不能直接晋升 doctrine。
 
-成功响应:
+历史的本地直写式 CLI / IPC batch 已废弃。CLI 不再是权威记忆系统，只是服务端启动器和 HTTP 客户端。
+
+## 服务端启动
+
+```bash
+python3 cerebrate.py serve --host 127.0.0.1 --port 8765
+```
+
+服务端第一行输出：
+
 ```json
-{"status":"ok","data":{},"meta":{"protocol":"v4"}}
+{"status":"ok","data":{"base_url":"http://127.0.0.1:8765"},"meta":{"protocol":"v5"}}
 ```
 
-失败响应:
+## 响应协议
+
+成功：
+
 ```json
-{"status":"error","error":{"code":500,"message":"...","details":{}},"meta":{"protocol":"v4"}}
+{"status":"ok","data":{},"meta":{"protocol":"v5"}}
 ```
 
-Exit code: 0 = success, 1 = error.
+失败：
 
-## Session Lifecycle
-
-### 1. Register Unit
-
-```bash
-python3 cerebrate.py agent register \
-  --id <agent_id> \
-  --type cli \
-  --capabilities "code_generation,debugging,refactoring"
-```
-
-### 2. Sense Brain State
-
-```bash
-python3 cerebrate.py sense
-```
-
-`data` includes health, memory counts, lifecycle counts, active agents, embedding mode, semantic index stats, and latest evolution time.
-
-### 3. Query Swarm Memory
-
-```bash
-python3 cerebrate.py query "<problem_description>" --user <user_id>
-```
-
-`data.recommendation`:
-- `reuse`: best match score > 0.5
-- `verify`: best match score is 0.2-0.5
-- `new_experience`: no useful match
-
-### 4. Report Memory Use
-
-```bash
-python3 cerebrate.py use start \
-  --memory-id <memory_id> \
-  --agent <agent_id> \
-  --problem "<problem>"
-```
-
-```bash
-python3 cerebrate.py use finish \
-  --usage-id <usage_id> \
-  --outcome success|partial|failure \
-  --feedback "<what happened>"
-```
-
-This closes the loop: the brain updates reuse counts, success counts, evidence, and the unit's action record.
-
-### 5. Share Experience
-
-```bash
-python3 cerebrate.py share \
-  --title "<short title>" \
-  --content "<context and process>" \
-  --category coding \
-  --tags "python,bug-fix" \
-  --agent <agent_id> \
-  --problem "<original problem>" \
-  --solution "<concrete solution>" \
-  --validate
-```
-
-Low-quality or unsafe validated content is written as `life_stage=quarantined` instead of breaking the protocol.
-
-## Memory Lifecycle
-
-Swarm memory has a real lifecycle:
-
-- `nutrient`: imported seed material, not yet trusted
-- `memory`: normal shared experience
-- `verified_skill`: high-reuse, high-success experience distilled by evolution
-- `doctrine`: cross-project stable strategy
-- `quarantined`: immune system isolated it
-- `archived`: stale or low-value memory retained but deprioritized
-
-Important fields include `confidence`, `nutrient_score`, `evidence`, and `supersedes`.
-
-## Storage and Reindexing
-
-Runtime ChromaDB is a rebuildable index. Long-lived nourishment is exported as JSONL seeds:
-
-```bash
-python3 cerebrate.py migrate --export-seeds
-python3 cerebrate.py migrate --reindex
-```
-
-Embedding mode is collection-scoped. If BGE is locally available, Cerebrate uses it. Otherwise it falls back to deterministic local hash embeddings, so the brain can still sense and query offline.
-
-## IPC Queue Protocol
-
-For agents without shell access, write requests to:
-
-`memory/.queue/requests/<uuid>.json`
-
-Read results from:
-
-`memory/.queue/results/<uuid>.result.json`
-
-Request format:
 ```json
-{
-  "request_id": "uuid",
-  "timestamp": "ISO8601",
-  "source_agent": "agent_id",
-  "project_id": "project_id_or_empty",
-  "command": "query|share|remember|recall|store-kb|stats|sense|evolve|register",
-  "params": {}
-}
+{"status":"error","error":{"code":500,"message":"...","details":{}},"meta":{"protocol":"v5"}}
 ```
 
-Trigger processing:
-```bash
-python3 cerebrate.py batch process --limit 50
-```
+## HTTP API
 
-## Standard Categories
+- `POST /v1/agents/register`
+- `GET /v1/sense`
+- `POST /v1/query`
+- `POST /v1/memories/propose`
+- `POST /v1/usages/start`
+- `POST /v1/usages/finish`
+- `POST /v1/consensus/vote`
+- `GET /v1/events?cursor=0&limit=100`
+- `GET /v1/events/stream?cursor=0`
+- `GET /v1/memories/{id}`
+- `GET /v1/doctrines`
+- `POST /v1/evolve`
 
-- `coding`
-- `debugging`
-- `architecture`
-- `devops`
-- `performance`
-- `security`
-- `testing`
-- `config`
-
-## Decision Logic
-
-1. Query the brain.
-2. Follow `data.recommendation`.
-3. Start a `use` record when reusing a memory.
-4. Finish the `use` record with success, partial, or failure.
-5. Share new experience after solving.
-6. Periodically run:
+## CLI 客户端
 
 ```bash
-python3 cerebrate.py batch process --limit 50
-python3 cerebrate.py evolve
+python3 cerebrate.py register --url http://127.0.0.1:8765 --id codex
+python3 cerebrate.py sense --url http://127.0.0.1:8765
+python3 cerebrate.py query --url http://127.0.0.1:8765 "如何接入脑虫"
+python3 cerebrate.py propose --url http://127.0.0.1:8765 --title "经验" --content "..." --category coding --agent codex
+python3 cerebrate.py use start --url http://127.0.0.1:8765 --memory-id <id> --agent codex --problem "..."
+python3 cerebrate.py use finish --url http://127.0.0.1:8765 --usage-id <id> --outcome success --feedback "..."
+python3 cerebrate.py vote --url http://127.0.0.1:8765 --memory-id <id> --agent codex --vote support --evidence "..."
+python3 cerebrate.py events --url http://127.0.0.1:8765 --cursor 0
 ```
+
+## 连接策略
+
+- REST 短请求承载命令和事实提交。
+- 持久 `event log` 承载记忆连续性。
+- SSE 长连接只负责广播和观察。
+- 记忆绝不依赖长连接是否存活。
+
+客户端断线后用 `cursor` 从 `GET /v1/events` 或 `GET /v1/events/stream` 继续同步。
+
+## 权威规则
+
+客户端可以提交：
+
+- 候选记忆 `memory`
+- 养分 `nutrient`
+- 复用反馈
+- 共识投票事件
+
+客户端不能提交：
+
+- `verified_skill`
+- `doctrine`
+- 直接删除群体记忆
+- 直接篡改共识结果
+
+晋升必须由服务端进化、免疫和共识裁决完成。

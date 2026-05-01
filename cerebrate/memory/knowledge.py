@@ -1,4 +1,4 @@
-"""权威知识库层 v4.0 — ChromaDB 向量存储 + 元数据过滤"""
+"""权威知识库层 v5 — 服务端权威知识 + ChromaDB 向量存储"""
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
