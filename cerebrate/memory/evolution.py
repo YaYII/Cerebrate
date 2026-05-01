@@ -37,7 +37,7 @@ class EvolutionEngine:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "actions": [],
             "insights": [],
-            "stats": {"merged": 0, "skills_created": 0, "archived": 0, "conflicts": 0},
+            "stats": {"merged": 0, "skills_created": 0, "doctrines_created": 0, "archived": 0, "conflicts": 0},
         }
 
         merged = self._deduplicate_semantic()
@@ -49,6 +49,11 @@ class EvolutionEngine:
         result["stats"]["skills_created"] = skills
         if skills > 0:
             result["actions"].append(f"提炼出 {skills} 条技能记忆")
+
+        doctrines = self._distill_doctrines()
+        result["stats"]["doctrines_created"] = doctrines
+        if doctrines > 0:
+            result["actions"].append(f"固化了 {doctrines} 条脑虫教条")
 
         archived = self._decay_cleanup()
         result["stats"]["archived"] = archived
@@ -146,6 +151,8 @@ class EvolutionEngine:
             mem = swarm._load_memory(mid)
             if not mem:
                 continue
+            if mem.get("life_stage") in {"quarantined", "archived"}:
+                continue
             reuse = mem.get("reuse_count", 0)
             success = mem.get("success_count", 0)
 
@@ -168,19 +175,69 @@ class EvolutionEngine:
                 f"方案: {mem.get('solution', mem.get('content',''))}\n"
                 f"验证: 复用 {reuse} 次, 成功率 {success / reuse:.0%}"
             )
+            raw_tags = mem.get("tags", [])
+            if isinstance(raw_tags, str):
+                raw_tags = [t for t in raw_tags.split(",") if t]
             swarm.share(
                 title=skill_title,
                 content=skill_content,
                 category="distilled_skill",
-                tags=mem.get("tags", []) + (["verified_skill"] if isinstance(mem.get("tags"), list) else ["verified_skill"]),
+                tags=raw_tags + ["verified_skill"],
                 source_agent="cerebrate-evolution",
                 problem_solved=mem.get("problem_solved", ""),
                 solution=mem.get("solution", ""),
                 outcome="success",
                 project_id=mem.get("project_id", ""),
+                life_stage="verified_skill",
+                confidence=1.0,
+                evidence=f"复用 {reuse} 次, 成功率 {success / reuse:.0%}",
+                supersedes=[mid],
             )
             created += 1
 
+        return created
+
+    def _distill_doctrines(self) -> int:
+        """把跨项目稳定技能固化为脑虫教条。"""
+        swarm = self.manager.swarm
+        created = 0
+        categories: dict[str, set[str]] = {}
+        samples: dict[str, dict] = {}
+        for mid in swarm.get_all_memory_ids():
+            mem = swarm._load_memory(mid)
+            if not mem or mem.get("life_stage") not in {"verified_skill", "memory"}:
+                continue
+            reuse = mem.get("reuse_count", 0)
+            success = mem.get("success_count", 0)
+            if reuse < 3 or success / max(reuse, 1) < 0.8:
+                continue
+            cat = mem.get("category", "general")
+            categories.setdefault(cat, set()).add(mem.get("project_id", "") or "global")
+            samples.setdefault(cat, mem)
+
+        for cat, projects in categories.items():
+            if len(projects) < 2:
+                continue
+            existing = swarm.query(f"doctrine {cat}", category="doctrine", project_id=None, limit=1)
+            if existing and existing[0].get("score", 0) > 0.5:
+                continue
+            sample = samples[cat]
+            swarm.share(
+                title=f"[脑虫教条] {cat}",
+                content=f"跨项目稳定策略: {sample.get('solution') or sample.get('content')}",
+                category="doctrine",
+                tags=["doctrine", cat],
+                source_agent="cerebrate-evolution",
+                problem_solved=sample.get("problem_solved", ""),
+                solution=sample.get("solution", ""),
+                outcome="success",
+                project_id="",
+                life_stage="doctrine",
+                confidence=1.0,
+                evidence=f"覆盖项目: {', '.join(sorted(projects))}",
+                supersedes=[sample.get("memory_id", "")],
+            )
+            created += 1
         return created
 
     # ==================== 衰减清理 ====================
@@ -203,10 +260,11 @@ class EvolutionEngine:
                 outcome=mem.get("outcome", "success"),
             )
 
-            if should_archive(decay, threshold) and mem.get("category") != "distilled_skill":
+            if should_archive(decay, threshold) and mem.get("life_stage") not in {"verified_skill", "doctrine"}:
                 # 标记为已归档（保留在 ChromaDB 但降低分数）
                 mem["score"] = 0.01
                 mem["deprecated"] = "True"
+                mem["life_stage"] = "archived"
                 text = f"{mem.get('title','')}\n{mem.get('content','')}\n{mem.get('problem_solved','')}\n{mem.get('solution','')}"
                 swarm._store.upsert(mid, text, mem)
                 archived += 1

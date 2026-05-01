@@ -9,6 +9,9 @@ from .decay import calculate_decay, boost_from_reuse
 from ..config import config
 
 
+LIFE_STAGES = {"nutrient", "memory", "verified_skill", "doctrine", "quarantined", "archived"}
+
+
 class SwarmMemory:
     """虫群共享记忆：ChromaDB 向量存储后端"""
 
@@ -51,7 +54,10 @@ class SwarmMemory:
     def share(self, title: str, content: str, category: str, tags: list[str],
               source_agent: str = "unknown", problem_solved: str = "",
               solution: str = "", outcome: str = "success",
-              project_id: str = "", language: str = "") -> str:
+              project_id: str = "", language: str = "",
+              life_stage: str = "memory", nutrient_score: float = 1.0,
+              confidence: float = 1.0, evidence: str = "",
+              supersedes: Optional[list[str]] = None) -> str:
         project_id = project_id or config.current_project_id
         language = language or config.default_language
         now = datetime.now(timezone.utc).isoformat()
@@ -60,7 +66,9 @@ class SwarmMemory:
             f"{title}{category}{now}".encode()
         ).hexdigest()[:16]
 
-        search_text = f"{title}\n{content}\n{problem_solved}\n{solution}"
+        life_stage = life_stage if life_stage in LIFE_STAGES else "memory"
+        supersedes = supersedes or []
+        search_text = f"{title}\n{content}\n{problem_solved}\n{solution}\n{evidence}"
         metadata = {
             "title": title,
             "content": content,
@@ -75,6 +83,11 @@ class SwarmMemory:
             "score": 1.0,
             "reuse_count": 0,
             "success_count": 0,
+            "life_stage": life_stage,
+            "nutrient_score": float(nutrient_score),
+            "confidence": float(confidence),
+            "evidence": evidence,
+            "supersedes": ",".join(supersedes),
             "created": now,
             "updated": now,
         }
@@ -128,6 +141,8 @@ class SwarmMemory:
                 item_tags = set((meta.get("tags") or "").split(","))
                 if not item_tags.intersection(tags):
                     continue
+            if meta.get("life_stage") == "quarantined":
+                continue
 
             decay = calculate_decay(
                 created_at=meta.get("created", ""),
@@ -141,7 +156,8 @@ class SwarmMemory:
             sem_score = 1.0 - (item["distance"] / 2.0)
             reuse_boost = boost_from_reuse(meta.get("reuse_count", 0),
                                            meta.get("success_count", 0))
-            final_score = sem_score * 0.7 + sem_score * decay * 0.2 + reuse_boost
+            confidence = float(meta.get("confidence", 1.0) or 1.0)
+            final_score = (sem_score * 0.7 + sem_score * decay * 0.2 + reuse_boost) * confidence
 
             results.append({
                 "memory_id": item["id"],
@@ -151,9 +167,15 @@ class SwarmMemory:
                 "solution": meta.get("solution", ""),
                 "outcome": meta.get("outcome", "unknown"),
                 "reuse_count": meta.get("reuse_count", 0),
+                "success_count": meta.get("success_count", 0),
                 "score": round(final_score, 4),
                 "semantic_score": round(sem_score, 4),
                 "decay": round(decay, 4),
+                "life_stage": meta.get("life_stage", "memory"),
+                "nutrient_score": meta.get("nutrient_score", 1.0),
+                "confidence": meta.get("confidence", 1.0),
+                "evidence": meta.get("evidence", ""),
+                "supersedes": [s for s in (meta.get("supersedes") or "").split(",") if s],
                 "category": meta.get("category", ""),
                 "tags": (meta.get("tags") or "").split(","),
                 "source_agent": meta.get("source_agent", "unknown"),
@@ -178,6 +200,9 @@ class SwarmMemory:
         meta["reuse_count"] = meta.get("reuse_count", 0) + 1
         if success:
             meta["success_count"] = meta.get("success_count", 0) + 1
+        if feedback:
+            previous = meta.get("evidence", "")
+            meta["evidence"] = (previous + "\n" if previous else "") + feedback[:500]
         meta["updated"] = datetime.now(timezone.utc).isoformat()
         meta["score"] = self._calculate_swarm_score(meta)
         # 重建搜索文本以更新嵌入
@@ -234,6 +259,12 @@ class SwarmMemory:
             "solution": meta.get("solution", ""),
             "outcome": meta.get("outcome", ""),
             "reuse_count": meta.get("reuse_count", 0),
+            "success_count": meta.get("success_count", 0),
+            "life_stage": meta.get("life_stage", "memory"),
+            "nutrient_score": meta.get("nutrient_score", 1.0),
+            "confidence": meta.get("confidence", 1.0),
+            "evidence": meta.get("evidence", ""),
+            "supersedes": [s for s in (meta.get("supersedes") or "").split(",") if s],
             "category": meta.get("category", ""),
             "tags": (meta.get("tags") or "").split(","),
             "source_agent": meta.get("source_agent", ""),
@@ -258,6 +289,33 @@ class SwarmMemory:
         meta = item["metadata"]
         meta["memory_id"] = item["id"]
         return meta
+
+    def update_lifecycle(self, memory_id: str, life_stage: str,
+                         confidence: Optional[float] = None,
+                         evidence: str = "") -> bool:
+        item = self._store.get(memory_id)
+        if not item or life_stage not in LIFE_STAGES:
+            return False
+        meta = item["metadata"]
+        meta["life_stage"] = life_stage
+        if confidence is not None:
+            meta["confidence"] = float(confidence)
+        if evidence:
+            previous = meta.get("evidence", "")
+            meta["evidence"] = (previous + "\n" if previous else "") + evidence
+        meta["updated"] = datetime.now(timezone.utc).isoformat()
+        text = f"{meta.get('title','')}\n{meta.get('content','')}\n{meta.get('problem_solved','')}\n{meta.get('solution','')}\n{meta.get('evidence','')}"
+        self._store.upsert(memory_id, text, meta)
+        return True
+
+    def lifecycle_counts(self) -> dict:
+        counts = {stage: 0 for stage in sorted(LIFE_STAGES)}
+        for mid in self.get_all_memory_ids():
+            item = self._store.get(mid)
+            if item:
+                stage = item["metadata"].get("life_stage", "memory")
+                counts[stage] = counts.get(stage, 0) + 1
+        return counts
 
     def get_all_memory_ids(self) -> list[str]:
         return self._store.get_all_ids()

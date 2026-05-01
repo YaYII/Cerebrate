@@ -60,6 +60,9 @@ class AgentRegistry:
                 "registered_at": now,
                 "total_actions": 0,
                 "success_count": 0,
+                "partial_count": 0,
+                "failure_count": 0,
+                "memory_contributions": 0,
                 "action_log": [],
             }
 
@@ -106,6 +109,7 @@ class AgentRegistry:
                 "agent_type": info.get("agent_type", ""),
                 "capabilities": info.get("capabilities", []),
                 "total_actions": info.get("total_actions", 0),
+                "memory_contributions": info.get("memory_contributions", 0),
                 "success_rate": info.get("success_count", 0) / max(info.get("total_actions", 1), 1),
                 "last_active": info.get("last_active", ""),
                 "registered_at": info.get("registered_at", ""),
@@ -116,8 +120,22 @@ class AgentRegistry:
                       project_id: str = "", outcome: str = "success",
                       details: Optional[dict] = None) -> None:
         """记录智能体的一次操作"""
-        info = self._agent_cache.get(agent_id) or {}
+        info = self._agent_cache.get(agent_id)
         now = datetime.now(timezone.utc).isoformat()
+        if not info:
+            info = {
+                "agent_id": agent_id,
+                "agent_type": "cli",
+                "capabilities": [],
+                "metadata": {},
+                "registered_at": now,
+                "total_actions": 0,
+                "success_count": 0,
+                "partial_count": 0,
+                "failure_count": 0,
+                "memory_contributions": 0,
+                "action_log": [],
+            }
 
         info.setdefault("action_log", []).append({
             "action_type": action_type,
@@ -130,6 +148,12 @@ class AgentRegistry:
         info["total_actions"] = info.get("total_actions", 0) + 1
         if outcome == "success":
             info["success_count"] = info.get("success_count", 0) + 1
+        elif outcome == "partial":
+            info["partial_count"] = info.get("partial_count", 0) + 1
+        elif outcome == "failure":
+            info["failure_count"] = info.get("failure_count", 0) + 1
+        if action_type == "memory_shared":
+            info["memory_contributions"] = info.get("memory_contributions", 0) + 1
         info["last_active"] = now
 
         if len(info.get("action_log", [])) > 500:
@@ -139,12 +163,13 @@ class AgentRegistry:
         self._agent_cache[agent_id] = info
         atomic_write_json(self._agent_file(agent_id), info)
 
-        if agent_id in self._agents:
-            self._agents[agent_id].update({
-                "last_active": now,
-                "total_actions": info["total_actions"],
-                "success_rate": info["success_count"] / max(info["total_actions"], 1),
-            })
+        self._agents[agent_id] = {
+            "agent_type": info.get("agent_type", "cli"),
+            "last_active": now,
+            "total_actions": info["total_actions"],
+            "success_rate": info["success_count"] / max(info["total_actions"], 1),
+            "memory_contributions": info.get("memory_contributions", 0),
+        }
         self._save()
 
     def get_stats(self, agent_id: str) -> Optional[dict]:
@@ -156,7 +181,10 @@ class AgentRegistry:
             "agent_type": info.get("agent_type", ""),
             "total_actions": info.get("total_actions", 0),
             "success_count": info.get("success_count", 0),
+            "partial_count": info.get("partial_count", 0),
+            "failure_count": info.get("failure_count", 0),
             "success_rate": info.get("success_count", 0) / max(info.get("total_actions", 1), 1),
+            "memory_contributions": info.get("memory_contributions", 0),
             "capabilities": info.get("capabilities", []),
             "last_active": info.get("last_active", ""),
             "registered_at": info.get("registered_at", ""),

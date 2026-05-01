@@ -10,7 +10,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-class _BGEembeddingFunction:
+class _CerebrateEmbeddingFunction:
     """ChromaDB 自定义嵌入函数，桥接 EmbeddingEngine"""
 
     def __init__(self, engine):
@@ -20,7 +20,7 @@ class _BGEembeddingFunction:
         return self._engine.encode(input)
 
     def name(self) -> str:
-        return "bge-small-zh-v1.5"
+        return f"cerebrate-{self._engine.mode}-{self._engine.dimension}"
 
 
 class ChromaStore:
@@ -29,11 +29,17 @@ class ChromaStore:
     def __init__(self, persist_dir: Path, collection_name: str,
                  embedding_engine=None):
         self.persist_dir = persist_dir
-        self.collection_name = collection_name
+        self.base_collection_name = collection_name
         self._engine = embedding_engine
+        suffix = self._engine.mode if self._engine else "default"
+        self.collection_name = f"{collection_name}_{suffix}"
         self._client = None
         self._collection = None
         self._init()
+
+    @property
+    def embedding_mode(self) -> str:
+        return self._engine.mode if self._engine else "unknown"
 
     def _init(self):
         import chromadb
@@ -43,9 +49,7 @@ class ChromaStore:
             settings=chromadb.Settings(anonymized_telemetry=False),
         )
 
-        embedding_fn = None
-        if self._engine and self._engine.mode == "bge":
-            embedding_fn = _BGEembeddingFunction(self._engine)
+        embedding_fn = _CerebrateEmbeddingFunction(self._engine) if self._engine else None
 
         try:
             self._collection = self._client.get_collection(
@@ -108,6 +112,13 @@ class ChromaStore:
         if query_embedding:
             results = self._collection.query(
                 query_embeddings=[query_embedding],
+                n_results=top_k,
+                where=where,
+                include=["metadatas", "documents", "distances", "embeddings"],
+            )
+        elif self._engine:
+            results = self._collection.query(
+                query_embeddings=[self._engine.encode_query(query)],
                 n_results=top_k,
                 where=where,
                 include=["metadatas", "documents", "distances", "embeddings"],

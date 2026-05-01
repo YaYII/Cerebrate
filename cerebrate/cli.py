@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cerebrate CLI v3.1 — AI 智能体通信协议
+"""Cerebrate CLI v4 — AI 智能体通信协议
 
 所有命令默认输出 JSON。使用 --human 获取人类可读格式。
 退出码: 0=成功, 1=错误
@@ -16,19 +16,26 @@ from cerebrate.decision import DecisionRouter
 from cerebrate.brain import CerebrateMind, Metacognition
 from cerebrate.ipc import BatchProcessor
 
+PROTOCOL_VERSION = "v4"
+
+
+class CerebrateArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        _out(_err(message, code=400))
+
 
 def _ok(data=None, **kwargs):
     """构造成功响应"""
-    r = {"status": "ok"}
-    if data is not None:
-        r["data"] = data
-    r.update(kwargs)
-    return r
+    payload = data if data is not None else kwargs
+    return {"status": "ok", "data": payload, "meta": {"protocol": PROTOCOL_VERSION}}
 
 
-def _err(msg, code=1, **kwargs):
+def _err(msg, code=1, details=None, **kwargs):
     """构造错误响应"""
-    return {"status": "error", "error": {"code": code, "message": msg}, **kwargs}
+    error = {"code": code, "message": msg, "details": details or {}}
+    if kwargs:
+        error["details"].update(kwargs)
+    return {"status": "error", "error": error, "meta": {"protocol": PROTOCOL_VERSION}}
 
 
 def _out(result, human=None):
@@ -113,6 +120,9 @@ def cmd_share(args):
     tags = [t.strip() for t in args.tags.split(",")] if args.tags else []
 
     validation = None
+    life_stage = args.life_stage or "memory"
+    confidence = args.confidence
+    evidence = args.evidence or ""
     if args.validate:
         from cerebrate.llm import CerebrateLLM
         llm = CerebrateLLM()
@@ -120,24 +130,23 @@ def cmd_share(args):
         if validation.get("suggested_tags") and not args.tags:
             tags = validation["suggested_tags"]
         if not validation["safe"] and not args.force:
-            result = _err("免疫系统拒绝", code=422,
-                         validation=validation,
-                         hint="使用 --force 强制写入")
-            def immune_human():
-                print(f"免疫拒绝 (质量:{validation['quality']:.2f})")
-                for i in validation.get("issues", []):
-                    print(f"  ⚠ {i}")
-            _out(result, immune_human if args.human else None)
+            life_stage = "quarantined"
+            confidence = min(confidence, validation.get("quality", 0.1))
+            evidence = (evidence + "\n" if evidence else "") + "免疫系统隔离: " + "; ".join(validation.get("issues", []))
 
     mid = mm.share_to_swarm(
         title=args.title, content=args.content, category=args.category,
         tags=tags, source_agent=args.agent,
         problem_solved=args.problem or "", solution=args.solution or "",
         outcome=args.outcome or "success", project_id=args.project or "",
+        life_stage=life_stage, nutrient_score=args.nutrient_score,
+        confidence=confidence, evidence=evidence,
+        supersedes=[s.strip() for s in args.supersedes.split(",") if s.strip()],
     )
     result = _ok(memory_id=mid, agent=args.agent, category=args.category,
                 tags=tags, validated=args.validate,
-                validation=validation)
+                validation=validation, life_stage=life_stage,
+                confidence=confidence)
 
     def share_human():
         if not args.quiet:
@@ -161,12 +170,17 @@ def cmd_query(args):
     policy = decision.get("policy_result")
     tone = decision.get("personal_tone", {})
 
+    recommendation = "new_experience"
+    if best:
+        recommendation = "reuse" if best.get("score", 0) > 0.5 else "verify"
+
     result = _ok(
         query=args.query,
         found=bool(best),
         swarm_result=best,
         policy_result=policy,
         personal=tone,
+        recommendation=recommendation,
     )
 
     def human():
@@ -220,8 +234,18 @@ def cmd_evolve(args):
 
 
 def cmd_migrate(args):
-    from cerebrate.migrate import migrate_all, migrate_swarm
+    from cerebrate.migrate import export_seeds, migrate_all, migrate_swarm, reindex_from_seeds
 
+    if args.export_seeds:
+        result_data = export_seeds()
+        result = _ok(result_data)
+        _out(result)
+        return
+    if args.reindex:
+        result_data = reindex_from_seeds(dry_run=args.dry_run)
+        result = _ok(result_data)
+        _out(result)
+        return
     if args.swarm_only:
         results = {"swarm": migrate_swarm(dry_run=args.dry_run)}
         total = results["swarm"]
@@ -326,6 +350,27 @@ def cmd_batch_result(args):
     _out(result)
 
 
+# ==================== use ====================
+
+def cmd_use_start(args):
+    mm = get_manager()
+    record = mm.start_memory_use(args.memory_id, args.agent, args.problem,
+                                 project_id=args.project or "")
+    result = _ok(record)
+    def use_human():
+        print(f"已开始复用记忆: {record['usage_id']}")
+    _out(result, use_human if args.human else None)
+
+
+def cmd_use_finish(args):
+    mm = get_manager()
+    record = mm.finish_memory_use(args.usage_id, args.outcome, args.feedback or "")
+    result = _ok(record)
+    def use_human():
+        print(f"已完成复用记录: {record['usage_id']} ({record['outcome']})")
+    _out(result, use_human if args.human else None)
+
+
 # ==================== llm ====================
 
 def cmd_llm_status(args):
@@ -366,7 +411,7 @@ def _add_common(p):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Cerebrate v3.1 - 虫群记忆 / AI Agent 协议")
+    parser = CerebrateArgumentParser(description="Cerebrate v4 - 脑虫记忆 / AI Agent 协议")
     sub = parser.add_subparsers(dest="command")
 
     # stats
@@ -402,6 +447,12 @@ def main():
     p.add_argument("--project", "-p", default="")
     p.add_argument("--validate", action="store_true")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--life-stage", default="memory",
+                   choices=["nutrient", "memory", "verified_skill", "doctrine", "quarantined", "archived"])
+    p.add_argument("--nutrient-score", type=float, default=1.0)
+    p.add_argument("--confidence", type=float, default=1.0)
+    p.add_argument("--evidence", default="")
+    p.add_argument("--supersedes", default="")
     p.add_argument("--quiet", "-q", action="store_true")
     _add_common(p)
 
@@ -433,6 +484,8 @@ def main():
     p = sub.add_parser("migrate", help="迁移 JSON → ChromaDB [→ JSON]")
     p.add_argument("--dry-run", action="store_true", help="预览不执行")
     p.add_argument("--swarm-only", action="store_true", help="仅迁移虫群")
+    p.add_argument("--reindex", action="store_true", help="从种子/旧集合重建当前 embedding 模式索引")
+    p.add_argument("--export-seeds", action="store_true", help="导出现有 Chroma 记忆为 JSONL 养分种子")
     _add_common(p)
 
     # sense
@@ -472,6 +525,21 @@ def main():
     b3.add_argument("--id", required=True)
     _add_common(b3)
 
+    # use
+    p_use = sub.add_parser("use", help="记忆复用反馈 [→ JSON]")
+    u_sub = p_use.add_subparsers(dest="use_cmd")
+    u1 = u_sub.add_parser("start", help="开始复用一条记忆")
+    u1.add_argument("--memory-id", required=True)
+    u1.add_argument("--agent", "-a", required=True)
+    u1.add_argument("--problem", required=True)
+    u1.add_argument("--project", "-p", default="")
+    _add_common(u1)
+    u2 = u_sub.add_parser("finish", help="完成复用反馈")
+    u2.add_argument("--usage-id", required=True)
+    u2.add_argument("--outcome", required=True, choices=["success", "partial", "failure"])
+    u2.add_argument("--feedback", default="")
+    _add_common(u2)
+
     # llm
     p_llm = sub.add_parser("llm", help="LLM/免疫操作 [→ JSON]")
     l_sub = p_llm.add_subparsers(dest="llm_cmd")
@@ -490,28 +558,39 @@ def main():
         "evolve": cmd_evolve, "sense": cmd_sense, "migrate": cmd_migrate,
     }
 
-    if args.command in dispatch:
-        dispatch[args.command](args)
-    elif args.command == "agent":
-        ad = {"register": cmd_agent_register, "list": cmd_agent_list, "stats": cmd_agent_stats}
-        if args.agent_cmd in ad:
-            ad[args.agent_cmd](args)
+    try:
+        if args.command in dispatch:
+            dispatch[args.command](args)
+        elif args.command == "agent":
+            ad = {"register": cmd_agent_register, "list": cmd_agent_list, "stats": cmd_agent_stats}
+            if args.agent_cmd in ad:
+                ad[args.agent_cmd](args)
+            else:
+                _out(_err("缺少 agent 子命令", code=400))
+        elif args.command == "batch":
+            bd = {"process": cmd_batch_process, "submit": cmd_batch_submit, "result": cmd_batch_result}
+            if args.batch_cmd in bd:
+                bd[args.batch_cmd](args)
+            else:
+                _out(_err("缺少 batch 子命令", code=400))
+        elif args.command == "use":
+            ud = {"start": cmd_use_start, "finish": cmd_use_finish}
+            if args.use_cmd in ud:
+                ud[args.use_cmd](args)
+            else:
+                _out(_err("缺少 use 子命令", code=400))
+        elif args.command == "llm":
+            ld = {"status": cmd_llm_status, "validate": cmd_llm_validate}
+            if args.llm_cmd in ld:
+                ld[args.llm_cmd](args)
+            else:
+                _out(_err("缺少 llm 子命令", code=400))
         else:
-            p_agent.print_help()
-    elif args.command == "batch":
-        bd = {"process": cmd_batch_process, "submit": cmd_batch_submit, "result": cmd_batch_result}
-        if args.batch_cmd in bd:
-            bd[args.batch_cmd](args)
-        else:
-            p_batch.print_help()
-    elif args.command == "llm":
-        ld = {"status": cmd_llm_status, "validate": cmd_llm_validate}
-        if args.llm_cmd in ld:
-            ld[args.llm_cmd](args)
-        else:
-            p_llm.print_help()
-    else:
-        parser.print_help()
+            _out(_err("缺少命令", code=400))
+    except SystemExit:
+        raise
+    except Exception as e:
+        _out(_err(str(e), code=500, exception=e.__class__.__name__))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
     python3 cerebrate.py migrate --swarm-only  # 仅迁移虫群
 """
 import json
-import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import config
@@ -21,7 +21,6 @@ def migrate_swarm(dry_run: bool = False) -> int:
 
     swarm_dir = config.swarm_path
     if not swarm_dir.exists():
-        print("虫群目录不存在，跳过")
         return 0
 
     json_files = sorted(swarm_dir.glob("*.json"))
@@ -63,7 +62,6 @@ def migrate_swarm(dry_run: bool = False) -> int:
             store.add(mid, text, metadata)
         count += 1
 
-    print(f"虫群记忆: {count} 条{' (预览)' if dry_run else ' 已迁移'}")
     return count
 
 
@@ -75,7 +73,6 @@ def migrate_knowledge(dry_run: bool = False) -> int:
 
     kb_dir = config.knowledge_path
     if not kb_dir.exists():
-        print("知识库目录不存在，跳过")
         return 0
 
     json_files = sorted(kb_dir.glob("*.json"))
@@ -115,7 +112,6 @@ def migrate_knowledge(dry_run: bool = False) -> int:
             store.add(did, text, metadata)
         count += 1
 
-    print(f"知识库文档: {count} 条{' (预览)' if dry_run else ' 已迁移'}")
     return count
 
 
@@ -127,7 +123,6 @@ def migrate_personal(dry_run: bool = False) -> int:
 
     personal_dir = config.personal_path
     if not personal_dir.exists():
-        print("个人记忆目录不存在，跳过")
         return 0
 
     json_files = sorted(personal_dir.glob("*.json"))
@@ -165,7 +160,6 @@ def migrate_personal(dry_run: bool = False) -> int:
                 store.add(doc_id, text, metadata)
             count += 1
 
-    print(f"个人记忆: {count} 条{' (预览)' if dry_run else ' 已迁移'}")
     return count
 
 
@@ -177,6 +171,135 @@ def migrate_all(dry_run: bool = False) -> dict:
         "personal": migrate_personal(dry_run),
     }
     total = sum(results.values())
-    action = "预览" if dry_run else "迁移"
-    print(f"\n{action}完成: 共 {total} 条记忆")
     return results
+
+
+def _chroma_client():
+    import chromadb
+    return chromadb.PersistentClient(
+        path=str(config.chroma_path),
+        settings=chromadb.Settings(anonymized_telemetry=False),
+    )
+
+
+def _collection_records(collection_name: str) -> list[dict]:
+    try:
+        collection = _chroma_client().get_collection(collection_name)
+    except Exception:
+        return []
+    data = collection.get(include=["metadatas", "documents"])
+    records = []
+    ids = data.get("ids") or []
+    metadatas = data.get("metadatas") or []
+    documents = data.get("documents") or []
+    for i, doc_id in enumerate(ids):
+        meta = metadatas[i] if i < len(metadatas) else {}
+        document = documents[i] if i < len(documents) else ""
+        record = dict(meta)
+        record["memory_id"] = doc_id
+        record["_document"] = document
+        record["life_stage"] = record.get("life_stage", "nutrient")
+        record["nutrient_score"] = record.get("nutrient_score", 0.6)
+        record["confidence"] = record.get("confidence", 0.6)
+        records.append(record)
+    return records
+
+
+def export_seeds() -> dict:
+    """导出现有 Chroma 虫群记忆为 JSONL 养分种子。"""
+    config.seeds_path.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    seed_file = config.seeds_path / f"swarm_nutrients_{stamp}.jsonl"
+    seen = set()
+    exported = 0
+    collections = ["swarm_memories", "swarm_memories_bge", "swarm_memories_hash"]
+    with seed_file.open("w", encoding="utf-8") as f:
+        for collection_name in collections:
+            for record in _collection_records(collection_name):
+                mid = record.get("memory_id")
+                if not mid or mid in seen:
+                    continue
+                seen.add(mid)
+                record["_source_collection"] = collection_name
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                exported += 1
+    return {"seed_file": str(seed_file), "exported": exported}
+
+
+def _seed_files() -> list[Path]:
+    if not config.seeds_path.exists():
+        return []
+    return sorted(config.seeds_path.glob("*.jsonl"))
+
+
+def _load_seed_records() -> list[dict]:
+    records = []
+    for seed_file in _seed_files():
+        for line in seed_file.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return records
+
+
+def reindex_from_seeds(dry_run: bool = False) -> dict:
+    """用当前 embedding 模式从 JSONL 养分种子重建虫群索引。"""
+    if not _seed_files():
+        export_seeds()
+
+    from .storage.chroma_store import ChromaStore
+    engine = get_embedding_engine(config.embedding_model, config.embedding_device)
+    store = ChromaStore(config.chroma_path, "swarm_memories", engine)
+
+    indexed = 0
+    skipped = 0
+    for record in _load_seed_records():
+        memory_id = record.get("memory_id")
+        if not memory_id:
+            skipped += 1
+            continue
+        if store.get(memory_id):
+            skipped += 1
+            continue
+        text = "\n".join([
+            record.get("title", ""),
+            record.get("content", ""),
+            record.get("problem_solved", ""),
+            record.get("solution", ""),
+            record.get("evidence", ""),
+        ])
+        metadata = {
+            "title": record.get("title", ""),
+            "content": record.get("content", ""),
+            "category": record.get("category", "nutrient"),
+            "tags": record.get("tags", ""),
+            "source_agent": record.get("source_agent", "seed-export"),
+            "problem_solved": record.get("problem_solved", ""),
+            "solution": record.get("solution", ""),
+            "outcome": record.get("outcome", "partial"),
+            "project_id": record.get("project_id", ""),
+            "language": record.get("language", config.default_language),
+            "score": float(record.get("score", 0.6) or 0.6),
+            "reuse_count": int(record.get("reuse_count", 0) or 0),
+            "success_count": int(record.get("success_count", 0) or 0),
+            "life_stage": record.get("life_stage", "nutrient"),
+            "nutrient_score": float(record.get("nutrient_score", 0.6) or 0.6),
+            "confidence": float(record.get("confidence", 0.6) or 0.6),
+            "evidence": record.get("evidence", ""),
+            "supersedes": record.get("supersedes", ""),
+            "created": record.get("created", datetime.now(timezone.utc).isoformat()),
+            "updated": datetime.now(timezone.utc).isoformat(),
+        }
+        if not dry_run:
+            store.add(memory_id, text, metadata)
+        indexed += 1
+    return {
+        "indexed": indexed,
+        "skipped": skipped,
+        "embedding_mode": store.embedding_mode,
+        "seed_files": [str(p) for p in _seed_files()],
+        "dry_run": dry_run,
+    }

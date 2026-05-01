@@ -1,19 +1,26 @@
-# Cerebrate Protocol v3.1 — AI Agent Communication Specification
+# Cerebrate Protocol v4 — 脑虫系统 AI Agent 通信规范
 
 ## Protocol Overview
 
-Cerebrate exposes a JSON-native CLI. Every command returns JSON on stdout.
-Exit code 0 = success, exit code 1 = error.
+Cerebrate 是 JSON-native 的脑虫记忆 CLI。每个 AI 是虫群单位，所有经验先进入脑虫，再由免疫、复用反馈和进化流程决定吸收、隔离、提炼或归档。
 
-Response envelope:
+所有命令默认只在 stdout 输出 JSON。不要在 agent 代码中使用 `--human`。
+
+成功响应:
 ```json
-{"status": "ok", "data": {...}}
-{"status": "error", "error": {"code": 422, "message": "..."}}
+{"status":"ok","data":{},"meta":{"protocol":"v4"}}
 ```
 
-To read human output: add `--human` flag. Do NOT use `--human` in agent code.
+失败响应:
+```json
+{"status":"error","error":{"code":500,"message":"...","details":{}},"meta":{"protocol":"v4"}}
+```
 
-## Registration (required, once per agent)
+Exit code: 0 = success, 1 = error.
+
+## Session Lifecycle
+
+### 1. Register Unit
 
 ```bash
 python3 cerebrate.py agent register \
@@ -21,115 +28,93 @@ python3 cerebrate.py agent register \
   --type cli \
   --capabilities "code_generation,debugging,refactoring"
 ```
-→ `{"status":"ok","agent_id":"<id>","agent_type":"cli","capabilities":[...]}`
 
-## Session Lifecycle
-
-### 1. Session Start: Sense + Recall
+### 2. Sense Brain State
 
 ```bash
 python3 cerebrate.py sense
 ```
-→ `{"status":"ok","health":"healthy","total_memories":N,"total_agents":N,"agent_ids":[...],"warnings":[...],"semantic_index":{...}}`
 
-```bash
-python3 cerebrate.py recall --user <user_id>
-```
-→ `{"status":"ok","user":"<user_id>","memories":{"pref_tone":"...","fact_name":"..."}}`
+`data` includes health, memory counts, lifecycle counts, active agents, embedding mode, semantic index stats, and latest evolution time.
 
-### 2. During Session: Query Swarm
+### 3. Query Swarm Memory
 
 ```bash
 python3 cerebrate.py query "<problem_description>" --user <user_id>
 ```
-→ `{"status":"ok","query":"...","found":true|false,"swarm_result":{...},"policy_result":{...},"personal":{...}}`
 
-swarm_result schema:
-```json
-{
-  "memory_id": "hex16",
-  "title": "string",
-  "content": "string",
-  "solution": "string",
-  "problem_solved": "string",
-  "outcome": "success|partial|failure",
-  "reuse_count": int,
-  "score": float,
-  "semantic_score": float,
-  "decay": float,
-  "category": "string",
-  "tags": ["string"],
-  "source_agent": "string",
-  "project_id": "string"
-}
-```
+`data.recommendation`:
+- `reuse`: best match score > 0.5
+- `verify`: best match score is 0.2-0.5
+- `new_experience`: no useful match
 
-Project-scoped query:
+### 4. Report Memory Use
+
 ```bash
-python3 cerebrate.py query "<problem>" --project <project_id>
+python3 cerebrate.py use start \
+  --memory-id <memory_id> \
+  --agent <agent_id> \
+  --problem "<problem>"
 ```
 
-### 3. After Solving: Share to Swarm
+```bash
+python3 cerebrate.py use finish \
+  --usage-id <usage_id> \
+  --outcome success|partial|failure \
+  --feedback "<what happened>"
+```
+
+This closes the loop: the brain updates reuse counts, success counts, evidence, and the unit's action record.
+
+### 5. Share Experience
 
 ```bash
 python3 cerebrate.py share \
   --title "<short title>" \
   --content "<context and process>" \
-  --category <category> \
-  --tags "<tag1,tag2>" \
-  --agent <your_agent_id> \
+  --category coding \
+  --tags "python,bug-fix" \
+  --agent <agent_id> \
   --problem "<original problem>" \
   --solution "<concrete solution>" \
   --validate
 ```
-→ `{"status":"ok","memory_id":"hex16","agent":"...","category":"...","validated":true,"validation":{...}}`
 
-If immune system rejects:
-→ `{"status":"error","error":{"code":422,"message":"免疫系统拒绝"},"validation":{"safe":false,"quality":0.05,"issues":[...]}}`
+Low-quality or unsafe validated content is written as `life_stage=quarantined` instead of breaking the protocol.
 
-Add `--force` to bypass rejection.
+## Memory Lifecycle
 
-### 4. Session End: Process Queue
+Swarm memory has a real lifecycle:
+
+- `nutrient`: imported seed material, not yet trusted
+- `memory`: normal shared experience
+- `verified_skill`: high-reuse, high-success experience distilled by evolution
+- `doctrine`: cross-project stable strategy
+- `quarantined`: immune system isolated it
+- `archived`: stale or low-value memory retained but deprioritized
+
+Important fields include `confidence`, `nutrient_score`, `evidence`, and `supersedes`.
+
+## Storage and Reindexing
+
+Runtime ChromaDB is a rebuildable index. Long-lived nourishment is exported as JSONL seeds:
 
 ```bash
-python3 cerebrate.py batch process --limit 50
+python3 cerebrate.py migrate --export-seeds
+python3 cerebrate.py migrate --reindex
 ```
-→ `{"status":"ok","processed":N}`
 
-## Commands Reference
+Embedding mode is collection-scoped. If BGE is locally available, Cerebrate uses it. Otherwise it falls back to deterministic local hash embeddings, so the brain can still sense and query offline.
 
-### Memory Operations
+## IPC Queue Protocol
 
-| Command | Input | Output |
-|---------|-------|--------|
-| `query "<q>"` | query string | `{found: bool, swarm_result: {...}, policy_result: {...}}` |
-| `share --title ...` | memory fields | `{memory_id: hex16, validated: bool}` |
-| `remember --user X --key K --value V` | user, key, value | `{user: X, key: K, remembered: true}` |
-| `recall --user X` | user id | `{user: X, memories: {...}}` |
-| `store-kb --title ...` | doc fields | `{doc_id: hex16, title: ..., is_policy: bool}` |
+For agents without shell access, write requests to:
 
-### System Operations
+`memory/.queue/requests/<uuid>.json`
 
-| Command | Output Schema |
-|---------|---------------|
-| `stats` | `{stats: {personal,swarm,knowledge,agents,semantic}, sense: {...}, assessment: {...}}` |
-| `sense` | `{health, total_memories, total_agents, agent_ids, warnings, semantic_index}` |
-| `evolve` | `{generation: int, evolution: {actions, insights, stats}}` |
-| `llm status` | `{available, sdk_ready, provider, model, immune_enabled, immune_threshold}` |
-| `llm validate --content "..."` | `{safe, quality, issues, suggested_tags, immune_active}` |
+Read results from:
 
-### Agent Management
-
-| Command | Output |
-|---------|--------|
-| `agent register --id X --type cli` | `{agent_id: X, agent_type: cli}` |
-| `agent list` | `{agents: [...], count: N}` |
-| `agent stats --id X` | `{agent_id, total_actions, success_rate, ...}` |
-
-## IPC Queue Protocol (for agents without shell access)
-
-Write requests to: `memory/.queue/requests/<uuid>.json`
-Read results from: `memory/.queue/results/<uuid>.result.json`
+`memory/.queue/results/<uuid>.result.json`
 
 Request format:
 ```json
@@ -139,17 +124,7 @@ Request format:
   "source_agent": "agent_id",
   "project_id": "project_id_or_empty",
   "command": "query|share|remember|recall|store-kb|stats|sense|evolve|register",
-  "params": { "command_specific": "values" }
-}
-```
-
-Result format:
-```json
-{
-  "request_id": "uuid",
-  "status": "ok|error",
-  "data": {},
-  "elapsed_ms": 15
+  "params": {}
 }
 ```
 
@@ -158,38 +133,27 @@ Trigger processing:
 python3 cerebrate.py batch process --limit 50
 ```
 
-## Categories
+## Standard Categories
 
-Standard categories for `share --category`:
-- `coding` — code patterns, fixes, optimizations
-- `debugging` — bug root causes and fixes
-- `architecture` — design decisions, patterns
-- `devops` — CI/CD, deployment, infrastructure
-- `performance` — performance optimizations
-- `security` — security fixes and practices
-- `testing` — test strategies, mocking patterns
-- `config` — environment config, setup
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success (`status: "ok"`) |
-| 1 | Error (`status: "error"`) |
-| 422 | Immune system rejection (share only) |
+- `coding`
+- `debugging`
+- `architecture`
+- `devops`
+- `performance`
+- `security`
+- `testing`
+- `config`
 
 ## Decision Logic
 
-When an agent receives a problem, the decision flow is:
+1. Query the brain.
+2. Follow `data.recommendation`.
+3. Start a `use` record when reusing a memory.
+4. Finish the `use` record with success, partial, or failure.
+5. Share new experience after solving.
+6. Periodically run:
 
-1. `query` → check `swarm_result.score`:
-   - `> 0.5`: apply the solution, mark reused
-   - `0.2-0.5`: reference but verify independently
-   - `< 0.2`: no useful match, solve from scratch
-2. If problem involves rules/policies → also check `policy_result`
-3. Use `personal` data to adapt tone/preferences
-
-## Configuration
-
-Required: `.env` file with `ANTHROPIC_API_KEY=sk-ant-...`
-Without it, rule-based immune system still runs (pattern matching only).
+```bash
+python3 cerebrate.py batch process --limit 50
+python3 cerebrate.py evolve
+```

@@ -1,6 +1,11 @@
-"""嵌入引擎 — 文本向量化，BGE 模型优先，TF-IDF 回退"""
+"""嵌入引擎 — 文本向量化，BGE 模型优先，本地 hash 回退"""
+import hashlib
 import logging
+import math
+import re
 from typing import Optional
+
+from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +26,7 @@ class EmbeddingEngine:
     """文本向量化引擎
 
     优先使用 sentence-transformers + BGE 模型，
-    不可用时回退到本地 TF-IDF。
+    不可用时回退到确定性本地 hash 向量。
     """
 
     def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5",
@@ -29,30 +34,34 @@ class EmbeddingEngine:
         self.model_name = model_name
         self.device = device
         self._model = None
-        self._tfidf = None
-        self._mode = None  # "bge" | "tfidf"
+        self._mode = None  # "bge" | "hash"
+        self._dimension = config.embedding_hash_dim
         self._init_model()
 
     def _init_model(self):
-        """尝试加载 BGE 模型，失败则回退 TF-IDF"""
+        """尝试加载 BGE 模型，失败则回退 hash"""
         try:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self.model_name, device=self.device)
+            kwargs = {"device": self.device}
+            if not config.embedding_allow_download:
+                kwargs["local_files_only"] = True
+            self._model = SentenceTransformer(self.model_name, **kwargs)
             self._mode = "bge"
             try:
                 dim = self._model.get_embedding_dimension()
             except AttributeError:
                 dim = self._model.get_sentence_embedding_dimension()
+            self._dimension = dim
             logger.info(f"嵌入引擎: BGE ({self.model_name}, {dim}维)")
         except Exception as e:
-            logger.warning(f"BGE 模型加载失败 ({e})，回退到 TF-IDF")
-            self._init_tfidf()
+            logger.warning(f"BGE 模型加载失败 ({e})，回退到 hash")
+            self._init_hash()
 
-    def _init_tfidf(self):
-        from ..memory.semantic import SemanticIndex
-        self._tfidf = SemanticIndex()
-        self._mode = "tfidf"
-        logger.info("嵌入引擎: TF-IDF (回退模式)")
+    def _init_hash(self):
+        self._model = None
+        self._mode = "hash"
+        self._dimension = config.embedding_hash_dim
+        logger.info(f"嵌入引擎: hash ({self._dimension}维，本地离线模式)")
 
     @property
     def mode(self) -> str:
@@ -62,7 +71,7 @@ class EmbeddingEngine:
     def dimension(self) -> int:
         if self._mode == "bge" and self._model:
             return self._model.get_sentence_embedding_dimension()
-        return 0  # TF-IDF 维度不固定
+        return self._dimension
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         """将文本列表编码为向量列表"""
@@ -75,8 +84,7 @@ class EmbeddingEngine:
                 show_progress_bar=False,
             )
             return embeddings.tolist()
-        else:
-            return self._tfidf_encode(texts)
+        return [self._hash_encode(text) for text in texts]
 
     def encode_query(self, query: str) -> list[float]:
         """编码查询文本（BGE 需要加前缀）"""
@@ -88,8 +96,7 @@ class EmbeddingEngine:
                 show_progress_bar=False,
             )
             return emb.tolist()
-        else:
-            return self._tfidf_encode([query])[0] if self._tfidf_encode([query]) else []
+        return self._hash_encode(query)
 
     def encode_document(self, text: str) -> list[float]:
         """编码文档文本"""
@@ -100,31 +107,24 @@ class EmbeddingEngine:
                 show_progress_bar=False,
             )
             return emb.tolist()
-        else:
-            result = self._tfidf_encode([text])
-            return result[0] if result else []
+        return self._hash_encode(text)
 
-    def _tfidf_encode(self, texts: list[str]) -> list[list[float]]:
-        """TF-IDF 向量化（回退方案）
-
-        TF-IDF 向量维度不固定，不适合直接做余弦相似度。
-        改为返回稀疏表示，由 ChromaStore 判断是否使用。
-        在实际使用中，TF-IDF 模式会绕过 ChromaDB 的 embedding 函数，
-        直接用 ChromaDB 的内建 all-MiniLM-L6-v2 ONNX 模型。
-        """
-        # 如果连 TF-IDF 索引都没初始化，返回空
-        if not self._tfidf:
-            self._init_tfidf()
-        # TF-IDF 不支持直接向量化，标记交由调用方处理
-        return []
+    def _hash_encode(self, text: str) -> list[float]:
+        """确定性特征哈希向量，保证无网络时 Chroma 仍可查询。"""
+        vector = [0.0] * self._dimension
+        tokens = re.findall(r"[\w\u4e00-\u9fff]+", (text or "").lower())
+        if not tokens:
+            tokens = [text or ""]
+        for token in tokens:
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+            bucket = int.from_bytes(digest[:4], "big") % self._dimension
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vector[bucket] += sign
+        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+        return [v / norm for v in vector]
 
     def add_documents(self, ids: list[str], texts: list[str]):
-        """向 TF-IDF 索引添加文档（回退模式用）"""
-        if self._tfidf:
-            for i, (did, text) in enumerate(zip(ids, texts)):
-                self._tfidf.add_document(did, text)
+        """兼容旧接口。hash/Chroma 模式不需要外部索引。"""
 
     def remove_document(self, doc_id: str):
-        """从 TF-IDF 索引移除文档"""
-        if self._tfidf:
-            self._tfidf.remove_document(doc_id)
+        """兼容旧接口。hash/Chroma 模式不需要外部索引。"""

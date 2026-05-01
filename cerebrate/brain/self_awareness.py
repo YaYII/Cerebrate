@@ -70,6 +70,8 @@ class CerebrateMind:
         total_memories = swarm_stats.get("total", 0)
         total_agents = stats.get("agents", {}).get("registered", 0)
         agent_ids = self.mm.agents.list_active()
+        lifecycle = stats.get("lifecycle", {})
+        semantic = stats.get("semantic", {})
 
         health = "healthy"
         warnings = []
@@ -85,11 +87,28 @@ class CerebrateMind:
         return {
             "health": health,
             "total_memories": total_memories,
+            "quarantined_memories": lifecycle.get("quarantined", 0),
+            "verified_skills": lifecycle.get("verified_skill", 0),
+            "doctrines": lifecycle.get("doctrine", 0),
             "total_agents": total_agents,
             "agent_ids": agent_ids,
             "warnings": warnings,
-            "semantic_index": stats.get("semantic", {}),
+            "semantic_index": semantic,
+            "embedding_mode": semantic.get("embedding_mode", "unknown"),
+            "last_evolution": self._last_evolution_time(),
         }
+
+    def _last_evolution_time(self) -> str:
+        log_path = config.evolution_path / "_evolution_log.json"
+        if not log_path.exists():
+            return ""
+        try:
+            history = json.loads(log_path.read_text())
+        except json.JSONDecodeError:
+            return ""
+        if not history:
+            return ""
+        return history[-1].get("timestamp", "")
 
     def evolve(self):
         """进化到下一代"""

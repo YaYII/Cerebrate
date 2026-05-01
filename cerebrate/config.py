@@ -49,6 +49,8 @@ class CerebrateConfig:
     agents_path: Path = field(init=False)
     queue_path: Path = field(init=False)
     archive_path: Path = field(init=False)
+    seeds_path: Path = field(init=False)
+    usage_path: Path = field(init=False)
 
     # 项目上下文
     current_project_id: str = field(
@@ -86,6 +88,12 @@ class CerebrateConfig:
     embedding_device: str = field(
         default_factory=lambda: os.environ.get("CEREBRATE_EMBEDDING_DEVICE", "cpu")
     )
+    embedding_hash_dim: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_HASH_EMBEDDING_DIM", "384"))
+    )
+    embedding_allow_download: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD", "false").lower() == "true"
+    )
     use_chroma: bool = field(
         default_factory=lambda: os.environ.get("CEREBRATE_USE_CHROMA", "true").lower() == "true"
     )
@@ -98,6 +106,8 @@ class CerebrateConfig:
         self.agents_path = self.memory_root / "agents"
         self.queue_path = self.memory_root / ".queue"
         self.archive_path = self.memory_root / ".archived"
+        self.seeds_path = self.memory_root / "seeds"
+        self.usage_path = self.memory_root / "usage"
         self.semantic_index_path = self.memory_root / "_semantic_index.json"
         self.chroma_path = self.memory_root / "chroma_data"
 

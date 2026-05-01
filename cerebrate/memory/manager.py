@@ -1,5 +1,6 @@
 """统一记忆管理器 v3.0 — 集成语义搜索、项目隔离、智能体注册表"""
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -56,10 +57,18 @@ class MemoryManager:
     def share_to_swarm(self, title: str, content: str, category: str, tags: list[str],
                        source_agent: str = "unknown", problem_solved: str = "",
                        solution: str = "", outcome: str = "success",
-                       project_id: str = "") -> str:
-        return self.swarm.share(title, content, category, tags,
-                                source_agent, problem_solved, solution, outcome,
-                                project_id)
+                       project_id: str = "", life_stage: str = "memory",
+                       nutrient_score: float = 1.0, confidence: float = 1.0,
+                       evidence: str = "", supersedes: Optional[list[str]] = None) -> str:
+        memory_id = self.swarm.share(title, content, category, tags,
+                                     source_agent, problem_solved, solution, outcome,
+                                     project_id, life_stage=life_stage,
+                                     nutrient_score=nutrient_score,
+                                     confidence=confidence, evidence=evidence,
+                                     supersedes=supersedes)
+        self.agents.record_action(source_agent, "memory_shared", project_id, outcome,
+                                  {"memory_id": memory_id, "life_stage": life_stage})
+        return memory_id
 
     def query_swarm(self, query_text: str, category: Optional[str] = None,
                     tags: Optional[list[str]] = None, limit: int = 10,
@@ -70,6 +79,55 @@ class MemoryManager:
 
     def mark_swarm_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
         self.swarm.mark_reused(memory_id, success, feedback)
+
+    def start_memory_use(self, memory_id: str, agent_id: str, problem: str,
+                         project_id: str = "") -> dict:
+        memory = self.get_swarm_memory(memory_id)
+        if not memory:
+            raise ValueError(f"记忆不存在: {memory_id}")
+        config.usage_path.mkdir(parents=True, exist_ok=True)
+        usage_id = str(uuid.uuid4())[:12]
+        record = {
+            "usage_id": usage_id,
+            "memory_id": memory_id,
+            "agent_id": agent_id,
+            "problem": problem,
+            "project_id": project_id or memory.get("project_id", ""),
+            "status": "started",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": "",
+            "outcome": "",
+            "feedback": "",
+        }
+        from ..storage.atomic import atomic_write_json
+        atomic_write_json(config.usage_path / f"{usage_id}.json", record)
+        self.agents.record_action(agent_id, "memory_use_started",
+                                  record["project_id"], "started",
+                                  {"memory_id": memory_id, "problem": problem})
+        return record
+
+    def finish_memory_use(self, usage_id: str, outcome: str, feedback: str = "") -> dict:
+        usage_file = config.usage_path / f"{usage_id}.json"
+        if not usage_file.exists():
+            raise ValueError(f"使用记录不存在: {usage_id}")
+        record = json.loads(usage_file.read_text())
+        outcome = outcome if outcome in {"success", "partial", "failure"} else "partial"
+        record.update({
+            "status": "finished",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "outcome": outcome,
+            "feedback": feedback,
+        })
+        from ..storage.atomic import atomic_write_json
+        atomic_write_json(usage_file, record)
+        self.mark_swarm_reused(record["memory_id"], success=outcome == "success",
+                               feedback=feedback)
+        self.agents.record_action(record["agent_id"], "memory_use_finished",
+                                  record.get("project_id", ""), outcome,
+                                  {"memory_id": record["memory_id"],
+                                   "usage_id": usage_id,
+                                   "feedback": feedback})
+        return record
 
     def get_swarm_stats(self) -> dict:
         return self.swarm.get_stats()
@@ -127,6 +185,7 @@ class MemoryManager:
             "version": "4.0.0",
             "personal": {"user_count": len(self.personal.list_users())},
             "swarm": swarm_stats,
+            "lifecycle": self.swarm.lifecycle_counts(),
             "knowledge": {
                 "document_count": kb_count,
                 "topic_count": len(self.knowledge.list_topics()),
@@ -136,6 +195,7 @@ class MemoryManager:
             "semantic": {
                 "swarm_docs": swarm_count,
                 "kb_docs": kb_count,
+                "embedding_mode": self.swarm._store.embedding_mode if self.swarm._store else "unknown",
             },
         }
 
