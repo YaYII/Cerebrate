@@ -108,9 +108,6 @@ class KnowledgeBase:
         results = []
         for item in raw_results:
             meta = item["metadata"]
-            # 更新访问计数（内存中，不触发写盘）
-            self._update_access_in_meta(meta, item["id"])
-
             bonus = 0.0
             if meta.get("is_policy") == "True":
                 bonus += 0.15
@@ -138,18 +135,12 @@ class KnowledgeBase:
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:5]
 
-    def _update_access_in_meta(self, meta: dict, doc_id: str):
-        """更新访问计数（仅内存，延迟写盘）"""
-        meta["access_count"] = meta.get("access_count", 0) + 1
-        # 不每次都写 ChromaDB，减少 I/O
-
     def get_policy(self, policy_name: str) -> Optional[dict]:
         # 扫描查找匹配 policy_name
         for did in self._store.get_all_ids():
             item = self._store.get(did)
             if item and item["metadata"].get("policy_name") == policy_name:
                 meta = item["metadata"]
-                meta["access_count"] = meta.get("access_count", 0) + 1
                 return {
                     "doc_id": item["id"],
                     "title": meta.get("title", ""),
@@ -198,6 +189,3 @@ class KnowledgeBase:
             if item and item["metadata"].get("policy_name"):
                 policies.add(item["metadata"]["policy_name"])
         return list(policies)
-
-    def rebuild_semantic_index(self):
-        pass  # ChromaDB 自动管理

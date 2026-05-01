@@ -67,17 +67,3 @@ def boost_from_reuse(reuse_count: int, success_count: int) -> float:
     if reuse_count == 0:
         return 0.0
     return min(0.2, 0.05 * math.log2(reuse_count + 1) * (success_count / reuse_count))
-
-
-def recency_score(last_accessed: Optional[str]) -> float:
-    """基于最近访问时间的时效性分数"""
-    if not last_accessed:
-        return 0.5
-    try:
-        dt = datetime.fromisoformat(last_accessed)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return 0.5
-    days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
-    return max(0.1, 1.0 - days / 90)

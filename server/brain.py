@@ -71,7 +71,7 @@ class CerebrateMind:
         total_agents = stats.get("agents", {}).get("registered", 0)
         agent_ids = self.mm.agents.list_active()
         lifecycle = stats.get("lifecycle", {})
-        semantic = stats.get("semantic", {})
+        vector = stats.get("vector", {})
 
         health = "healthy"
         warnings = []
@@ -93,8 +93,8 @@ class CerebrateMind:
             "total_agents": total_agents,
             "agent_ids": agent_ids,
             "warnings": warnings,
-            "semantic_index": semantic,
-            "embedding_mode": semantic.get("embedding_mode", "unknown"),
+            "vector_index": vector,
+            "embedding_mode": vector.get("embedding_mode", "unknown"),
             "last_evolution": self._last_evolution_time(),
         }
 

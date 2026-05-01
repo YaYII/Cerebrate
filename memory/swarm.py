@@ -322,10 +322,6 @@ class SwarmMemory:
     def get_all_memory_ids(self) -> list[str]:
         return self._store.get_all_ids()
 
-    def rebuild_semantic_index(self):
-        """ChromaDB 模式下无需重建（内建索引自动维护）"""
-        pass
-
     # ==================== 内部 ====================
 
     def _calculate_swarm_score(self, meta: dict) -> float:

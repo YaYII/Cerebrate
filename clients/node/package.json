@@ -1,0 +1,36 @@
+{
+  "name": "cerebrate-client",
+  "version": "5.0.0",
+  "description": "Zero-dependency HTTP client for Cerebrate Brain Server v5 — the memory hub for AI coding agents",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cerebrate",
+    "brain-server",
+    "ai-agent",
+    "memory",
+    "swarm"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^5.0.0"
+  }
+}

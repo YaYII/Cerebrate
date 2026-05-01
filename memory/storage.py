@@ -59,13 +59,6 @@ class FileLock:
                 pass
 
 
-def locked_atomic_write(path: Path, data: dict, timeout: float = 5.0) -> None:
-    """带文件锁的原子写入"""
-    lock_path = Path(str(path) + ".lock")
-    with FileLock(lock_path, timeout):
-        atomic_write_json(path, data)
-
-
 # ==================== ChromaDB 向量存储 ====================
 
 import logging as _logging
@@ -257,19 +250,6 @@ class ChromaStore:
         results = self._collection.get(include=[])
         ids_list = results.get("ids") or []
         return ids_list
-
-    # ==================== 更新 ====================
-
-    def update(self, doc_id: str, metadata: dict,
-               text: Optional[str] = None,
-               embedding: Optional[list[float]] = None):
-        """更新文档的元数据/文本/嵌入"""
-        kwargs = {"ids": [doc_id], "metadatas": [metadata]}
-        if text:
-            kwargs["documents"] = [text]
-        if embedding:
-            kwargs["embeddings"] = [embedding]
-        self._collection.update(**kwargs)
 
     # ==================== 删除 ====================
 

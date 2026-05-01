@@ -1,4 +1,4 @@
-"""统一记忆管理器 v5.0 — 集成语义搜索、项目隔离、智能体注册表"""
+"""统一记忆管理器 v5.0 — 集成向量记忆、项目隔离、智能体注册表"""
 import json
 import uuid
 from datetime import datetime, timezone
@@ -193,7 +193,7 @@ class MemoryManager:
                 "policy_count": len(self.knowledge.list_policies()),
             },
             "agents": {"registered": len(self.agents.list_active())},
-            "semantic": {
+            "vector": {
                 "swarm_docs": swarm_count,
                 "kb_docs": kb_count,
                 "embedding_mode": self.swarm._store.embedding_mode if self.swarm._store else "unknown",
@@ -213,11 +213,6 @@ class MemoryManager:
 
     def get_query_log(self, limit: int = 50) -> list[dict]:
         return self._query_log[-limit:]
-
-    def rebuild_indexes(self):
-        """重建所有语义索引"""
-        self.swarm.rebuild_semantic_index()
-        self.knowledge.rebuild_semantic_index()
 
     # ==================== 刷盘 ====================
 

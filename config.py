@@ -77,9 +77,6 @@ class CerebrateConfig:
     swarm_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_SWARM_ENABLED", "true").lower() == "true")
     default_language: str = field(default_factory=lambda: os.environ.get("CEREBRATE_LANGUAGE", "简体中文"))
 
-    # 语义搜索配置
-    semantic_index_path: Path = field(init=False)
-
     # ChromaDB 向量数据库配置 (v5)
     chroma_path: Path = field(init=False)
     embedding_model: str = field(
@@ -113,7 +110,6 @@ class CerebrateConfig:
         self.seeds_path = self.memory_root / "seeds"
         self.usage_path = self.memory_root / "usage"
         self.events_path = self.memory_root / "events"
-        self.semantic_index_path = self.memory_root / "_semantic_index.json"
         self.chroma_path = self.memory_root / "chroma_data"
 
 

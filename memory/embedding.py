@@ -122,9 +122,3 @@ class EmbeddingEngine:
             vector[bucket] += sign
         norm = math.sqrt(sum(v * v for v in vector)) or 1.0
         return [v / norm for v in vector]
-
-    def add_documents(self, ids: list[str], texts: list[str]):
-        """兼容旧接口。hash/Chroma 模式不需要外部索引。"""
-
-    def remove_document(self, doc_id: str):
-        """兼容旧接口。hash/Chroma 模式不需要外部索引。"""
