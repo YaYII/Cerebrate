@@ -15,8 +15,8 @@ CLI = ROOT / "cerebrate.py"
 
 
 def configure_temp_memory(tmp_name):
-    from cerebrate.config import config
-    import cerebrate.embedding.engine as embedding
+    from config import config
+    import memory.embedding as embedding
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -39,7 +39,7 @@ class BrainAPITests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         configure_temp_memory(self.tmp.name)
-        from cerebrate.server import BrainAPI
+        from server.api import BrainAPI
         self.api = BrainAPI()
 
     def tearDown(self):
@@ -73,20 +73,75 @@ class BrainAPITests(unittest.TestCase):
         self.assertIn("usage.finished", event_types)
 
     def test_consensus_vote_is_event_not_direct_doctrine_mutation(self):
+        self.api.register_agent({"agent_id": "api-unit", "capabilities": ["testing"]})
         proposed = self.api.propose_memory({
             "title": "共识候选",
             "content": "投票只是事件，不直接晋升规则。",
             "category": "architecture",
             "agent_id": "api-unit",
+            "validate": False,
         })
         vote = self.api.consensus_vote({
             "memory_id": proposed["memory_id"],
             "agent_id": "api-unit",
             "vote": "support",
-            "evidence": "测试证据",
+            "evidence": "测试证据足够长",
         })
         self.assertEqual(vote["event_type"], "consensus.vote")
+        self.assertEqual(vote["consensus"]["decision"], "pending")
         self.assertEqual(self.api.doctrines()["count"], 0)
+        self.assertEqual(self.api.get_memory(proposed["memory_id"])["life_stage"], "memory")
+
+    def test_consensus_quorum_promotes_to_verified_skill_not_doctrine(self):
+        self.api.register_agent({"agent_id": "alpha", "capabilities": ["review"]})
+        self.api.register_agent({"agent_id": "beta", "capabilities": ["review"]})
+        proposed = self.api.propose_memory({
+            "title": "可共识技能",
+            "content": "两个独立单位支持后，服务端可晋升为 verified_skill。",
+            "category": "architecture",
+            "agent_id": "alpha",
+            "validate": False,
+        })
+        memory_id = proposed["memory_id"]
+
+        first = self.api.consensus_vote({
+            "memory_id": memory_id,
+            "agent_id": "alpha",
+            "vote": "support",
+            "evidence": "alpha 复核通过并提供证据",
+            "confidence": 1.0,
+        })
+        self.assertEqual(first["consensus"]["decision"], "pending")
+
+        second = self.api.consensus_vote({
+            "memory_id": memory_id,
+            "agent_id": "beta",
+            "vote": "support",
+            "evidence": "beta 独立复核通过并提供证据",
+            "confidence": 1.0,
+        })
+        self.assertEqual(second["consensus"]["decision"], "accepted")
+        self.assertEqual(second["consensus"]["applied_life_stage"], "verified_skill")
+        self.assertEqual(self.api.get_memory(memory_id)["life_stage"], "verified_skill")
+        self.assertEqual(self.api.doctrines()["count"], 0)
+
+    def test_llm_status_exposes_rule_only_fallback_without_key(self):
+        from config import config
+        old_provider = config.llm_provider
+        old_anthropic = os.environ.pop("ANTHROPIC_API_KEY", None)
+        old_openai = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            config.llm_provider = "anthropic"
+            status = self.api.llm_status()
+            self.assertEqual(status["mode"], "rule-only")
+            self.assertFalse(status["api_key_present"])
+            self.assertEqual(status["fallback"], "deterministic rule immune validation")
+        finally:
+            config.llm_provider = old_provider
+            if old_anthropic is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_anthropic
+            if old_openai is not None:
+                os.environ["OPENAI_API_KEY"] = old_openai
 
     def test_client_cannot_directly_create_doctrine(self):
         proposed = self.api.propose_memory({
@@ -169,7 +224,7 @@ class HttpBrainServerTests(unittest.TestCase):
         self.assertIn("data", payload)
 
     def test_rest_endpoints_and_event_log(self):
-        from cerebrate.client import BrainClient
+        from client.http import BrainClient
         client_sense = BrainClient(self.base_url).get("/v1/sense")
         self.assert_v5_ok(client_sense)
 
@@ -225,6 +280,18 @@ class HttpBrainServerTests(unittest.TestCase):
             "evidence": "端到端测试支持",
         })
         self.assert_v5_ok(vote)
+
+        consensus = self.get(f"/v1/consensus/{memory_id}")
+        self.assert_v5_ok(consensus)
+        self.assertEqual(consensus["data"]["memory_id"], memory_id)
+
+        llm_status = self.get("/v1/llm/status")
+        self.assert_v5_ok(llm_status)
+        self.assertIn(llm_status["data"]["mode"], {"rule-only", "llm-assisted"})
+
+        assessment = self.get("/v1/brain/assess")
+        self.assert_v5_ok(assessment)
+        self.assertIn("biases_detected", assessment["data"])
 
         events = self.get("/v1/events", {"cursor": 0, "limit": 20})
         self.assert_v5_ok(events)
@@ -287,6 +354,67 @@ class HttpBrainServerTests(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assert_v5_ok(payload)
         self.assertEqual(payload["data"]["authority"], "brain_server")
+        memory_id = payload["data"]["memory_id"]
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "llm",
+                "status",
+                "--url",
+                self.base_url,
+            ],
+            cwd=str(ROOT),
+            env=self.env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        payload = json.loads(proc.stdout)
+        self.assert_v5_ok(payload)
+        self.assertIn(payload["data"]["mode"], {"rule-only", "llm-assisted"})
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "brain",
+                "assess",
+                "--url",
+                self.base_url,
+            ],
+            cwd=str(ROOT),
+            env=self.env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        payload = json.loads(proc.stdout)
+        self.assert_v5_ok(payload)
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "consensus",
+                "--url",
+                self.base_url,
+                "--memory-id",
+                memory_id,
+            ],
+            cwd=str(ROOT),
+            env=self.env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        payload = json.loads(proc.stdout)
+        self.assert_v5_ok(payload)
+        self.assertEqual(payload["data"]["memory_id"], memory_id)
 
 
 if __name__ == "__main__":

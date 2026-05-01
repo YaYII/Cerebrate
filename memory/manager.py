@@ -24,7 +24,7 @@ class MemoryManager:
     @property
     def agents(self):
         if self._agent_registry is None:
-            from server.agents import AgentRegistry
+            from .agents import AgentRegistry
             self._agent_registry = AgentRegistry(config.agents_path)
         return self._agent_registry
 

@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Cerebrate v5 CLI.
+"""Cerebrate v5 client CLI.
 
-This CLI is no longer an authority over group memory. It has two roles:
-1. start the authoritative Brain Server;
-2. act as a thin client that sends requests to that server.
+This module belongs to the battle-unit client project. It never writes group
+memory directly; every command is an HTTP request to the Brain Server.
 """
 
 import argparse
 import json
 import sys
 
-from cerebrate.config import config
-from cerebrate.protocol import err
+from config import config
+from protocol import err
 
 
 class CerebrateArgumentParser(argparse.ArgumentParser):
@@ -25,13 +24,8 @@ def _out(payload: dict):
 
 
 def _client(args):
-    from cerebrate.client import BrainClient
+    from client.http import BrainClient
     return BrainClient(args.url, timeout=args.timeout)
-
-
-def cmd_serve(args):
-    from cerebrate.server import serve
-    serve(args.host, args.port, quiet=args.quiet)
 
 
 def cmd_register(args):
@@ -115,27 +109,24 @@ def cmd_memory_get(args):
     _out(_client(args).get(f"/v1/memories/{args.memory_id}"))
 
 
+def cmd_help(args):
+    _out(_client(args).get("/v1/help"))
+
+
+def cmd_brain_assess(args):
+    _out(_client(args).get("/v1/brain/assess"))
+
+
+def cmd_llm_status(args):
+    _out(_client(args).get("/v1/llm/status"))
+
+
+def cmd_consensus(args):
+    _out(_client(args).get(f"/v1/consensus/{args.memory_id}"))
+
+
 def cmd_evolve(args):
     _out(_client(args).post("/v1/evolve", {}))
-
-
-def cmd_migrate(args):
-    from cerebrate.migrate import migrate_all, export_seeds, reindex_from_seeds
-    if args.export_seeds:
-        _out({"status": "ok", "data": export_seeds(), "meta": {"protocol": "v5"}})
-    elif args.reindex:
-        _out({"status": "ok", "data": reindex_from_seeds(args.dry_run), "meta": {"protocol": "v5"}})
-    elif args.swarm_only:
-        result = {"swarm": _migrate_swarm(args.dry_run)}
-        _out({"status": "ok", "data": result, "meta": {"protocol": "v5"}})
-    else:
-        result = migrate_all(args.dry_run)
-        _out({"status": "ok", "data": result, "meta": {"protocol": "v5"}})
-
-
-def _migrate_swarm(dry_run: bool) -> int:
-    from cerebrate.migrate import migrate_swarm
-    return migrate_swarm(dry_run)
 
 
 def _add_client_common(parser):
@@ -143,15 +134,9 @@ def _add_client_common(parser):
     parser.add_argument("--timeout", type=float, default=30.0)
 
 
-def main():
+def main(argv=None):
     parser = CerebrateArgumentParser(description="Cerebrate v5 - Brain Server client")
     sub = parser.add_subparsers(dest="command")
-
-    p = sub.add_parser("serve", help="start authoritative Brain Server")
-    p.add_argument("--host", default=config.server_host)
-    p.add_argument("--port", type=int, default=config.server_port)
-    p.add_argument("--quiet", "-q", action="store_true")
-    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("register", help="register an AI unit with the Brain Server")
     p.add_argument("--id", required=True)
@@ -220,6 +205,27 @@ def main():
     _add_client_common(p)
     p.set_defaults(func=cmd_events)
 
+    p = sub.add_parser("help", help="get Brain Server API discovery document")
+    _add_client_common(p)
+    p.set_defaults(func=cmd_help)
+
+    p_brain = sub.add_parser("brain", help="brain server introspection")
+    brain_sub = p_brain.add_subparsers(dest="brain_cmd")
+    p = brain_sub.add_parser("assess", help="metacognitive assessment")
+    _add_client_common(p)
+    p.set_defaults(func=cmd_brain_assess)
+
+    p_llm = sub.add_parser("llm", help="LLM/immune layer")
+    llm_sub = p_llm.add_subparsers(dest="llm_cmd")
+    p = llm_sub.add_parser("status", help="show LLM and immune mode")
+    _add_client_common(p)
+    p.set_defaults(func=cmd_llm_status)
+
+    p = sub.add_parser("consensus", help="read consensus snapshot for a memory")
+    p.add_argument("--memory-id", required=True)
+    _add_client_common(p)
+    p.set_defaults(func=cmd_consensus)
+
     p = sub.add_parser("doctrines", help="read authoritative doctrines")
     _add_client_common(p)
     p.set_defaults(func=cmd_doctrines)
@@ -235,16 +241,9 @@ def main():
     _add_client_common(p)
     p.set_defaults(func=cmd_evolve)
 
-    p = sub.add_parser("migrate", help="migrate JSON memories to ChromaDB / export seeds / reindex")
-    p.add_argument("--dry-run", action="store_true", help="preview without executing")
-    p.add_argument("--swarm-only", action="store_true", help="only migrate swarm memories")
-    p.add_argument("--export-seeds", action="store_true", help="export ChromaDB memories to JSONL seed files")
-    p.add_argument("--reindex", action="store_true", help="rebuild ChromaDB index from seed files")
-    p.set_defaults(func=cmd_migrate)
-
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not hasattr(args, "func"):
-        _out(err("missing command", code=400, protocol="v5"))
+        _out(err("missing client command", code=400, protocol="v5"))
     try:
         args.func(args)
     except SystemExit:

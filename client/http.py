@@ -6,16 +6,18 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from ..config import config
-from ..protocol import err
+from config import config
+from protocol import err
 
 
 class BrainClient:
     """Small client used by CLI/agent adapters to call the Brain Server."""
 
-    def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0):
+    def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0,
+                 max_response_bytes: int = 10 * 1024 * 1024):
         self.base_url = (base_url or config.server_url or "http://127.0.0.1:8765").rstrip("/")
         self.timeout = timeout
+        self.max_response_bytes = max_response_bytes
 
     def get(self, path: str, params: Optional[dict] = None) -> dict:
         query = f"?{urlencode(params)}" if params else ""
@@ -34,9 +36,26 @@ class BrainClient:
         request = Request(url, data=data, headers=headers, method=method)
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                raw = response.read().decode("utf-8")
+                raw_bytes = response.read(self.max_response_bytes)
+                if len(response.read(1)) > 0:
+                    return err("response body exceeds size limit", code=413, protocol="v5")
+                raw = self._safe_decode(raw_bytes)
         except HTTPError as e:
-            raw = e.read().decode("utf-8")
+            try:
+                raw_bytes = e.read(self.max_response_bytes)
+                raw = self._safe_decode(raw_bytes)
+            except Exception:
+                return err(f"HTTP {e.code} {e.reason}", code=e.code, protocol="v5")
         except URLError as e:
             return err(f"Brain Server unavailable: {e.reason}", code=503, protocol="v5")
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return err(f"server returned non-JSON response: {raw[:200]}", code=502, protocol="v5")
+
+    @staticmethod
+    def _safe_decode(raw_bytes: bytes) -> str:
+        try:
+            return raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw_bytes.decode("latin-1")

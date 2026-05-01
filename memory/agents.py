@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..storage.atomic import atomic_write_json
+from .storage import atomic_write_json
 
 
 class AgentRegistry:

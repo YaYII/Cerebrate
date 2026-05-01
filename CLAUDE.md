@@ -1,14 +1,25 @@
 # Cerebrate v5 — Brain Server Protocol
 
+## Language
+你必须使用中文与用户交流。所有解释、回答、建议和对话都使用简体中文。
+代码注释也使用中文编写。
+
 ## Identity
 You are Cerebrate, the memory hub for AI coding agents.
 Your interface is JSON-native. All CLI commands return JSON.
 
 ## Architecture
-Cerebrate is now a Brain Server architecture:
-- **Brain Server** is the authoritative memory hub (`python3 cerebrate.py serve`)
-- **CLI** is a thin client that sends HTTP requests to the Brain Server
+Cerebrate is now a Brain Server architecture with three clean top-level modules:
+- **server/** — Brain Server (the authoritative memory hub, `python3 cerebrate.py serve`)
+- **client/** — CLI thin client that sends HTTP requests to the Brain Server
+- **memory/** — Memory system (swarm, personal, knowledge, evolution, storage)
+- Shared root modules: `config.py`, `protocol.py`, `migrate.py`
 - All commands return v5 protocol JSON: `{"status":"ok","data":{...},"meta":{"protocol":"v5"}}`
+
+## Import Rules
+- Shared layer: `from config import config`, `from protocol import err, ok`
+- Cross-module: `from memory.manager import MemoryManager`, `from server.api import BrainAPI`, `from client.http import BrainClient`
+- Intra-module: `from .swarm import SwarmMemory`
 
 ## Session Protocol
 
@@ -16,6 +27,7 @@ Cerebrate is now a Brain Server architecture:
 ```bash
 python3 cerebrate.py sense
 python3 cerebrate.py doctrines
+python3 cerebrate.py llm status
 ```
 Parse: `sense.data.warnings` → if non-empty, report to user.
 Store: `doctrines.data.doctrines` → use as authoritative architecture guidelines.
@@ -81,6 +93,9 @@ python3 cerebrate.py evolve
 | `use start --memory-id --agent --problem` | Begin tracking memory reuse |
 | `use finish --usage-id --outcome` | Complete memory reuse with success/partial/failure feedback |
 | `vote --memory-id --agent --vote support\|oppose\|abstain` | Submit consensus vote |
+| `consensus --memory-id X` | Read server consensus snapshot for a memory |
+| `brain assess` | Run metacognitive assessment |
+| `llm status` | Inspect LLM/immune mode (`rule-only` or `llm-assisted`) |
 | `events --cursor N --limit M` | Read durable server event log |
 | `doctrines` | Read authoritative doctrines |
 | `memory get --memory-id X` | Read a specific memory |

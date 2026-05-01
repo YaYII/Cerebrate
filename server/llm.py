@@ -11,7 +11,7 @@ import os
 import re
 from typing import Optional
 
-from ..config import config
+from config import config
 
 
 class CerebrateLLM:
@@ -49,10 +49,37 @@ class CerebrateLLM:
             elif self._provider == "openai":
                 import openai
                 self._client = openai.OpenAI()
+            else:
+                self._sdk_available = False
+                return False
             self._sdk_available = True
         except ImportError:
             self._sdk_available = False
         return self._sdk_available
+
+    def status(self) -> dict:
+        """返回 LLM/免疫层状态，用于服务端自检和客户端排障。"""
+        api_key_present = self.is_available()
+        sdk_available = self._sdk_ready() if api_key_present else False
+        llm_available = api_key_present and sdk_available
+        return {
+            "provider": self._provider,
+            "model": self._model,
+            "api_key_present": api_key_present,
+            "sdk_available": sdk_available,
+            "available": llm_available,
+            "immune_enabled": self._immune_enabled,
+            "immune_threshold": self._immune_threshold,
+            "mode": "llm-assisted" if llm_available and self._immune_enabled else "rule-only",
+            "fallback": "deterministic rule immune validation",
+            "responsibilities": [
+                "memory safety validation",
+                "quality scoring",
+                "tag suggestions",
+                "summarization",
+                "knowledge conflict detection",
+            ],
+        }
 
     def _get_client(self):
         """获取 LLM 客户端，SDK 不可用时返回 None"""
@@ -210,7 +237,7 @@ class CerebrateLLM:
 
     def summarize_memory(self, content: str, max_length: int = 200) -> Optional[str]:
         """将冗长的记忆内容压缩为关键要点"""
-        if not self._sdk_ready():
+        if not self.is_available() or not self._sdk_ready():
             return self._rule_summarize(content, max_length)
         return self._llm_summarize(content, max_length)
 
@@ -253,7 +280,7 @@ class CerebrateLLM:
 
     def suggest_tags(self, content: str) -> list[str]:
         """自动生成标签"""
-        if self._sdk_ready():
+        if self.is_available() and self._sdk_ready():
             llm_tags = self._llm_suggest_tags(content)
             if llm_tags:
                 return llm_tags
@@ -294,7 +321,7 @@ class CerebrateLLM:
 
     def detect_conflicts(self, text_a: str, text_b: str) -> Optional[str]:
         """检测两段知识是否存在矛盾"""
-        if not self._sdk_ready():
+        if not self.is_available() or not self._sdk_ready():
             return None
         client = self._get_client()
         if not client:

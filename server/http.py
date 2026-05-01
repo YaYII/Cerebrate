@@ -6,8 +6,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from ..config import config
-from ..protocol import err, ok
+from config import config
+from protocol import err, ok
 from .api import BrainAPI
 
 
@@ -51,12 +51,20 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str, path: str, params: dict) -> dict:
         if method == "GET" and path == "/v1/sense":
             return self.api.sense()
+        if method == "GET" and path == "/v1/brain/assess":
+            return self.api.assess()
+        if method == "GET" and path == "/v1/llm/status":
+            return self.api.llm_status()
         if method == "GET" and path == "/v1/events":
             cursor = int((params.get("cursor") or ["0"])[0])
             limit = int((params.get("limit") or ["100"])[0])
             return {"events": self.api.events.read_after(cursor, limit)}
+        if method == "GET" and path.startswith("/v1/consensus/"):
+            return self.api.consensus_snapshot(path.rsplit("/", 1)[-1])
         if method == "GET" and path.startswith("/v1/memories/"):
             return self.api.get_memory(path.rsplit("/", 1)[-1])
+        if method == "GET" and path == "/v1/help":
+            return self.api.help()
         if method == "GET" and path == "/v1/doctrines":
             return self.api.doctrines()
 
@@ -123,7 +131,7 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 
 def create_server(host: str = "", port: int = 0, quiet: bool = False) -> ThreadingHTTPServer:
     bind_host = host or config.server_host
-    bind_port = port or config.server_port
+    bind_port = config.server_port if port is None else port
     server = ThreadingHTTPServer((bind_host, bind_port), BrainRequestHandler)
     server.api = BrainAPI()  # type: ignore[attr-defined]
     server.quiet = quiet  # type: ignore[attr-defined]

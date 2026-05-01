@@ -1,6 +1,6 @@
 import unittest
 
-from cerebrate.decision.router import DecisionRouter
+from server.decision import DecisionRouter
 
 
 class FakeMemoryManager:

@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..config import config
-from ..storage.atomic import FileLock, atomic_write_json
+from config import config
+from memory.storage import FileLock, atomic_write_json
 
 
 class EventLog:

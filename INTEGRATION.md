@@ -4,24 +4,24 @@
 
 服务端：
 
-- `cerebrate/server/`
+- `server/`
 - 这是脑虫中央处理器。
 - 所有群体记忆、事件日志、共识和进化都由服务端控制。
 
 客户端：
 
-- `cerebrate/client/`
+- `client/`
+- 这是 AI 单位访问服务端的安装包/适配层，不拥有权威记忆。
+
+记忆内核：
+
+- `memory/`
+- 这是服务端内部器官，不是客户端项目。
+
+兼容入口：
+
 - `cerebrate.py`
-- 这是 AI 单位访问服务端的工具，不拥有权威记忆。
-
-底层记忆内核：
-
-- `cerebrate/memory/`
-- `cerebrate/brain/`
-- `cerebrate/decision/`
-- `cerebrate/storage/`
-
-这些是服务端使用的内部器官，不是客户端项目。
+- 只负责开发期分发命令：`serve/migrate` 进入服务端 CLI，其余命令进入客户端 CLI。
 
 ## 启动服务端
 
@@ -74,6 +74,10 @@ python3 cerebrate.py vote \
   --agent my-agent \
   --vote support \
   --evidence "有测试或复现证据"
+
+python3 cerebrate.py consensus \
+  --url http://127.0.0.1:8765 \
+  --memory-id <memory_id>
 ```
 
 ## 重要原则
@@ -95,6 +99,28 @@ python3 cerebrate.py vote \
 - 是否固化为 `doctrine`
 
 共识不是简单多数。脑虫需要结合来源可信度、证据质量、复用成功率、失败反馈、时间衰减和冲突检测。
+
+## 脑虫状态和 LLM 免疫层
+
+元认知评估：
+
+```bash
+python3 cerebrate.py brain assess --url http://127.0.0.1:8765
+```
+
+LLM/免疫状态：
+
+```bash
+python3 cerebrate.py llm status --url http://127.0.0.1:8765
+```
+
+内置 LLM 的工作方式：
+
+- `server/llm.py` 是可选增强层，不是强依赖。
+- 有 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY` 且对应 SDK 可用时，进入 `llm-assisted`。
+- 无 API key、SDK 不存在或调用失败时，进入 `rule-only`。
+- `rule-only` 仍会执行危险命令、SQL/XSS、低质量内容和基础标签检测。
+- LLM 主要负责深度质量审核、标签建议、摘要和知识冲突检测；最终写入、晋升和隔离仍由服务端规则裁决。
 
 ## 事件日志
 
