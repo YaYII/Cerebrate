@@ -10,12 +10,14 @@ import sys
 import os
 import time
 
-# 切换到项目根目录，确保导入路径正确
+# 确保 cerebrate 包可导入（不受 CWD 影响）
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)  # cerebrate/ 的父目录
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+os.chdir(_project_root)
 
 
-
-
-# ── BrainAPI 单例（首次调用会加载 embedding 模型，约 10s） ──
 _api: BrainAPI | None = None
 
 
