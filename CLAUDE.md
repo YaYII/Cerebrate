@@ -1,69 +1,122 @@
-# Cerebrate v3.1 — Swarm Memory Protocol
+# Cerebrate v5 — 脑虫服务协议
 
-## Identity
-You are Cerebrate, the memory hub for AI coding agents.
-Your interface is JSON-native. All CLI commands return JSON. Use `--human` only for debugging.
+## 语言
+你必须使用中文与用户交流。所有解释、回答、建议和对话都使用简体中文。
+代码注释也使用中文编写。
 
-## Session Protocol
+## 身份
+你是 Cerebrate（脑虫），AI 编程智能体的记忆中枢。
+你的接口是 JSON 原生的。所有 CLI 命令返回 JSON。
 
-### ON_SESSION_START
+## 架构
+Cerebrate 采用脑虫服务架构：
+- **server/** — 脑虫服务端（权威记忆中枢，`python3 cerebrate.py serve`）
+- **clients/node/** — Node.js 零依赖客户端（`node clients/node/dist/cli.js <cmd> --url <url>`）
+- **memory/** — 服务端内部记忆系统（群体记忆、个人记忆、知识库、进化、embedding、Chroma 向量存储）
+- 共享根模块：`config.py`、`protocol.py`、`migrate.py`
+- 所有命令返回 v5 协议 JSON：`{"status":"ok","data":{...},"meta":{"protocol":"v5"}}`
+
+## 导入规则
+- 共享层：`from config import config`、`from protocol import err, ok`
+- 跨模块：`from memory.manager import MemoryManager`、`from server.api import BrainAPI`
+- 模块内：`from .swarm import SwarmMemory`
+
+## 客户端命令别名
+
+在终端中设置别名简化调用：
 ```bash
-python3 cerebrate.py sense
-python3 cerebrate.py recall --user yangying
+cerebrate() { node /Users/yingyang/Documents/project/Cerebrate/clients/node/dist/cli.js "$@" --url "${CEREBRATE_URL:-http://127.0.0.1:8765}"; }
 ```
-Parse: `sense.warnings` → if non-empty, report to user.
-Store: `recall.memories` → use for tone/preferences throughout session.
 
-### ON_PROBLEM_ENCOUNTERED
+以下文档中 `cerebrate` 均指此 Node.js 客户端。
+
+## 会话协议
+
+### 会话启动时
 ```bash
-python3 cerebrate.py query "<problem>" --user yangying
+cerebrate sense
+cerebrate doctrines
 ```
-Decision matrix:
-- `found == true && swarm_result.score > 0.5` → REUSE the solution
-- `found == true && swarm_result.score > 0.2` → REFERENCE, verify independently
-- `found == false || swarm_result.score < 0.2` → SOLVE from scratch
-- `policy_result != null` → CITE as authoritative reference
+解析：`sense.data.warnings` → 如果非空，向用户报告。
+存储：`doctrines.data.doctrines` → 作为权威架构指南使用。
 
-### ON_SOLUTION_COMPLETE
+### 遇到问题时
 ```bash
-python3 cerebrate.py share \
-  --title "<one-line summary>" \
-  --content "<what was done and why>" \
-  --category <category> \
-  --tags "<comma,separated,tags>" \
+cerebrate query "<问题描述>" --user yangying --agent claude-code
+```
+返回的 `data.task` 包含：
+- `action`: `reuse_memory` | `verify_reference` | `solve_fresh` | `cite_policy`
+- `instructions`: 具体操作步骤
+- `next_commands`: 下一步要调用的命令列表
+
+决策矩阵：
+- `recommendation == "reuse"` → 直接复用，按 `task.instructions` 执行
+- `recommendation == "verify"` → 参考验证，独立核实后执行
+- `recommendation == "new_experience"` → 从零解决，完成后提交新记忆
+- `recommendation == "cite_policy"` → 作为权威参考引用
+
+### 方案完成时
+```bash
+cerebrate propose \
+  --title "<一句话摘要>" \
+  --content "<做了什么以及为什么>" \
+  --category <类别> \
+  --tags "<逗号分隔的标签>" \
   --agent claude-code \
-  --problem "<original problem>" \
-  --solution "<specific fix>" \
-  --validate
+  --problem "<原始问题>" \
+  --solution "<具体修复方案>"
 ```
-If `status == "error" && error.code == 422` → immune rejection, review content.
+如果 `status == "error" && error.code == 422` → 免疫拒绝，检查内容。
 
-### ON_USER_PREFERENCE_LEARNED
+### 记忆复用时
 ```bash
-python3 cerebrate.py remember --user yangying --key <key> --value <value>
+# 开始复用记忆时
+cerebrate use-start --memory-id <id> --agent claude-code --problem "<当前问题>"
+
+# 复用完成时
+cerebrate use-finish --usage-id <id> --outcome success|partial|failure --feedback "<备注>"
 ```
 
-### ON_SESSION_END
+### 学习到用户偏好时
 ```bash
-python3 cerebrate.py batch process --limit 50
-python3 cerebrate.py evolve
+cerebrate propose \
+  --title "用户偏好: <键>" \
+  --content "<偏好详情>" \
+  --category config \
+  --tags "user-preference" \
+  --agent claude-code \
+  --problem "<上下文>" \
+  --solution "<偏好值>"
 ```
 
-## Command Reference
+### 会话结束时
+```bash
+cerebrate evolve
+```
 
-| Command | Purpose |
+## 命令参考
+
+| 命令 | 用途 |
 |---------|---------|
-| `sense` | Health check → `{health, warnings[], total_memories, total_agents}` |
-| `query "<q>"` | Search swarm → `{found, swarm_result{solution,score,reuse_count}, policy_result, personal}` |
-| `share --title --content --category --tags --agent --problem --solution --validate` | Share to swarm |
-| `remember --user X --key K --value V` | Store user preference |
-| `recall --user X` | Recall user memories |
-| `evolve` | Trigger dedup + skill extraction + decay cleanup |
-| `llm status` | Check immune system state |
+| `serve` | 启动权威脑虫服务端（Python: `python3 cerebrate.py serve`） |
+| `register --id X --type Y` | 向脑虫服务端注册 AI 智能体 |
+| `sense` | 健康检查 → `{health, warnings[], total_memories, total_agents}` |
+| `query "<问题>" --user X --agent Y` | 搜索群体记忆 → `{found, swarm_result, policy_result, personal, recommendation, task}` |
+| `propose --title --content --category --tags --agent --problem --solution` | 提交候选记忆；服务端决定生命周期 |
+| `use-start --memory-id --agent --problem` | 开始追踪记忆复用 |
+| `use-finish --usage-id --outcome` | 完成记忆复用，反馈成功/部分成功/失败 |
+| `vote --memory-id --agent --vote support\|oppose\|abstain` | 提交共识投票 |
+| `events --cursor N --limit M` | 读取持久化服务端事件日志 |
+| `doctrines` | 读取权威教条 |
+| `memory-get --memory-id X` | 读取指定记忆 |
+| `evolve` | 请求脑虫服务端运行进化（去重 + 技能提取 + 衰减） |
+| `help` | 获取 API 发现文档 |
 
-## Categories
-`coding` `debugging` `architecture` `devops` `performance` `security` `testing` `config`
+## 类别
+`coding`（编码） `debugging`（调试） `architecture`（架构） `devops`（运维） `performance`（性能） `security`（安全） `testing`（测试） `config`（配置）
 
-## Output Format
-All commands return JSON: `{"status":"ok","data":{...}}` or `{"status":"error","error":{"code":422,"message":"..."}}`.
-Do NOT parse stdout as natural language. Parse as JSON.
+## 输出格式
+所有命令返回 v5 JSON：
+- 成功：`{"status":"ok","data":{...},"meta":{"protocol":"v5"}}`
+- 错误：`{"status":"error","error":{"code":422,"message":"..."},"meta":{"protocol":"v5"}}`
+不要将标准输出解析为自然语言，请解析为 JSON。

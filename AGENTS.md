@@ -1,195 +1,125 @@
-# Cerebrate Protocol v3.1 — AI Agent Communication Specification
+# Cerebrate Protocol v5 — Root Split Brain Server
 
-## Protocol Overview
+## 项目边界
 
-Cerebrate exposes a JSON-native CLI. Every command returns JSON on stdout.
-Exit code 0 = success, exit code 1 = error.
+Cerebrate 现在明确分为三个根级项目：
 
-Response envelope:
+- **服务端项目**：`server/`
+  - 脑虫中央处理器，唯一权威入口。
+  - 负责记忆写入、事件日志、免疫隔离、复用反馈、共识投票、进化和 doctrine 输出。
+- **客户端项目**：`client/`
+  - 给 AI 作战单位访问服务端。
+  - 只能提交请求、候选经验、复用反馈和投票。
+  - 不能直接写群体记忆，不能直接晋升 doctrine。
+- **记忆内核**：`memory/`
+  - 服务端内部器官，包含 swarm、personal、knowledge、evolution、embedding 和 storage。
+  - 当前唯一搜索/索引主链路是 `EmbeddingEngine` + `ChromaStore`；BGE 可用时使用 BGE，不可用时使用本地 deterministic hash embedding。
+  - 运行时 Chroma collection 按 embedding 模式隔离，例如 `swarm_memories_hash`。
+  - 客户端不得直接依赖或写入。
+
+旧 `cerebrate/` 包已废弃并删除。`cerebrate.py` 只是仓库开发入口：`serve/migrate` 分发到服务端 CLI，其余命令分发到客户端 CLI。
+
+## 服务端启动
+
+```bash
+python3 cerebrate.py serve --host 127.0.0.1 --port 8765
+```
+
+服务端第一行输出：
+
 ```json
-{"status": "ok", "data": {...}}
-{"status": "error", "error": {"code": 422, "message": "..."}}
+{"status":"ok","data":{"base_url":"http://127.0.0.1:8765"},"meta":{"protocol":"v5"}}
 ```
 
-To read human output: add `--human` flag. Do NOT use `--human` in agent code.
+## 响应协议
 
-## Registration (required, once per agent)
+成功：
 
-```bash
-python3 cerebrate.py agent register \
-  --id <agent_id> \
-  --type cli \
-  --capabilities "code_generation,debugging,refactoring"
-```
-→ `{"status":"ok","agent_id":"<id>","agent_type":"cli","capabilities":[...]}`
-
-## Session Lifecycle
-
-### 1. Session Start: Sense + Recall
-
-```bash
-python3 cerebrate.py sense
-```
-→ `{"status":"ok","health":"healthy","total_memories":N,"total_agents":N,"agent_ids":[...],"warnings":[...],"semantic_index":{...}}`
-
-```bash
-python3 cerebrate.py recall --user <user_id>
-```
-→ `{"status":"ok","user":"<user_id>","memories":{"pref_tone":"...","fact_name":"..."}}`
-
-### 2. During Session: Query Swarm
-
-```bash
-python3 cerebrate.py query "<problem_description>" --user <user_id>
-```
-→ `{"status":"ok","query":"...","found":true|false,"swarm_result":{...},"policy_result":{...},"personal":{...}}`
-
-swarm_result schema:
 ```json
-{
-  "memory_id": "hex16",
-  "title": "string",
-  "content": "string",
-  "solution": "string",
-  "problem_solved": "string",
-  "outcome": "success|partial|failure",
-  "reuse_count": int,
-  "score": float,
-  "semantic_score": float,
-  "decay": float,
-  "category": "string",
-  "tags": ["string"],
-  "source_agent": "string",
-  "project_id": "string"
-}
+{"status":"ok","data":{},"meta":{"protocol":"v5"}}
 ```
 
-Project-scoped query:
-```bash
-python3 cerebrate.py query "<problem>" --project <project_id>
-```
+失败：
 
-### 3. After Solving: Share to Swarm
-
-```bash
-python3 cerebrate.py share \
-  --title "<short title>" \
-  --content "<context and process>" \
-  --category <category> \
-  --tags "<tag1,tag2>" \
-  --agent <your_agent_id> \
-  --problem "<original problem>" \
-  --solution "<concrete solution>" \
-  --validate
-```
-→ `{"status":"ok","memory_id":"hex16","agent":"...","category":"...","validated":true,"validation":{...}}`
-
-If immune system rejects:
-→ `{"status":"error","error":{"code":422,"message":"免疫系统拒绝"},"validation":{"safe":false,"quality":0.05,"issues":[...]}}`
-
-Add `--force` to bypass rejection.
-
-### 4. Session End: Process Queue
-
-```bash
-python3 cerebrate.py batch process --limit 50
-```
-→ `{"status":"ok","processed":N}`
-
-## Commands Reference
-
-### Memory Operations
-
-| Command | Input | Output |
-|---------|-------|--------|
-| `query "<q>"` | query string | `{found: bool, swarm_result: {...}, policy_result: {...}}` |
-| `share --title ...` | memory fields | `{memory_id: hex16, validated: bool}` |
-| `remember --user X --key K --value V` | user, key, value | `{user: X, key: K, remembered: true}` |
-| `recall --user X` | user id | `{user: X, memories: {...}}` |
-| `store-kb --title ...` | doc fields | `{doc_id: hex16, title: ..., is_policy: bool}` |
-
-### System Operations
-
-| Command | Output Schema |
-|---------|---------------|
-| `stats` | `{stats: {personal,swarm,knowledge,agents,semantic}, sense: {...}, assessment: {...}}` |
-| `sense` | `{health, total_memories, total_agents, agent_ids, warnings, semantic_index}` |
-| `evolve` | `{generation: int, evolution: {actions, insights, stats}}` |
-| `llm status` | `{available, sdk_ready, provider, model, immune_enabled, immune_threshold}` |
-| `llm validate --content "..."` | `{safe, quality, issues, suggested_tags, immune_active}` |
-
-### Agent Management
-
-| Command | Output |
-|---------|--------|
-| `agent register --id X --type cli` | `{agent_id: X, agent_type: cli}` |
-| `agent list` | `{agents: [...], count: N}` |
-| `agent stats --id X` | `{agent_id, total_actions, success_rate, ...}` |
-
-## IPC Queue Protocol (for agents without shell access)
-
-Write requests to: `memory/.queue/requests/<uuid>.json`
-Read results from: `memory/.queue/results/<uuid>.result.json`
-
-Request format:
 ```json
-{
-  "request_id": "uuid",
-  "timestamp": "ISO8601",
-  "source_agent": "agent_id",
-  "project_id": "project_id_or_empty",
-  "command": "query|share|remember|recall|store-kb|stats|sense|evolve|register",
-  "params": { "command_specific": "values" }
-}
+{"status":"error","error":{"code":500,"message":"...","details":{}},"meta":{"protocol":"v5"}}
 ```
 
-Result format:
-```json
-{
-  "request_id": "uuid",
-  "status": "ok|error",
-  "data": {},
-  "elapsed_ms": 15
-}
-```
+## HTTP API
 
-Trigger processing:
+- `POST /v1/agents/register`
+- `GET /v1/sense`
+- `GET /v1/help`
+- `GET /v1/brain/assess`
+- `GET /v1/llm/status`
+- `POST /v1/query`
+- `POST /v1/memories/propose`
+- `POST /v1/usages/start`
+- `POST /v1/usages/finish`
+- `POST /v1/consensus/vote`
+- `GET /v1/consensus/{memory_id}`
+- `GET /v1/events?cursor=0&limit=100`
+- `GET /v1/events/stream?cursor=0`
+- `GET /v1/memories/{id}`
+- `GET /v1/doctrines`
+- `POST /v1/evolve`
+
+## CLI 客户端
+
 ```bash
-python3 cerebrate.py batch process --limit 50
+python3 cerebrate.py register --url http://127.0.0.1:8765 --id codex
+python3 cerebrate.py sense --url http://127.0.0.1:8765
+python3 cerebrate.py query --url http://127.0.0.1:8765 "如何接入脑虫"
+python3 cerebrate.py propose --url http://127.0.0.1:8765 --title "经验" --content "..." --category coding --agent codex
+python3 cerebrate.py use start --url http://127.0.0.1:8765 --memory-id <id> --agent codex --problem "..."
+python3 cerebrate.py use finish --url http://127.0.0.1:8765 --usage-id <id> --outcome success --feedback "..."
+python3 cerebrate.py vote --url http://127.0.0.1:8765 --memory-id <id> --agent codex --vote support --evidence "..."
+python3 cerebrate.py consensus --url http://127.0.0.1:8765 --memory-id <id>
+python3 cerebrate.py llm status --url http://127.0.0.1:8765
+python3 cerebrate.py brain assess --url http://127.0.0.1:8765
+python3 cerebrate.py events --url http://127.0.0.1:8765 --cursor 0
 ```
 
-## Categories
+## 连接策略
 
-Standard categories for `share --category`:
-- `coding` — code patterns, fixes, optimizations
-- `debugging` — bug root causes and fixes
-- `architecture` — design decisions, patterns
-- `devops` — CI/CD, deployment, infrastructure
-- `performance` — performance optimizations
-- `security` — security fixes and practices
-- `testing` — test strategies, mocking patterns
-- `config` — environment config, setup
+- REST 短请求承载命令和事实提交。
+- 持久 `event log` 承载记忆连续性。
+- SSE 长连接只负责广播和观察。
+- 记忆绝不依赖长连接是否存活。
 
-## Exit Codes
+客户端断线后用 `cursor` 从 `GET /v1/events` 或 `GET /v1/events/stream` 继续同步。
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success (`status: "ok"`) |
-| 1 | Error (`status: "error"`) |
-| 422 | Immune system rejection (share only) |
+## 权威规则
 
-## Decision Logic
+客户端可以提交：
 
-When an agent receives a problem, the decision flow is:
+- 候选记忆 `memory`
+- 养分 `nutrient`
+- 复用反馈
+- 共识投票事件
 
-1. `query` → check `swarm_result.score`:
-   - `> 0.5`: apply the solution, mark reused
-   - `0.2-0.5`: reference but verify independently
-   - `< 0.2`: no useful match, solve from scratch
-2. If problem involves rules/policies → also check `policy_result`
-3. Use `personal` data to adapt tone/preferences
+客户端不能提交：
 
-## Configuration
+- `verified_skill`
+- `doctrine`
+- 直接删除群体记忆
+- 直接篡改共识结果
 
-Required: `.env` file with `ANTHROPIC_API_KEY=sk-ant-...`
-Without it, rule-based immune system still runs (pattern matching only).
+晋升必须由服务端进化、免疫和共识裁决完成。
+
+## 记忆内核规则
+
+- `memory/swarm.py`：群体记忆与生命周期，服务端写入候选经验、隔离内容、复用反馈。
+- `memory/knowledge.py`：权威知识库，保存策略/文档类知识。
+- `memory/personal.py`：个人上下文缓存与持久化。
+- `memory/embedding.py`：向量化引擎，BGE 优先，本地 hash 保底。
+- `memory/storage.py`：ChromaDB 向量存储和仍被事件/状态文件使用的原子 JSON 写入。
+- 旧 TF-IDF `SemanticIndex` 已删除，不再维护 `_semantic_index.json` 或重建语义索引入口。
+
+## 脑虫裁决与 LLM
+
+- `vote` 只提交共识事件，不直接改写 doctrine。
+- 服务端用 `GET /v1/consensus/{memory_id}` 聚合每个智能体的最新投票，结合置信度、证据长度、智能体成功率和法定人数生成 `pending | accepted | rejected | split`。
+- 达成接受共识时，服务端最多自动晋升为 `verified_skill`；`doctrine` 仍由服务端进化流程沉淀。
+- 达成拒绝共识时，服务端可隔离为 `quarantined`。
+- 内置 LLM 是可选免疫增强层；没有 API key 或 SDK 时自动进入 `rule-only`，仍会用规则检测危险命令、低质量内容和基础标签。

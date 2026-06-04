@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Cerebrate 虫群记忆管理系统 - 主入口"""
-import sys
-import os
+"""Cerebrate v5 — Brain Server entrypoint.
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from cerebrate.cli import main
+Use clients/node/ for client commands (sense, query, propose, etc.).
+"""
 
 if __name__ == "__main__":
-    main()
+    from server.cli import main as server_main
+    server_main()
