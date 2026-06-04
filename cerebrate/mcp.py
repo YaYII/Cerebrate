@@ -4,15 +4,15 @@ Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务
 
 直接导入 BrainAPI 作为本地库调用，无需额外 HTTP 服务。
 """
-from cerebrate.server.api import BrainAPI
+import time
 import json
+from cerebrate.server.api import BrainAPI
 import sys
 import os
-import time
 
-# 确保 cerebrate 包可导入（不受 CWD 影响）
+# 在导入 cerebrate 之前设置路径
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.dirname(_script_dir)  # cerebrate/ 的父目录
+_project_root = os.path.dirname(_script_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 os.chdir(_project_root)
@@ -26,6 +26,7 @@ def _get_api() -> BrainAPI:
     if _api is None:
         _api = BrainAPI()
     return _api
+
 
 # ── 工具定义 ────────────────────────────────────────────────
 

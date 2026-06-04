@@ -458,7 +458,10 @@ class BrainAPI:
         for event in self._consensus_vote_events():
             mid = event.get("payload", {}).get("memory_id")
             if mid:
-                snapshots[mid] = self.consensus_snapshot(mid, apply=False)
+                try:
+                    snapshots[mid] = self.consensus_snapshot(mid, apply=False)
+                except KeyError:
+                    continue  # 记忆已被删除，跳过
         decisions = {"pending": 0, "accepted": 0, "rejected": 0, "split": 0}
         for snapshot in snapshots.values():
             decision = snapshot.get("decision", "pending")
