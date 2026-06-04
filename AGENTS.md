@@ -21,7 +21,11 @@ python3 cerebrate.py serve --host 127.0.0.1 --port 8765
 服务端第一行输出：
 
 ```json
-{"status":"ok","data":{"base_url":"http://127.0.0.1:8765"},"meta":{"protocol":"v5"}}
+{
+  "status": "ok",
+  "data": { "base_url": "http://127.0.0.1:8765" },
+  "meta": { "protocol": "v5" }
+}
 ```
 
 ## 响应协议
@@ -29,13 +33,17 @@ python3 cerebrate.py serve --host 127.0.0.1 --port 8765
 成功：
 
 ```json
-{"status":"ok","data":{},"meta":{"protocol":"v5"}}
+{ "status": "ok", "data": {}, "meta": { "protocol": "v5" } }
 ```
 
 失败：
 
 ```json
-{"status":"error","error":{"code":500,"message":"...","details":{}},"meta":{"protocol":"v5"}}
+{
+  "status": "error",
+  "error": { "code": 500, "message": "...", "details": {} },
+  "meta": { "protocol": "v5" }
+}
 ```
 
 ## HTTP API
