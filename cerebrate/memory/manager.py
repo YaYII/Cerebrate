@@ -1,5 +1,6 @@
 """统一记忆管理器 v5.0 — 集成向量记忆、项目隔离、智能体注册表"""
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,13 +20,17 @@ class MemoryManager:
         self.swarm = SwarmMemory(swarm_path)
         self.knowledge = KnowledgeBase(knowledge_path)
         self._agent_registry = None  # 延迟加载
+        self._agent_registry_lock = threading.Lock()
+        self._usage_lock = threading.Lock()
         self._query_log: list[dict] = []
 
     @property
     def agents(self):
         if self._agent_registry is None:
-            from cerebrate.memory.agents import AgentRegistry
-            self._agent_registry = AgentRegistry(config.agents_path)
+            with self._agent_registry_lock:
+                if self._agent_registry is None:
+                    from cerebrate.memory.agents import AgentRegistry
+                    self._agent_registry = AgentRegistry(config.agents_path)
         return self._agent_registry
 
     # ==================== 个人记忆接口 ====================
@@ -81,12 +86,16 @@ class MemoryManager:
         self.swarm.mark_reused(memory_id, success, feedback)
 
     def _usage_store(self):
-        """Lazy-init usage ChromaStore"""
+        """Lazy-init usage ChromaStore (线程安全)"""
         if not hasattr(self, "_usage_store_cache"):
-            from cerebrate.core.embedding import get_embedding_engine
-            from cerebrate.core.storage import ChromaStore
-            engine = get_embedding_engine(config.embedding_model, config.embedding_device)
-            self._usage_store_cache = ChromaStore(config.chroma_path, "usage_tracking", engine)
+            with self._usage_lock:
+                if not hasattr(self, "_usage_store_cache"):
+                    from cerebrate.core.embedding import get_embedding_engine
+                    from cerebrate.core.storage import ChromaStore
+                    engine = get_embedding_engine(
+                        config.embedding_model, config.embedding_device)
+                    self._usage_store_cache = ChromaStore(
+                        config.chroma_path, "usage_tracking", engine)
         return self._usage_store_cache
 
     def start_memory_use(self, memory_id: str, agent_id: str, problem: str,
@@ -127,7 +136,8 @@ class MemoryManager:
         record = item["metadata"]
         # Convert string metadata back to dict
         record = {k: v for k, v in record.items()}
-        outcome = outcome if outcome in {"success", "partial", "failure"} else "partial"
+        outcome = outcome if outcome in {
+            "success", "partial", "failure"} else "partial"
         record.update({
             "status": "finished",
             "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -138,7 +148,7 @@ class MemoryManager:
         meta = {}
         for k, v in record.items():
             meta[k] = str(v) if v is not None else ""
-        text = f"{record.get('agent_id','')} {record.get('problem','')}"
+        text = f"{record.get('agent_id', '')} {record.get('problem', '')}"
         self._usage_store().upsert(doc_id, text, meta)
         self.mark_swarm_reused(record["memory_id"], success=outcome == "success",
                                feedback=feedback)
@@ -194,13 +204,15 @@ class MemoryManager:
     def record_agent_action(self, agent_id: str, action_type: str,
                             project_id: str = "", outcome: str = "success",
                             details: Optional[dict] = None):
-        self.agents.record_action(agent_id, action_type, project_id, outcome, details)
+        self.agents.record_action(
+            agent_id, action_type, project_id, outcome, details)
 
     # ==================== 统计与维护 ====================
 
     def get_all_stats(self) -> dict:
         swarm_stats = self.swarm.get_stats()
-        swarm_count = self.swarm._store.count() if self.swarm._store else swarm_stats.get("total", 0)
+        swarm_count = self.swarm._store.count(
+        ) if self.swarm._store else swarm_stats.get("total", 0)
         kb_count = self.knowledge._store.count() if self.knowledge._store else 0
         return {
             "version": "5.0.0",

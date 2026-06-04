@@ -31,7 +31,8 @@ class CerebrateMind:
             return self._store
         from cerebrate.core.embedding import get_embedding_engine
         from cerebrate.core.storage import ChromaStore
-        engine = get_embedding_engine(config.embedding_model, config.embedding_device)
+        engine = get_embedding_engine(
+            config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "brain_state", engine)
         return self._store
 
@@ -47,10 +48,10 @@ class CerebrateMind:
                 try:
                     self.state = json.loads(state_str)
                 except json.JSONDecodeError:
-                    self.state = {"mood": "ready", "confidence": 0.8, "focus": "", "last_action": ""}
+                    self.state = {"mood": "ready", "confidence": 0.8,
+                                  "focus": "", "last_action": ""}
             else:
                 self.state = state_str
-
 
     def _save_state(self):
         store = self._get_store()
@@ -91,7 +92,8 @@ class CerebrateMind:
             health = "newborn"
             warnings.append("虫群记忆为空，需要播种初始经验")
         if total_agents == 0:
-            warnings.append("没有注册的智能体，客户端应执行 python3 cerebrate.py register --id <agent>")
+            warnings.append(
+                "没有注册的智能体，客户端应执行 python3 cerebrate.py register --id <agent>")
         if len(agent_ids) <= 1:
             warnings.append("只有一个智能体活跃，虫群多样性不足")
 
@@ -111,9 +113,11 @@ class CerebrateMind:
 
     def _last_evolution_time(self) -> str:
         # 从 ChromaDB evolution_logs 读取最后时间
+        from cerebrate.core.embedding import get_embedding_engine
         from cerebrate.core.storage import ChromaStore
         try:
-            store = ChromaStore(config.chroma_path, "evolution_logs")
+            engine = get_embedding_engine()
+            store = ChromaStore(config.chroma_path, "evolution_logs", engine)
             item = store.get("evolution_log")
             if item:
                 import json as _json
@@ -210,8 +214,8 @@ class Metacognition:
             stale = 0
             for mem in cat_samples.get(cat, []):
                 d = calculate_decay(mem.get("created", ""),
-                                   reuse_count=mem.get("reuse_count", 0),
-                                   success_count=mem.get("success_count", 0))
+                                    reuse_count=mem.get("reuse_count", 0),
+                                    success_count=mem.get("success_count", 0))
                 if d < 0.15:
                     stale += 1
             sample = cat_samples.get(cat, [])
@@ -271,7 +275,8 @@ class Metacognition:
         total = sum(a["contributions"] for a in agents.values())
         for agent, info in agents.items():
             if total > 10 and info["contributions"] / max(total, 1) > 0.8:
-                biases.append(f"智能体 '{agent}' 贡献了 {info['contributions']/max(total,1):.0%} 的记忆，存在单一来源偏见")
+                biases.append(
+                    f"智能体 '{agent}' 贡献了 {info['contributions']/max(total, 1):.0%} 的记忆，存在单一来源偏见")
 
         return biases
 

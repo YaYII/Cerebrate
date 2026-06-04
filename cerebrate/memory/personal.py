@@ -1,4 +1,5 @@
 """个人记忆层 v5 — 服务端用户上下文 + ChromaDB 持久化"""
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -16,13 +17,16 @@ class PersonalMemory:
         self._store: Optional[ChromaStore] = None
         self._index: dict = {"users": {}}  # 用户列表
         self._dirty_access: set[str] = set()  # access_count 变更待刷盘的 doc_id
+        self._lock = threading.Lock()
         self._init_store()
         self._load_all_to_cache()
 
     def _init_store(self):
         from cerebrate.core.embedding import get_embedding_engine
-        engine = get_embedding_engine(config.embedding_model, config.embedding_device)
-        self._store = ChromaStore(config.chroma_path, "personal_memories", engine)
+        engine = get_embedding_engine(
+            config.embedding_model, config.embedding_device)
+        self._store = ChromaStore(
+            config.chroma_path, "personal_memories", engine)
 
     def _load_all_to_cache(self):
         """启动时从 ChromaDB 全量加载到内存"""
@@ -48,23 +52,24 @@ class PersonalMemory:
 
     def flush(self):
         """将缓存的 access_count 变更批量写回 ChromaDB"""
-        if not self._dirty_access:
-            return
-        for doc_id in list(self._dirty_access):
-            parts = doc_id.split(":", 1)
-            if len(parts) != 2:
-                continue
-            uid, key = parts
-            entry = self._cache.get(uid, {}).get(key)
-            if not entry:
-                continue
-            item = self._store.get(doc_id)
-            if item:
-                meta = item["metadata"]
-                meta["access_count"] = entry.get("access_count", 0)
-                text = f"{key}: {entry.get('value', '')}"
-                self._store.upsert(doc_id, text, meta)
-        self._dirty_access.clear()
+        with self._lock:
+            if not self._dirty_access:
+                return
+            for doc_id in list(self._dirty_access):
+                parts = doc_id.split(":", 1)
+                if len(parts) != 2:
+                    continue
+                uid, key = parts
+                entry = self._cache.get(uid, {}).get(key)
+                if not entry:
+                    continue
+                item = self._store.get(doc_id)
+                if item:
+                    meta = item["metadata"]
+                    meta["access_count"] = entry.get("access_count", 0)
+                    text = f"{key}: {entry.get('value', '')}"
+                    self._store.upsert(doc_id, text, meta)
+            self._dirty_access.clear()
 
     # ==================== 读写 ====================
 
@@ -100,8 +105,9 @@ class PersonalMemory:
         if key:
             entry = data.get(key, {})
             if entry:
-                entry["access_count"] = entry.get("access_count", 0) + 1
-                self._dirty_access.add(f"{user_id}:{key}")
+                with self._lock:
+                    entry["access_count"] = entry.get("access_count", 0) + 1
+                    self._dirty_access.add(f"{user_id}:{key}")
                 return {key: entry.get("value", "")}
             return {}
         result = {}
@@ -135,7 +141,8 @@ class PersonalMemory:
                 parts = rest.split("_", 1)
                 if len(parts) == 2:
                     p_id, p_key = parts
-                    profile["project_contexts"].setdefault(p_id, {})[p_key] = val
+                    profile["project_contexts"].setdefault(p_id, {})[
+                        p_key] = val
 
         if project_id:
             profile["project_contexts"] = {

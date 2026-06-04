@@ -214,7 +214,7 @@ class CerebrateLLM:
             }
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
-                text = response.content[0].text
+                text = response.content[0].text if response.content else ""
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content
@@ -275,10 +275,12 @@ class CerebrateLLM:
             }
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
-                return response.content[0].text.strip()
+                content = response.content[0].text if response.content else ""
+                return content.strip()
             else:
                 response = client.chat.completions.create(**kwargs)
-                return response.choices[0].message.content.strip()
+                content = response.choices[0].message.content if response.choices else ""
+                return content.strip()
         except Exception:
             return self._rule_summarize(content, max_length)
 
@@ -310,7 +312,7 @@ class CerebrateLLM:
             }
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
-                text = response.content[0].text
+                text = response.content[0].text if response.content else ""
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content
@@ -351,7 +353,7 @@ B: {text_b[:1500]}
             }
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
-                text = response.content[0].text
+                text = response.content[0].text if response.content else ""
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content

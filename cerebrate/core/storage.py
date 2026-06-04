@@ -18,7 +18,7 @@ def _retry_busy(op, max_retries=5, delay=0.2):
             msg = str(e).lower()
             if ('database is locked' in msg or
                 'sqlite_busy' in msg or
-                'busy' in str(type(e).__name__).lower()):
+                    'busy' in str(type(e).__name__).lower()):
                 if attempt < max_retries - 1:
                     _time.sleep(delay * (1.5 ** attempt))
                     continue
@@ -72,7 +72,8 @@ class ChromaStore:
             settings=chromadb.Settings(anonymized_telemetry=False),
         )
 
-        embedding_fn = _CerebrateEmbeddingFunction(self._engine) if self._engine else None
+        embedding_fn = _CerebrateEmbeddingFunction(
+            self._engine) if self._engine else None
 
         try:
             self._collection = self._client.get_collection(
@@ -107,6 +108,7 @@ class ChromaStore:
         embeddings = None
         if embedding:
             embeddings = [embedding]
+
         def _add():
             with ChromaStore._db_semaphore, self._write_lock:
                 self._collection.add(
@@ -123,6 +125,7 @@ class ChromaStore:
         embeddings = None
         if embedding:
             embeddings = [embedding]
+
         def _upsert():
             with ChromaStore._db_semaphore, self._write_lock:
                 self._collection.upsert(
@@ -144,18 +147,21 @@ class ChromaStore:
                     results = self._collection.query(
                         query_embeddings=[query_embedding],
                         n_results=top_k, where=where,
-                        include=["metadatas", "documents", "distances", "embeddings"],
+                        include=["metadatas", "documents",
+                                 "distances", "embeddings"],
                     )
                 elif self._engine:
                     results = self._collection.query(
                         query_embeddings=[self._engine.encode_query(query)],
                         n_results=top_k, where=where,
-                        include=["metadatas", "documents", "distances", "embeddings"],
+                        include=["metadatas", "documents",
+                                 "distances", "embeddings"],
                     )
                 else:
                     results = self._collection.query(
                         query_texts=[query], n_results=top_k, where=where,
-                        include=["metadatas", "documents", "distances", "embeddings"],
+                        include=["metadatas", "documents",
+                                 "distances", "embeddings"],
                     )
                 items = []
                 ids_list = results.get("ids")
@@ -191,8 +197,10 @@ class ChromaStore:
                 )
                 ids_list = results.get("ids") or []
                 if ids_list:
-                    meta = results["metadatas"][0] if results.get("metadatas") else {}
-                    doc = results["documents"][0] if results.get("documents") else ""
+                    meta = results["metadatas"][0] if results.get(
+                        "metadatas") else {}
+                    doc = results["documents"][0] if results.get(
+                        "documents") else ""
                     emb = None
                     embs = results.get("embeddings")
                     if embs is not None and len(embs) > 0:
@@ -220,7 +228,22 @@ class ChromaStore:
     # ==================== Stats ====================
 
     def count(self) -> int:
-        return self._collection.count()
+        def _count():
+            with ChromaStore._db_semaphore:
+                return self._collection.count()
+        return _retry_busy(_count)
+
+    def get_all_metadata(self, where: Optional[dict] = None,
+                         limit: int = 1000) -> list[dict]:
+        """批量读取元数据，受 _db_semaphore 和 _retry_busy 保护"""
+        def _get():
+            with ChromaStore._db_semaphore:
+                results = self._collection.get(
+                    where=where, include=["metadatas"], limit=limit,
+                )
+                metadatas = results.get("metadatas") or []
+                return [m for m in metadatas if m is not None]
+        return _retry_busy(_get)
 
     def get_collection(self):
         return self._collection

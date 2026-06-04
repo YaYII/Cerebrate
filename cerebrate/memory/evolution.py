@@ -26,7 +26,8 @@ class EvolutionEngine:
             return self._store
         from cerebrate.core.embedding import get_embedding_engine
         from cerebrate.core.storage import ChromaStore
-        engine = get_embedding_engine(config.embedding_model, config.embedding_device)
+        engine = get_embedding_engine(
+            config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "evolution_logs", engine)
         return self._store
 
@@ -39,7 +40,6 @@ class EvolutionEngine:
                 self._history = json.loads(history_str)
             except json.JSONDecodeError:
                 self._history = []
-
 
     def _save_history(self):
         store = self._get_store()
@@ -139,10 +139,13 @@ class EvolutionEngine:
                 keeper_mem = swarm._load_memory(keeper)
                 victim_mem = swarm._load_memory(victim)
                 if keeper_mem and victim_mem:
-                    keeper_mem["reuse_count"] = keeper_mem.get("reuse_count", 0) + victim_mem.get("reuse_count", 0)
-                    keeper_mem["success_count"] = keeper_mem.get("success_count", 0) + victim_mem.get("success_count", 0)
-                    keeper_mem["updated"] = datetime.now(timezone.utc).isoformat()
-                    text = f"{keeper_mem.get('title','')}\n{keeper_mem.get('content','')}\n{keeper_mem.get('problem_solved','')}\n{keeper_mem.get('solution','')}"
+                    keeper_mem["reuse_count"] = keeper_mem.get(
+                        "reuse_count", 0) + victim_mem.get("reuse_count", 0)
+                    keeper_mem["success_count"] = keeper_mem.get(
+                        "success_count", 0) + victim_mem.get("success_count", 0)
+                    keeper_mem["updated"] = datetime.now(
+                        timezone.utc).isoformat()
+                    text = f"{keeper_mem.get('title', '')}\n{keeper_mem.get('content', '')}\n{keeper_mem.get('problem_solved', '')}\n{keeper_mem.get('solution', '')}"
                     swarm._store.upsert(keeper, text, keeper_mem)
 
                 swarm.delete_memory(victim)
@@ -168,7 +171,7 @@ class EvolutionEngine:
                 continue
 
             existing = swarm.query(
-                f"distilled skill {mem.get('title','')}",
+                f"distilled skill {mem.get('title', '')}",
                 category="distilled_skill",
                 project_id=None,
                 limit=1,
@@ -176,10 +179,10 @@ class EvolutionEngine:
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
 
-            skill_title = f"[已验证技能] {mem.get('title','')}"
+            skill_title = f"[已验证技能] {mem.get('title', '')}"
             skill_content = (
-                f"问题: {mem.get('problem_solved', mem.get('content',''))}\n"
-                f"方案: {mem.get('solution', mem.get('content',''))}\n"
+                f"问题: {mem.get('problem_solved', mem.get('content', ''))}\n"
+                f"方案: {mem.get('solution', mem.get('content', ''))}\n"
                 f"验证: 复用 {reuse} 次, 成功率 {success / reuse:.0%}"
             )
             raw_tags = mem.get("tags", [])
@@ -218,13 +221,15 @@ class EvolutionEngine:
             if reuse < 3 or success / max(reuse, 1) < 0.8:
                 continue
             cat = mem.get("category", "general")
-            categories.setdefault(cat, set()).add(mem.get("project_id", "") or "global")
+            categories.setdefault(cat, set()).add(
+                mem.get("project_id", "") or "global")
             samples.setdefault(cat, mem)
 
         for cat, projects in categories.items():
             if len(projects) < 2:
                 continue
-            existing = swarm.query(f"doctrine {cat}", category="doctrine", project_id=None, limit=1)
+            existing = swarm.query(
+                f"doctrine {cat}", category="doctrine", project_id=None, limit=1)
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
             sample = samples[cat]
@@ -267,7 +272,7 @@ class EvolutionEngine:
                 mem["score"] = 0.01
                 mem["deprecated"] = "True"
                 mem["life_stage"] = "archived"
-                text = f"{mem.get('title','')}\n{mem.get('content','')}\n{mem.get('problem_solved','')}\n{mem.get('solution','')}"
+                text = f"{mem.get('title', '')}\n{mem.get('content', '')}\n{mem.get('problem_solved', '')}\n{mem.get('solution', '')}"
                 swarm._store.upsert(mid, text, mem)
                 archived += 1
 
@@ -283,7 +288,7 @@ class EvolutionEngine:
             if item and item["metadata"].get("is_policy") == "True":
                 pname = item["metadata"].get("policy_name", "")
                 if pname:
-                    if pname.lower() in (k.lower() for k in policies):
+                    if pname.lower() in {k.lower() for k in policies}:
                         conflicts.append({
                             "type": "duplicate_policy",
                             "name": pname,

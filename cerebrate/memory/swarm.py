@@ -1,5 +1,6 @@
 """虫群共享记忆层 v5 — 服务端权威内核 + ChromaDB 向量存储"""
 import hashlib
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -9,7 +10,8 @@ from cerebrate.core.decay import calculate_decay, boost_from_reuse
 from cerebrate.config import config
 
 
-LIFE_STAGES = {"nutrient", "memory", "verified_skill", "doctrine", "quarantined", "archived"}
+LIFE_STAGES = {"nutrient", "memory", "verified_skill",
+               "doctrine", "quarantined", "archived"}
 
 
 class SwarmMemory:
@@ -21,11 +23,15 @@ class SwarmMemory:
         # 轻量级计数器（会话内内存，定期刷盘）
         self._stats = {"total": 0, "total_queries": 0, "total_successes": 0}
         self._dirty = False
+        self._stats_lock = threading.Lock()
+        self._mem_locks: dict[str, threading.Lock] = {}
+        self._mem_locks_lock = threading.Lock()
         self._init_store()
 
     def _init_store(self):
         from cerebrate.core.embedding import get_embedding_engine
-        engine = get_embedding_engine(config.embedding_model, config.embedding_device)
+        engine = get_embedding_engine(
+            config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "swarm_memories", engine)
 
         # 从 ChromaDB 恢复计数
@@ -33,18 +39,24 @@ class SwarmMemory:
         stats_item = self._store.get("_swarm_stats")
         if stats_item:
             saved = stats_item["metadata"]
-            self._stats["total_queries"] = int(saved.get("total_queries", 0))
-            self._stats["total_successes"] = int(saved.get("total_successes", 0))
+            with self._stats_lock:
+                self._stats["total_queries"] = int(
+                    saved.get("total_queries", 0))
+                self._stats["total_successes"] = int(
+                    saved.get("total_successes", 0))
 
     def _flush_stats(self):
         """将统计计数器刷到 ChromaDB"""
         if self._store:
-            self._store.upsert("_swarm_stats", "swarm statistics counter", self._stats)
+            with self._stats_lock:
+                self._store.upsert(
+                    "_swarm_stats", "swarm statistics counter", dict(self._stats))
 
     def flush(self):
         if self._dirty:
             self._flush_stats()
-            self._dirty = False
+            with self._stats_lock:
+                self._dirty = False
 
     # ==================== 写入 ====================
 
@@ -90,8 +102,9 @@ class SwarmMemory:
         }
 
         self._store.add(memory_id, search_text, metadata)
-        self._stats["total"] += 1
-        self._dirty = True
+        with self._stats_lock:
+            self._stats["total"] += 1
+            self._dirty = True
         return memory_id
 
     # ==================== 查询 ====================
@@ -101,8 +114,9 @@ class SwarmMemory:
               project_id: Optional[str] = None,
               source_agent: Optional[str] = None) -> list[dict]:
         """向量语义查询，支持元数据过滤"""
-        self._stats["total_queries"] += 1
-        self._dirty = True
+        with self._stats_lock:
+            self._stats["total_queries"] += 1
+            self._dirty = True
 
         # 构建 ChromaDB where 过滤条件
         conditions = []
@@ -123,7 +137,8 @@ class SwarmMemory:
         # 向量搜索
         from cerebrate.core.embedding import get_embedding_engine
         engine = get_embedding_engine()
-        q_emb = engine.encode_query(query_text) if engine.mode == "bge" else None
+        q_emb = engine.encode_query(
+            query_text) if engine.mode == "bge" else None
 
         # 搜索更多结果以便后过滤（tags 不在 ChromaDB where 中处理）
         raw_results = self._store.search(query_text, top_k=max(limit * 5, 20),
@@ -154,7 +169,8 @@ class SwarmMemory:
             reuse_boost = boost_from_reuse(meta.get("reuse_count", 0),
                                            meta.get("success_count", 0))
             confidence = float(meta.get("confidence", 1.0) or 1.0)
-            final_score = (sem_score * 0.7 + sem_score * decay * 0.2 + reuse_boost) * confidence
+            final_score = (sem_score * 0.7 + sem_score *
+                           decay * 0.2 + reuse_boost) * confidence
 
             results.append({
                 "memory_id": item["id"],
@@ -184,63 +200,66 @@ class SwarmMemory:
         top = results[:limit]
 
         if top and top[0]["score"] > 0.1:
-            self._stats["total_successes"] += 1
+            with self._stats_lock:
+                self._stats["total_successes"] += 1
         return top
 
     # ==================== 反馈 ====================
 
+    def _get_mem_lock(self, memory_id: str) -> threading.Lock:
+        with self._mem_locks_lock:
+            if memory_id not in self._mem_locks:
+                self._mem_locks[memory_id] = threading.Lock()
+            return self._mem_locks[memory_id]
+
     def mark_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
-        item = self._store.get(memory_id)
-        if not item:
-            return
-        meta = item["metadata"]
-        meta["reuse_count"] = meta.get("reuse_count", 0) + 1
-        if success:
-            meta["success_count"] = meta.get("success_count", 0) + 1
-        if feedback:
-            previous = meta.get("evidence", "")
-            meta["evidence"] = (previous + "\n" if previous else "") + feedback[:500]
-        meta["updated"] = datetime.now(timezone.utc).isoformat()
-        meta["score"] = self._calculate_swarm_score(meta)
-        # 重建搜索文本以更新嵌入
-        text = f"{meta.get('title','')}\n{meta.get('content','')}\n{meta.get('problem_solved','')}\n{meta.get('solution','')}"
-        self._store.upsert(memory_id, text, meta)
+        with self._get_mem_lock(memory_id):
+            item = self._store.get(memory_id)
+            if not item:
+                return
+            meta = item["metadata"]
+            meta["reuse_count"] = meta.get("reuse_count", 0) + 1
+            if success:
+                meta["success_count"] = meta.get("success_count", 0) + 1
+            if feedback:
+                previous = meta.get("evidence", "")
+                meta["evidence"] = (
+                    previous + "\n" if previous else "") + feedback[:500]
+            meta["updated"] = datetime.now(timezone.utc).isoformat()
+            meta["score"] = self._calculate_swarm_score(meta)
+            # 重建搜索文本以更新嵌入
+            text = f"{meta.get('title', '')}\n{meta.get('content', '')}\n{meta.get('problem_solved', '')}\n{meta.get('solution', '')}"
+            self._store.upsert(memory_id, text, meta)
 
     # ==================== 统计与列表 ====================
 
     def get_stats(self) -> dict:
-        return dict(self._stats)
+        with self._stats_lock:
+            return dict(self._stats)
 
     def list_categories(self) -> list[str]:
-        # 单次批量查询所有元数据，避免逐条 get
-        result = self._store.get_collection().get(
-            include=["metadatas"], limit=1000,
-        )
+        metadatas = self._store.get_all_metadata(limit=1000)
         cats = set()
-        for meta in (result.get("metadatas") or []):
-            cat = (meta or {}).get("category", "")
+        for meta in metadatas:
+            cat = meta.get("category", "")
             if cat:
                 cats.add(cat)
         return list(cats)
 
     def list_projects(self) -> list[str]:
-        result = self._store.get_collection().get(
-            include=["metadatas"], limit=1000,
-        )
+        metadatas = self._store.get_all_metadata(limit=1000)
         projects = set()
-        for meta in (result.get("metadatas") or []):
-            pid = (meta or {}).get("project_id", "")
+        for meta in metadatas:
+            pid = meta.get("project_id", "")
             if pid:
                 projects.add(pid)
         return list(projects)
 
     def list_tags(self) -> list[str]:
-        result = self._store.get_collection().get(
-            include=["metadatas"], limit=1000,
-        )
+        metadatas = self._store.get_all_metadata(limit=1000)
         tagset = set()
-        for meta in (result.get("metadatas") or []):
-            for t in ((meta or {}).get("tags") or "").split(","):
+        for meta in metadatas:
+            for t in (meta.get("tags") or "").split(","):
                 if t.strip():
                     tagset.add(t.strip())
         return list(tagset)
@@ -276,12 +295,17 @@ class SwarmMemory:
         if not item:
             return False
         self._store.delete(memory_id)
-        self._stats["total"] = max(0, self._stats["total"] - 1)
-        self._dirty = True
+        with self._stats_lock:
+            self._stats["total"] = max(0, self._stats["total"] - 1)
+            self._dirty = True
         return True
 
     def load_memory_raw(self, memory_id: str) -> Optional[dict]:
-        """公共接口: 加载完整记忆元数据 (供进化引擎/元认知使用)."""
+        """公共接口: 加载完整记忆元数据."""
+        return self._load_memory(memory_id)
+
+    def _load_memory(self, memory_id: str) -> Optional[dict]:
+        """内部接口: 加载完整记忆元数据 (供进化引擎/元认知使用)."""
         item = self._store.get(memory_id)
         if not item:
             return None
@@ -292,20 +316,22 @@ class SwarmMemory:
     def update_lifecycle(self, memory_id: str, life_stage: str,
                          confidence: Optional[float] = None,
                          evidence: str = "") -> bool:
-        item = self._store.get(memory_id)
-        if not item or life_stage not in LIFE_STAGES:
-            return False
-        meta = item["metadata"]
-        meta["life_stage"] = life_stage
-        if confidence is not None:
-            meta["confidence"] = float(confidence)
-        if evidence:
-            previous = meta.get("evidence", "")
-            meta["evidence"] = (previous + "\n" if previous else "") + evidence
-        meta["updated"] = datetime.now(timezone.utc).isoformat()
-        text = f"{meta.get('title','')}\n{meta.get('content','')}\n{meta.get('problem_solved','')}\n{meta.get('solution','')}\n{meta.get('evidence','')}"
-        self._store.upsert(memory_id, text, meta)
-        return True
+        with self._get_mem_lock(memory_id):
+            item = self._store.get(memory_id)
+            if not item or life_stage not in LIFE_STAGES:
+                return False
+            meta = item["metadata"]
+            meta["life_stage"] = life_stage
+            if confidence is not None:
+                meta["confidence"] = float(confidence)
+            if evidence:
+                previous = meta.get("evidence", "")
+                meta["evidence"] = (
+                    previous + "\n" if previous else "") + evidence
+            meta["updated"] = datetime.now(timezone.utc).isoformat()
+            text = f"{meta.get('title', '')}\n{meta.get('content', '')}\n{meta.get('problem_solved', '')}\n{meta.get('solution', '')}\n{meta.get('evidence', '')}"
+            self._store.upsert(memory_id, text, meta)
+            return True
 
     def lifecycle_counts(self) -> dict:
         counts = {stage: 0 for stage in sorted(LIFE_STAGES)}

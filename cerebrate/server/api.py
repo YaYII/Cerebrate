@@ -56,17 +56,20 @@ class BrainAPI:
             capabilities=payload.get("capabilities") or [],
             metadata=payload.get("metadata") or {},
         )
-        self.events.append("agent.registered", agent_id, {"agent_id": agent_id})
+        self.events.append("agent.registered", agent_id,
+                           {"agent_id": agent_id})
         return info
 
     def query(self, payload: dict) -> dict:
         query = payload.get("query", "")
         if not query:
             raise ValueError("query is required")
-        user_id = payload.get("user") or payload.get("user_id") or payload.get("agent_id") or "default"
+        user_id = payload.get("user") or payload.get(
+            "user_id") or payload.get("agent_id") or "default"
         project_id = payload.get("project") or payload.get("project_id")
         agent_id = payload.get("agent_id", user_id)
-        decision = DecisionRouter(self.mm).decide(user_id, query, context={"project_id": project_id})
+        decision = DecisionRouter(self.mm).decide(
+            user_id, query, context={"project_id": project_id})
         best = decision.get("swarm_knowledge", {}).get("best_match")
         recommendation = "new_experience"
         task = None
@@ -75,10 +78,12 @@ class BrainAPI:
             memory_id = best.get("memory_id") or best.get("id", "")
             if score > 0.5:
                 recommendation = "reuse"
-                task = self._build_task("reuse_memory", memory_id, agent_id, query)
+                task = self._build_task(
+                    "reuse_memory", memory_id, agent_id, query)
             elif score > 0.2:
                 recommendation = "verify"
-                task = self._build_task("verify_reference", memory_id, agent_id, query)
+                task = self._build_task(
+                    "verify_reference", memory_id, agent_id, query)
         if task is None:
             task = self._build_task("solve_fresh", "", agent_id, query)
         if decision.get("policy_result"):
@@ -308,6 +313,39 @@ class BrainAPI:
                                "capabilities": [], "metadata": {}},
                     "returns": {"agent_id": "string"}
                 },
+                {
+                    "command": "personal get",
+                    "method": "GET",
+                    "path": "/v1/personal",
+                    "description": "读取所有用户的个人偏好",
+                    "params": {},
+                    "returns": {"users": {}}
+                },
+                {
+                    "command": "personal set",
+                    "method": "POST",
+                    "path": "/v1/personal",
+                    "description": "写入用户个人偏好",
+                    "params": {"user": "string (required)", "key": "string (required)",
+                               "value": "string (required)", "confidence": 1.0},
+                    "returns": {"user_id": "string", "key": "string", "stored": True}
+                },
+                {
+                    "command": "batch process",
+                    "method": "POST",
+                    "path": "/v1/batch/process",
+                    "description": "批量处理内存队列",
+                    "params": {"limit": 50, "dry_run": False},
+                    "returns": {"processed": 0, "limit": 50}
+                },
+                {
+                    "command": "events stream",
+                    "method": "GET",
+                    "path": "/v1/events/stream",
+                    "description": "SSE 事件流广播",
+                    "params": {"cursor": 0, "limit": 100, "once": False},
+                    "returns": {"event_stream": "text/event-stream"}
+                },
             ]
         }
 
@@ -321,7 +359,8 @@ class BrainAPI:
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
-        source_agent = payload.get("agent") or payload.get("agent_id") or "unknown"
+        source_agent = payload.get("agent") or payload.get(
+            "agent_id") or "unknown"
         project_id = payload.get("project") or payload.get("project_id", "")
         requested_stage = payload.get("life_stage", "memory")
         life_stage = requested_stage if requested_stage in self.CLIENT_LIFE_STAGES else "memory"
@@ -337,7 +376,8 @@ class BrainAPI:
                 life_stage = "quarantined"
                 confidence = min(confidence, validation.get("quality", 0.1))
                 reason = "; ".join(validation.get("issues", []))
-                evidence = (evidence + "\n" if evidence else "") + f"server immune quarantine: {reason}"
+                evidence = (evidence + "\n" if evidence else "") + \
+                    f"server immune quarantine: {reason}"
 
         memory_id = self.mm.share_to_swarm(
             title=title,
@@ -345,7 +385,8 @@ class BrainAPI:
             category=payload.get("category", "general"),
             tags=tags,
             source_agent=source_agent,
-            problem_solved=payload.get("problem") or payload.get("problem_solved", ""),
+            problem_solved=payload.get(
+                "problem") or payload.get("problem_solved", ""),
             solution=payload.get("solution", ""),
             outcome=payload.get("outcome", "success"),
             project_id=project_id,
@@ -376,7 +417,8 @@ class BrainAPI:
             memory_id, agent_id, problem,
             project_id=payload.get("project") or payload.get("project_id", ""),
         )
-        self.events.append("usage.started", agent_id, record, record.get("project_id", ""))
+        self.events.append("usage.started", agent_id, record,
+                           record.get("project_id", ""))
         return record
 
     def finish_usage(self, payload: dict) -> dict:
@@ -384,7 +426,8 @@ class BrainAPI:
         outcome = payload.get("outcome")
         if not usage_id or not outcome:
             raise ValueError("usage_id and outcome are required")
-        record = self.mm.finish_memory_use(usage_id, outcome, payload.get("feedback", ""))
+        record = self.mm.finish_memory_use(
+            usage_id, outcome, payload.get("feedback", ""))
         self.events.append("usage.finished", record.get("agent_id", "unknown"),
                            record, record.get("project_id", ""))
         return record
@@ -394,7 +437,8 @@ class BrainAPI:
         agent_id = payload.get("agent") or payload.get("agent_id")
         vote = payload.get("vote")
         if not memory_id or not agent_id or vote not in {"support", "oppose", "abstain"}:
-            raise ValueError("memory_id, agent_id, and vote=support|oppose|abstain are required")
+            raise ValueError(
+                "memory_id, agent_id, and vote=support|oppose|abstain are required")
         event = self.events.append("consensus.vote", agent_id, {
             "memory_id": memory_id,
             "vote": vote,
@@ -402,7 +446,8 @@ class BrainAPI:
             "confidence": float(payload.get("confidence", 1.0)),
         }, payload.get("project") or payload.get("project_id", ""))
         self.mm.record_agent_action(agent_id, "consensus_vote",
-                                    payload.get("project") or payload.get("project_id", ""),
+                                    payload.get("project") or payload.get(
+                                        "project_id", ""),
                                     "success", event["payload"])
         snapshot = self.consensus_snapshot(memory_id, apply=True)
         event["consensus"] = snapshot
@@ -515,7 +560,8 @@ class BrainAPI:
     def _vote_weight(self, agent_id: str, payload: dict) -> float:
         confidence = max(0.0, min(float(payload.get("confidence", 1.0)), 1.0))
         stats = self.mm.agents.get_stats(agent_id) or {}
-        success_rate = max(0.0, min(float(stats.get("success_rate", 0.0)), 1.0))
+        success_rate = max(
+            0.0, min(float(stats.get("success_rate", 0.0)), 1.0))
         reliability = 0.75 + success_rate * 0.5
         evidence = payload.get("evidence", "") or ""
         evidence_bonus = 0.15 if len(evidence.strip()) >= 12 else 0.0
@@ -527,7 +573,8 @@ class BrainAPI:
             changed = self.mm.swarm.update_lifecycle(
                 memory_id,
                 "verified_skill",
-                confidence=max(float(memory.get("confidence", 0.0) or 0.0), 0.85),
+                confidence=max(
+                    float(memory.get("confidence", 0.0) or 0.0), 0.85),
                 evidence=f"server consensus accepted: {snapshot['votes']} votes, weighted={snapshot['weighted']}",
             )
             if changed:
@@ -542,7 +589,8 @@ class BrainAPI:
             changed = self.mm.swarm.update_lifecycle(
                 memory_id,
                 "quarantined",
-                confidence=min(float(memory.get("confidence", 1.0) or 1.0), 0.2),
+                confidence=min(
+                    float(memory.get("confidence", 1.0) or 1.0), 0.2),
                 evidence=f"server consensus rejected: {snapshot['votes']} votes, weighted={snapshot['weighted']}",
             )
             if changed:
@@ -567,6 +615,7 @@ class BrainAPI:
             if memory and memory.get("life_stage") == "doctrine":
                 doctrines.append(memory)
         return {"doctrines": doctrines, "count": len(doctrines)}
+
     def get_personal(self) -> dict:
         """Get personal preferences, equivalent to v3 recall."""
         users = self.mm.personal.list_users()
@@ -586,7 +635,8 @@ class BrainAPI:
             raise ValueError("user/user_id, key, and value are required")
         project_id = payload.get("project") or payload.get("project_id", "")
         conf = float(payload.get("confidence", 1.0))
-        self.mm.remember_user(user_id, key, value, confidence=conf, project_id=project_id)
+        self.mm.remember_user(user_id, key, value,
+                              confidence=conf, project_id=project_id)
         return {"user_id": user_id, "key": key, "stored": True}
 
     def batch_process(self, payload: dict) -> dict:
@@ -601,13 +651,12 @@ class BrainAPI:
                 continue
             if not dry_run:
                 # re-index through swarm's public API
-                self.mm.swarm.mark_reused(mid, success=None, feedback="batch-rescore")
+                self.mm.swarm.mark_reused(
+                    mid, success=None, feedback="batch-rescore")
             processed += 1
         if not dry_run:
             self.mm.flush_all()
         return {"processed": processed, "limit": limit, "dry_run": dry_run}
-
-
 
     def evolve(self) -> dict:
         result = EvolutionEngine(config.evolution_path, self.mm).evolve()

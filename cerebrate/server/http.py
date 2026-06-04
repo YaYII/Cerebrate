@@ -2,6 +2,7 @@
 
 import json
 import signal
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,8 +41,12 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                 return
             data = self._dispatch(method, path, params)
             self._send_json(ok(data, protocol="v5"))
+        except KeyError as e:
+            self._send_json(err(str(e), code=404, protocol="v5"),
+                            HTTPStatus.NOT_FOUND)
         except ValueError as e:
-            self._send_json(err(str(e), code=400, protocol="v5"), HTTPStatus.BAD_REQUEST)
+            self._send_json(err(str(e), code=400, protocol="v5"),
+                            HTTPStatus.BAD_REQUEST)
         except Exception as e:
             self._send_json(err(str(e), code=500, protocol="v5",
                                 exception=e.__class__.__name__),
@@ -112,34 +117,52 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    _sse_semaphore = threading.BoundedSemaphore(5)  # 限制 SSE 并发连接数
+    _sse_idle_timeout = 300  # 5 分钟无推送自动断开
+
     def _handle_sse(self, params: dict):
         cursor = int((params.get("cursor") or ["0"])[0])
         limit = int((params.get("limit") or ["100"])[0])
         once = (params.get("once") or ["false"])[0].lower() == "true"
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
-        self.end_headers()
-
-        while True:
-            events = self.api.events.read_after(cursor, limit)
-            for event in events:
-                cursor = max(cursor, int(event.get("event_id", 0)))
-                frame = (
-                    f"id: {event['event_id']}\n"
-                    f"event: {event['event_type']}\n"
-                    f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                )
-                try:
-                    self.wfile.write(frame.encode("utf-8"))
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    return
-            if once:
-                self.close_connection = True
+        if not once:
+            if not self._sse_semaphore.acquire(blocking=False):
+                self.send_error(503, "Too many SSE connections")
                 return
-            time.sleep(1.0)
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header(
+                "Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+
+            idle_start = time.monotonic()
+            while True:
+                events = self.api.events.read_after(cursor, limit)
+                if events:
+                    idle_start = time.monotonic()
+                for event in events:
+                    cursor = max(cursor, int(event.get("event_id", 0)))
+                    frame = (
+                        f"id: {event['event_id']}\n"
+                        f"event: {event['event_type']}\n"
+                        f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    )
+                    try:
+                        self.wfile.write(frame.encode("utf-8"))
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+                if once:
+                    self.close_connection = True
+                    return
+                # 空闲超时检测
+                if time.monotonic() - idle_start > self._sse_idle_timeout:
+                    return
+                time.sleep(1.0)
+        finally:
+            if not once:
+                self._sse_semaphore.release()
 
 
 def create_server(host: str = "", port: int = 0, quiet: bool = False) -> ThreadingHTTPServer:
@@ -155,8 +178,6 @@ def serve(host: str = "", port: int = 0, quiet: bool = False):
     server = create_server(host, port, quiet)
     actual_host, actual_port = server.server_address
     print(json.dumps(ok({
-        "host": actual_host,
-        "port": actual_port,
         "base_url": f"http://{actual_host}:{actual_port}",
     }, protocol="v5"), ensure_ascii=False), flush=True)
     # 忽略 SIGPIPE，防止客户端断连时进程退出

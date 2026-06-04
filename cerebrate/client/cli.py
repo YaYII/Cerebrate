@@ -14,7 +14,8 @@ def client_request(url: str, method: str, path: str, body: dict = None) -> dict:
     headers = {"Content-Type": "application/json"}
     if body:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(full_url, data=data, headers=headers, method=method)
+    req = urllib.request.Request(
+        full_url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -94,7 +95,7 @@ def cmd_register(args):
 
 def cmd_events(args):
     output(client_request(args.url, "GET",
-        f"/v1/events?cursor={args.cursor}&limit={args.limit}"))
+                          f"/v1/events?cursor={args.cursor}&limit={args.limit}"))
 
 
 def cmd_doctrines(args):
@@ -111,8 +112,42 @@ def cmd_vote(args):
     }))
 
 
+def cmd_use_start(args):
+    output(client_request(args.url, "POST", "/v1/usages/start", {
+        "memory_id": args.memory_id,
+        "agent": args.agent_id or args.id or "cli",
+        "problem": args.problem,
+        "project_id": args.project or "",
+    }))
+
+
+def cmd_use_finish(args):
+    output(client_request(args.url, "POST", "/v1/usages/finish", {
+        "usage_id": args.usage_id,
+        "outcome": args.outcome,
+        "feedback": args.feedback or "",
+    }))
+
+
+def cmd_llm_status(args):
+    output(client_request(args.url, "GET", "/v1/llm/status"))
+
+
+def cmd_brain_assess(args):
+    output(client_request(args.url, "GET", "/v1/brain/assess"))
+
+
+def cmd_consensus(args):
+    output(client_request(args.url, "GET", f"/v1/consensus/{args.memory_id}"))
+
+
+def cmd_memory_get(args):
+    output(client_request(args.url, "GET", f"/v1/memories/{args.memory_id}"))
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Cerebrate v5 — HTTP Client CLI")
+    parser = argparse.ArgumentParser(
+        description="Cerebrate v5 — HTTP Client CLI")
     parser.add_argument("--url", default="http://127.0.0.1:8765",
                         help="Brain Server URL (default: http://127.0.0.1:8765)")
     sub = parser.add_subparsers(dest="command")
@@ -177,12 +212,48 @@ def main(argv=None):
 
     p = sub.add_parser("vote", help="共识投票")
     p.add_argument("--memory-id", required=True)
-    p.add_argument("--vote", required=True, choices=["support", "oppose", "abstain"])
+    p.add_argument("--vote", required=True,
+                   choices=["support", "oppose", "abstain"])
     p.add_argument("--id", default="cli")
     p.add_argument("--agent-id", default="")
     p.add_argument("--evidence", default="")
     p.add_argument("--confidence", type=float, default=1.0)
     p.set_defaults(func=cmd_vote)
+
+    # use start / use finish
+    p = sub.add_parser("use", help="记忆复用追踪")
+    use_sub = p.add_subparsers(dest="use_command")
+    ps = use_sub.add_parser("start", help="开始追踪记忆复用")
+    ps.add_argument("--memory-id", required=True)
+    ps.add_argument("--id", default="cli")
+    ps.add_argument("--agent-id", default="")
+    ps.add_argument("--problem", required=True)
+    ps.add_argument("--project", default="")
+    ps.set_defaults(func=cmd_use_start)
+    pf = use_sub.add_parser("finish", help="完成记忆复用追踪")
+    pf.add_argument("--usage-id", required=True)
+    pf.add_argument("--outcome", required=True,
+                    choices=["success", "partial", "failure"])
+    pf.add_argument("--feedback", default="")
+    pf.set_defaults(func=cmd_use_finish)
+
+    p = sub.add_parser("llm", help="LLM 状态查询")
+    llm_sub = p.add_subparsers(dest="llm_command")
+    pl = llm_sub.add_parser("status", help="查看 LLM 状态")
+    pl.set_defaults(func=cmd_llm_status)
+
+    p = sub.add_parser("brain", help="脑虫评估")
+    brain_sub = p.add_subparsers(dest="brain_command")
+    pb = brain_sub.add_parser("assess", help="元认知评估")
+    pb.set_defaults(func=cmd_brain_assess)
+
+    p = sub.add_parser("consensus", help="读取共识快照")
+    p.add_argument("--memory-id", required=True)
+    p.set_defaults(func=cmd_consensus)
+
+    p = sub.add_parser("memory-get", help="读取指定记忆")
+    p.add_argument("--memory-id", required=True)
+    p.set_defaults(func=cmd_memory_get)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
@@ -193,4 +264,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-
