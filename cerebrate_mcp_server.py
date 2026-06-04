@@ -4,6 +4,7 @@ Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务
 
 直接导入 BrainAPI 作为本地库调用，无需额外 HTTP 服务。
 """
+from server.api import BrainAPI
 import json
 import sys
 import os
@@ -13,10 +14,10 @@ import time
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, '.')
 
-from server.api import BrainAPI
 
 # ── BrainAPI 单例（首次调用会加载 embedding 模型，约 10s） ──
 _api: BrainAPI | None = None
+
 
 def _get_api() -> BrainAPI:
     global _api
@@ -25,6 +26,7 @@ def _get_api() -> BrainAPI:
     return _api
 
 # ── 工具定义 ────────────────────────────────────────────────
+
 
 TOOLS = [
     {
@@ -69,7 +71,7 @@ TOOLS = [
             "properties": {
                 "title": {"type": "string", "description": "记忆标题"},
                 "content": {"type": "string", "description": "详细内容：场景、排查、根因、方案、验证、命令"},
-                "category": {"type": "string", "enum": ["coding","debugging","architecture","devops","performance","security","testing","config","skill"]},
+                "category": {"type": "string", "enum": ["coding", "debugging", "architecture", "devops", "performance", "security", "testing", "config", "skill"]},
                 "tags": {"type": "string", "description": "逗号分隔的标签"},
                 "agent_id": {"type": "string", "description": "代理标识", "default": "codex"},
                 "problem": {"type": "string", "description": "原始问题"},
@@ -183,6 +185,7 @@ TOOLS = [
 ]
 
 # ── 工具调用实现 ────────────────────────────────────────────
+
 
 def _handle_call(name: str, args: dict) -> dict:
     api = _get_api()
@@ -374,6 +377,7 @@ def main():
                 "id": req_id,
                 "error": {"code": -1, "message": f"未知方法: {method}"}
             })
+
 
 if __name__ == "__main__":
     main()
