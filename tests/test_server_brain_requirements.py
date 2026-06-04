@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 def configure_temp_memory(tmp_name):
-    from config import config
-    import memory.embedding as embedding
+    from cerebrate.config import config
+    import cerebrate.core.embedding as embedding
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -15,9 +15,9 @@ def configure_temp_memory(tmp_name):
     config.knowledge_path = root / "knowledge"
     config.evolution_path = root / "evolution"
     config.agents_path = root / "agents"
-    config.archive_path = root / ".archived"
-    config.seeds_path = root / "seeds"
-    config.usage_path = root / "usage"
+    # config.archive_path removed (v6 chroma-only) ".archived"
+    # config.seeds_path removed (v6 chroma-only) "seeds"
+    # config.usage_path removed (v6 chroma-only) "usage"
     config.events_path = root / "events"
     config.chroma_path = root / "chroma_data"
     config.embedding_model = "not-a-real-local-model"
@@ -29,7 +29,7 @@ class BrainServerRequirementTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         configure_temp_memory(self.tmp.name)
-        from server.api import BrainAPI
+        from cerebrate.server.api import BrainAPI
         self.api = BrainAPI()
 
     def tearDown(self):

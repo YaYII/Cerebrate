@@ -64,6 +64,9 @@ python3 cerebrate.py serve --host 127.0.0.1 --port 8765
 - `GET /v1/doctrines`
 - `POST /v1/evolve`
 
+- `GET /v1/personal` (个人偏好读取)
+- `POST /v1/personal` (个人偏好写入: {"user":"...", "key":"...", "value":"..."})
+- `POST /v1/batch/process` (批量处理: {"limit":50})
 ## CLI 客户端
 
 ```bash

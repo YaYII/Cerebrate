@@ -125,6 +125,35 @@ python3 cerebrate.py llm status --url http://127.0.0.1:8765
 - `rule-only` 仍会执行危险命令、SQL/XSS、低质量内容和基础标签检测。
 - LLM 主要负责深度质量审核、标签建议、摘要和知识冲突检测；最终写入、晋升和隔离仍由服务端规则裁决。
 
+
+## ChromaDB Collection 命名与 Embedding 模式
+
+ChromaDB collection 名称带 embedding 模式后缀，例如：
+
+- `swarm_memories_bge` — BGE 模型可用时
+- `swarm_memories_hash` — BGE 不可用，回退到 deterministic hash
+
+当 BGE 可用/不可用状态切换时（例如装了 sentence-transformers 后又卸载，或不慎删除了模型），服务端会使用另一个 collection，之前的数据不会丢失但暂不可见。这是设计行为，不是 bug。
+
+如果要切换 embedding 模式并保留数据，先用 `python3 cerebrate.py migrate --export-seeds` 导出种子，切换后 `python3 cerebrate.py migrate --reindex` 重建索引。
+
+## 包目录结构
+
+```
+cerebrate.py          # 统一入口: serve/migrate -> server.cli, 其余 -> client.cli
+server/               # 脑虫服务端: http.py, api.py, cli.py, brain.py, llm.py, events.py, decision.py
+client/               # 客户端: cli.py (HTTP 客户端), node/ (Node.js 客户端)
+memory/               # 记忆内核: swarm.py, personal.py, knowledge.py, embedding.py, storage.py, evolution.py, agents.py, decay.py, manager.py
+config.py             # 全局配置 (支持 .env)
+protocol.py           # 协议辅助: ok(), err()
+migrate.py            # 迁移与种子管理
+tests/                # 测试
+```
+
+`memory/` 是服务端内部器官，客户端不得直接依赖或写入。
+`cerebrate_mcp_server.py` 是 MCP 协议的独立包装，不依赖上述目录结构。
+
+
 ## 事件日志
 
 服务端将事实追加到 `memory/events/events.jsonl`。

@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 def configure_temp_memory(tmp_name):
-    from config import config
-    import memory.embedding as embedding
+    from cerebrate.config import config
+    import cerebrate.core.embedding as embedding
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -15,9 +15,9 @@ def configure_temp_memory(tmp_name):
     config.knowledge_path = root / "knowledge"
     config.evolution_path = root / "evolution"
     config.agents_path = root / "agents"
-    config.archive_path = root / ".archived"
-    config.seeds_path = root / "seeds"
-    config.usage_path = root / "usage"
+    # config.archive_path removed (v6 chroma-only) ".archived"
+    # config.seeds_path removed (v6 chroma-only) "seeds"
+    # config.usage_path removed (v6 chroma-only) "usage"
     config.events_path = root / "events"
     config.chroma_path = root / "chroma_data"
     config.embedding_model = "not-a-real-local-model"
@@ -34,8 +34,8 @@ class MemoryVectorKernelTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_memory_layers_use_hash_vector_collections(self):
-        from config import config
-        from memory.manager import MemoryManager
+        from cerebrate.config import config
+        from cerebrate.memory.manager import MemoryManager
 
         mm = MemoryManager(config.personal_path, config.swarm_path, config.knowledge_path)
 
@@ -78,13 +78,13 @@ class MemoryVectorKernelTests(unittest.TestCase):
         self.assertEqual(stats["vector"]["kb_docs"], 1)
 
     def test_legacy_semantic_index_code_is_not_exposed(self):
-        from config import config
+        from cerebrate.config import config
 
         self.assertIsNone(importlib.util.find_spec("memory.semantic"))
         self.assertFalse(hasattr(config, "semantic_index_path"))
 
     def test_brain_sense_reports_vector_index(self):
-        from server.api import BrainAPI
+        from cerebrate.server.api import BrainAPI
 
         api = BrainAPI()
         sense = api.sense()
