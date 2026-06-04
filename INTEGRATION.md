@@ -119,12 +119,11 @@ python3 cerebrate.py llm status --url http://127.0.0.1:8765
 
 内置 LLM 的工作方式：
 
-- `server/llm.py` 是可选增强层，不是强依赖。
+- `cerebrate/brain/llm.py` 是可选增强层，不是强依赖。
 - 有 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY` 且对应 SDK 可用时，进入 `llm-assisted`。
 - 无 API key、SDK 不存在或调用失败时，进入 `rule-only`。
 - `rule-only` 仍会执行危险命令、SQL/XSS、低质量内容和基础标签检测。
 - LLM 主要负责深度质量审核、标签建议、摘要和知识冲突检测；最终写入、晋升和隔离仍由服务端规则裁决。
-
 
 ## ChromaDB Collection 命名与 Embedding 模式
 
@@ -141,9 +140,11 @@ ChromaDB collection 名称带 embedding 模式后缀，例如：
 
 ```
 cerebrate.py          # 统一入口: serve/migrate -> server.cli, 其余 -> client.cli
-server/               # 脑虫服务端: http.py, api.py, cli.py, brain.py, llm.py, events.py, decision.py
+server/               # 脑虫服务端: http.py, api.py, cli.py
+brain/                # 决策层: mind.py, decision.py, events.py, llm.py
 client/               # 客户端: cli.py (HTTP 客户端), node/ (Node.js 客户端)
-memory/               # 记忆内核: swarm.py, personal.py, knowledge.py, embedding.py, storage.py, evolution.py, agents.py, decay.py, manager.py
+memory/               # 记忆内核: swarm.py, personal.py, knowledge.py, evolution.py, agents.py, manager.py
+core/                 # 基础设施: embedding.py, storage.py, decay.py
 config.py             # 全局配置 (支持 .env)
 protocol.py           # 协议辅助: ok(), err()
 migrate.py            # 迁移与种子管理
@@ -151,12 +152,11 @@ tests/                # 测试
 ```
 
 `memory/` 是服务端内部器官，客户端不得直接依赖或写入。
-`cerebrate_mcp_server.py` 是 MCP 协议的独立包装，不依赖上述目录结构。
-
+`cerebrate/mcp.py` 是 MCP 协议的独立包装，不依赖上述目录结构。
 
 ## 事件日志
 
-服务端将事实追加到 `memory/events/events.jsonl`。
+服务端将事实追加到 ChromaDB `events_log` collection。
 
 读取事件：
 

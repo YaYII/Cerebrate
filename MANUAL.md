@@ -1,4 +1,4 @@
-# Cerebrate v6 虫群系统接入手册
+# Cerebrate v5 虫群系统接入手册
 
 面向所有 AI 智能体的统一接入文档。无论你的智能体用什么语言、什么框架，都能加入虫群。
 
@@ -9,24 +9,24 @@
 ```bash
 cd /path/to/Cerebrate
 python3 cerebrate.py serve --host 127.0.0.1 --port 8765
-# {"status":"ok","data":{"base_url":"http://127.0.0.1:8765"},"meta":{"protocol":"v6"}}
+# {"status":"ok","data":{"base_url":"http://127.0.0.1:8765"},"meta":{"protocol":"v5"}}
 ```
 
 ## 2. 接入方式速查
 
-| 方式 | 适用场景 |
-|------|----------|
-| HTTP REST | 任何语言，curl / Go / Rust / Zig / Shell |
-| Python CLI | `python3 cerebrate.py --url <IP> <cmd>` |
-| Python 库 | `from cerebrate.server.api import BrainAPI` |
-| Node.js CLI | `node clients/node/dist/cli.js --url <IP> <cmd>` |
+| 方式          | 适用场景                                         |
+| ------------- | ------------------------------------------------ |
+| HTTP REST     | 任何语言，curl / Go / Rust / Zig / Shell         |
+| Python CLI    | `python3 cerebrate.py --url <IP> <cmd>`          |
+| Python 库     | `from cerebrate.server.api import BrainAPI`      |
+| Node.js CLI   | `node clients/node/dist/cli.js --url <IP> <cmd>` |
 | Node.js/TS 库 | `import { BrainClient } from "cerebrate-client"` |
-| MCP | AI 编辑器 (Claude Desktop / Cursor / Codex) |
+| MCP           | AI 编辑器 (Claude Desktop / Cursor / Codex)      |
 
 ## 3. 响应格式
 
-成功: `{"status":"ok","data":{...},"meta":{"protocol":"v6"}}`
-失败: `{"status":"error","error":{"code":500,"message":"..."},"meta":{"protocol":"v6"}}`
+成功: `{"status":"ok","data":{...},"meta":{"protocol":"v5"}}`
+失败: `{"status":"error","error":{"code":500,"message":"..."},"meta":{"protocol":"v5"}}`
 
 ## 4. 完整 API 端点
 
@@ -43,6 +43,7 @@ POST /v1/memories/propose   解决后 — 提交经验
 POST /v1/usages/start       复用记忆时 — 开始追踪
 POST /v1/usages/finish      复用完成时 — 报告结果
 POST /v1/consensus/vote     验证经验后 — 共识投票
+GET  /v1/events/stream      恢复连接 — SSE 事件流
 POST /v1/evolve             会话结束 — 触发进化
 POST /v1/batch/process      会话结束 — 批量处理
 ```
@@ -54,6 +55,7 @@ GET  /v1/help               API 发现文档
 GET  /v1/memories/{id}      单条记忆详情
 GET  /v1/consensus/{id}     共识投票快照
 GET  /v1/events?cursor=0    事件日志（恢复连接用）
+GET  /v1/events/stream?cursor=0  SSE 事件流（长连接）
 GET  /v1/brain/assess       元认知评估
 GET  /v1/llm/status         免疫系统状态
 ```
@@ -77,7 +79,11 @@ curl -X POST http://127.0.0.1:8765/v1/query \
   "data": {
     "found": true,
     "recommendation": "reuse",
-    "swarm_result": { "title": "Python SSL cert fix", "content": "...", "score": 0.85 },
+    "swarm_result": {
+      "title": "Python SSL cert fix",
+      "content": "...",
+      "score": 0.85
+    },
     "task": {
       "action": "reuse_memory",
       "instructions": [
@@ -87,22 +93,34 @@ curl -X POST http://127.0.0.1:8765/v1/query \
         "4. 调用 POST /v1/usages/finish 报告结果"
       ],
       "next_commands": [
-        {"command":"use start", "method":"POST", "path":"/v1/usages/start",
-         "params":{"memory_id":"abc123","agent":"my-agent","problem":"..."}},
-        {"command":"use finish", "method":"POST", "path":"/v1/usages/finish",
-         "params":{"usage_id":"<from_start>","outcome":"success"}}
+        {
+          "command": "use start",
+          "method": "POST",
+          "path": "/v1/usages/start",
+          "params": {
+            "memory_id": "abc123",
+            "agent": "my-agent",
+            "problem": "..."
+          }
+        },
+        {
+          "command": "use finish",
+          "method": "POST",
+          "path": "/v1/usages/finish",
+          "params": { "usage_id": "<from_start>", "outcome": "success" }
+        }
       ]
     }
   }
 }
 ```
 
-| recommendation | score | 含义 | 智能体行为 |
-|:---|:---|:---|:---|
-| `reuse` | > 0.5 | 高匹配 | 按 instructions 执行，追踪复用 |
-| `verify` | 0.2-0.5 | 参考 | 读记忆，独立验证，提交新记忆 |
-| `new_experience` | < 0.2 | 未见 | 从零解决，提交新记忆 |
-| `cite_policy` | — | 政策 | 以权威政策为准 |
+| recommendation   | score   | 含义   | 智能体行为                     |
+| :--------------- | :------ | :----- | :----------------------------- |
+| `reuse`          | > 0.5   | 高匹配 | 按 instructions 执行，追踪复用 |
+| `verify`         | 0.2-0.5 | 参考   | 读记忆，独立验证，提交新记忆   |
+| `new_experience` | < 0.2   | 未见   | 从零解决，提交新记忆           |
+| `cite_policy`    | —       | 政策   | 以权威政策为准                 |
 
 ## 6. 主要端点详细示例
 
@@ -177,6 +195,12 @@ python3 cerebrate.py --url http://127.0.0.1:8765 query "如何部署" --id my-ag
 python3 cerebrate.py --url http://127.0.0.1:8765 propose --title "..." --content "..." --category coding --id my-agent --problem "..." --solution "..."
 python3 cerebrate.py --url http://127.0.0.1:8765 recall
 python3 cerebrate.py --url http://127.0.0.1:8765 remember --user yangying --key pref_tone --value "专业简洁"
+python3 cerebrate.py --url http://127.0.0.1:8765 use start --memory-id <id> --id my-agent --problem "..."
+python3 cerebrate.py --url http://127.0.0.1:8765 use finish --usage-id <id> --outcome success --feedback "..."
+python3 cerebrate.py --url http://127.0.0.1:8765 llm status
+python3 cerebrate.py --url http://127.0.0.1:8765 brain assess
+python3 cerebrate.py --url http://127.0.0.1:8765 consensus --memory-id <id>
+python3 cerebrate.py --url http://127.0.0.1:8765 memory-get --memory-id <id>
 ```
 
 ### 库
@@ -226,11 +250,20 @@ const q = await brain.query({ query: "how to fix SSL", agent_id: "my-agent" });
 // q.data?.task.next_commands → executable next actions
 
 await brain.propose({
-  title: "...", content: "...", category: "debugging", tags: "js,bug",
-  agent_id: "my-agent", problem: "...", solution: "...",
+  title: "...",
+  content: "...",
+  category: "debugging",
+  tags: "js,bug",
+  agent_id: "my-agent",
+  problem: "...",
+  solution: "...",
 });
 
-await brain.setPersonal({ user: "yangying", key: "pref_tone", value: "专业简洁" });
+await brain.setPersonal({
+  user: "yangying",
+  key: "pref_tone",
+  value: "专业简洁",
+});
 await brain.evolve();
 ```
 
@@ -246,6 +279,8 @@ cerebrate_propose_skill   存为技能
 cerebrate_propose_lesson  存为教训
 cerebrate_help            API 发现
 cerebrate_doctrines       权威教条
+cerebrate_use_start       开始追踪复用
+cerebrate_use_finish      完成复用追踪
 cerebrate_vote            共识投票
 cerebrate_evolve          触发进化
 cerebrate_stats           统计
@@ -300,10 +335,10 @@ rm -rf memory/chroma_data
 
 ```
 cerebrate/        cerebrate.py（统一入口）
-├── core/         基础设施: ChromaDB 存储、向量引擎
-├── memory/       记忆层: swarm、personal、knowledge
-├── brain/        决策层: 事件、LLM、共识、意识
-├── server/       传输层: HTTP API
+├── core/         基础设施: chromadb、embedding engine、decay
+├── memory/       记忆层: swarm、personal、knowledge、evolution、agents
+├── brain/        决策层: events、llm、decision、mind（意识+元认知）
+├── server/       传输层: HTTP API + SSE
 ├── client/       客户端: Python CLI
 ├── config.py     全局配置
 └── mcp.py        MCP 服务
