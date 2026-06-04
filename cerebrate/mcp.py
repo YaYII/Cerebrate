@@ -183,6 +183,34 @@ TOOLS = [
         "name": "cerebrate_stats",
         "description": "查看虫群系统统计信息：记忆数、代理数、共识状态等。",
         "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "cerebrate_recall",
+        "description": "【会话开始调用】读取个人偏好和上下文缓存。",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "cerebrate_remember",
+        "description": "【学到偏好时调用】写入个人偏好: user/key/value。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user": {"type": "string", "description": "用户ID", "default": "yangying"},
+                "key": {"type": "string", "description": "偏好键名"},
+                "value": {"type": "string", "description": "偏好值"}
+            },
+            "required": ["key", "value"]
+        }
+    },
+    {
+        "name": "cerebrate_batch_process",
+        "description": "【会话结束时调用】批量处理 IPC 队列中的待办请求。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "最大处理数量", "default": 50}
+            }
+        }
     }
 ]
 
@@ -309,6 +337,23 @@ def _handle_call(name: str, args: dict) -> dict:
                 "consensus": sense.get("consensus", {}),
                 "health": sense.get("health", "unknown"),
             }}
+
+        elif name == "cerebrate_recall":
+            return {"status": "ok", "data": api.get_personal()}
+
+        elif name == "cerebrate_remember":
+            result = api.set_personal({
+                "user": args.get("user", "yangying"),
+                "key": args["key"],
+                "value": args["value"]
+            })
+            return {"status": "ok", "data": result}
+
+        elif name == "cerebrate_batch_process":
+            result = api.batch_process({
+                "limit": args.get("limit", 50)
+            })
+            return {"status": "ok", "data": result}
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}
