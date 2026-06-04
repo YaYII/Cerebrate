@@ -47,10 +47,8 @@ class EmbeddingEngine:
                 kwargs["local_files_only"] = True
             self._model = SentenceTransformer(self.model_name, **kwargs)
             self._mode = "bge"
-            try:
-                dim = self._model.get_embedding_dimension()
-            except AttributeError:
-                dim = self._model.get_sentence_embedding_dimension()
+            dim = getattr(self._model, 'get_embedding_dimension',
+                         getattr(self._model, 'get_sentence_embedding_dimension', lambda: 384))()
             self._dimension = dim
             logger.info(f"嵌入引擎: BGE ({self.model_name}, {dim}维)")
         except Exception as e:
@@ -70,7 +68,8 @@ class EmbeddingEngine:
     @property
     def dimension(self) -> int:
         if self._mode == "bge" and self._model:
-            return self._model.get_sentence_embedding_dimension()
+            return getattr(self._model, 'get_embedding_dimension',
+                          getattr(self._model, 'get_sentence_embedding_dimension', lambda: self._dimension))()
         return self._dimension
 
     def encode(self, texts: list[str]) -> list[list[float]]:
@@ -178,10 +177,8 @@ class EmbeddingEngine:
                 kwargs["local_files_only"] = True
             self._model = SentenceTransformer(self.model_name, **kwargs)
             self._mode = "bge"
-            try:
-                dim = self._model.get_embedding_dimension()
-            except AttributeError:
-                dim = self._model.get_sentence_embedding_dimension()
+            dim = getattr(self._model, 'get_embedding_dimension',
+                         getattr(self._model, 'get_sentence_embedding_dimension', lambda: 384))()
             self._dimension = dim
             logger.info(f"嵌入引擎: BGE ({self.model_name}, {dim}维)")
         except Exception as e:
@@ -201,7 +198,8 @@ class EmbeddingEngine:
     @property
     def dimension(self) -> int:
         if self._mode == "bge" and self._model:
-            return self._model.get_sentence_embedding_dimension()
+            return getattr(self._model, 'get_embedding_dimension',
+                          getattr(self._model, 'get_sentence_embedding_dimension', lambda: self._dimension))()
         return self._dimension
 
     def encode(self, texts: list[str]) -> list[list[float]]:

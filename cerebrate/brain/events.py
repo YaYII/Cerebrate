@@ -7,7 +7,6 @@ truth for memory continuity, consensus votes, and brain state changes.
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from cerebrate.config import config
@@ -35,7 +34,6 @@ class EventLog:
     """Append-only event log backed by ChromaDB with resumable event ids."""
 
     def __init__(self, root: Optional[Path] = None):
-        self.root = root or config.events_path
         self._store: Optional[ChromaStore] = None
         self._init_store()
 

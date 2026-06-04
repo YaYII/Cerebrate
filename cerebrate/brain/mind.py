@@ -121,7 +121,7 @@ class CerebrateMind:
                 if history:
                     return history[-1].get("timestamp", "")
         except Exception:
-            pass
+            pass  # ChromaDB may be temporarily busy; safe to skip
         return ""
 
     def evolve(self):

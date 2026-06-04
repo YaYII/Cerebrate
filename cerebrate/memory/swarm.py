@@ -280,8 +280,8 @@ class SwarmMemory:
         self._dirty = True
         return True
 
-    def _load_memory(self, memory_id: str) -> Optional[dict]:
-        """兼容进化引擎的内部接口"""
+    def load_memory_raw(self, memory_id: str) -> Optional[dict]:
+        """公共接口: 加载完整记忆元数据 (供进化引擎/元认知使用)."""
         item = self._store.get(memory_id)
         if not item:
             return None

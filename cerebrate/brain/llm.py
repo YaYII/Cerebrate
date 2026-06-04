@@ -9,6 +9,7 @@
 import json
 import os
 import re
+import time
 from typing import Optional
 
 from cerebrate.config import config
@@ -39,9 +40,12 @@ class CerebrateLLM:
         return self._available
 
     def _sdk_ready(self) -> bool:
-        """检查 SDK 是否可正常导入和初始化"""
+        """检查 SDK 是否可正常导入和初始化（失败后有 5 分钟冷却期）。"""
         if self._sdk_available is not None:
-            return self._sdk_available
+            age = time.time() - self._sdk_checked_at if hasattr(self, '_sdk_checked_at') else 999
+            if self._sdk_available or age < 300:
+                return self._sdk_available
+        self._sdk_checked_at = time.time()
         try:
             if self._provider == "anthropic":
                 import anthropic
@@ -54,7 +58,6 @@ class CerebrateLLM:
                 return False
             self._sdk_available = True
         except (ImportError, Exception):
-            # 捕获所有异常：SDK 不可用、API Key 无效、网络错误等
             self._sdk_available = False
         return self._sdk_available
 

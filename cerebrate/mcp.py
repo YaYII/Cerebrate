@@ -11,8 +11,8 @@ import os
 import time
 
 # 切换到项目根目录，确保导入路径正确
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, '.')
+
+
 
 
 # ── BrainAPI 单例（首次调用会加载 embedding 模型，约 10s） ──

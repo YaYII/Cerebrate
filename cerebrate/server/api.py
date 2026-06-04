@@ -590,18 +590,18 @@ class BrainAPI:
         return {"user_id": user_id, "key": key, "stored": True}
 
     def batch_process(self, payload: dict) -> dict:
-        """Batch process pending memory queue items."""
+        """Batch process pending memory queue items — rescores and flushes."""
         limit = int(payload.get("limit", 50))
         dry_run = payload.get("dry_run", False)
         ids = self.mm.swarm.get_all_memory_ids()
         processed = 0
         for mid in ids[:limit]:
-            mem = self.mm.swarm._load_memory(mid)
+            mem = self.mm.get_swarm_memory(mid)
             if not mem:
                 continue
             if not dry_run:
-                text = f"{mem.get('title','')}\n{mem.get('content','')}\n{mem.get('problem_solved','')}\n{mem.get('solution','')}"
-                self.mm.swarm._store.upsert(mid, text, mem)
+                # re-index through swarm's public API
+                self.mm.swarm.mark_reused(mid, success=None, feedback="batch-rescore")
             processed += 1
         if not dry_run:
             self.mm.flush_all()
