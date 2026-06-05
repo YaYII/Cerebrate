@@ -1,0 +1,29 @@
+# Cerebrate v5 脑虫 Brain Server 编排
+# 用法: cp .env.example .env  (填 CEREBRATE_SERVER_TOKEN、可选 ANTHROPIC_API_KEY)
+#       docker compose up -d --build
+services:
+  cerebrate:
+    build: .
+    image: cerebrate:v5
+    container_name: cerebrate
+    # 默认仅暴露到宿主机本地回环；局域网访问改为 "8765:8765" 或绑定内网 IP，如 "192.168.1.10:8765:8765"
+    ports:
+      - "127.0.0.1:8765:8765"
+    # 注入 CEREBRATE_SERVER_TOKEN、ANTHROPIC_API_KEY 等用户密钥
+    env_file:
+      - .env
+    # 显式钉死容器内部必需值，优先级高于 env_file，避免 .env 里的 SERVER_HOST=127.0.0.1 等
+    # 把容器监听限制在回环导致端口映射失效
+    environment:
+      CEREBRATE_SERVER_HOST: 0.0.0.0
+      CEREBRATE_SERVER_PORT: "8765"
+      CEREBRATE_MEMORY_ROOT: /data
+      CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD: "false"
+      HF_HOME: /models
+    # 记忆数据持久化（chroma_data / personal / swarm 等全部落在 /data 下）
+    volumes:
+      - cerebrate-data:/data
+    restart: unless-stopped
+
+volumes:
+  cerebrate-data:

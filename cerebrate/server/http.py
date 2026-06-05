@@ -4,6 +4,7 @@ import json
 import signal
 import threading
 import time
+import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -33,6 +34,10 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str):
         try:
+            if not self._check_auth():
+                self._send_json(err("unauthorized", code=401, protocol="v5"),
+                                HTTPStatus.UNAUTHORIZED)
+                return
             parsed = urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
             params = parse_qs(parsed.query)
@@ -95,6 +100,14 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/batch/process":
             return self.api.batch_process(payload)
         raise RuntimeError(f"unknown endpoint: {method} {path}")
+
+    def _check_auth(self) -> bool:
+        """校验 Bearer token。config.server_token 为空时不鉴权（向后兼容本地开发）。"""
+        token = config.server_token
+        if not token:
+            return True
+        header = self.headers.get("Authorization", "")
+        return hmac.compare_digest(header, f"Bearer {token}")
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

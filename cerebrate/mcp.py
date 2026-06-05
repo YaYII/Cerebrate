@@ -2,32 +2,43 @@
 """
 Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务
 
-直接导入 BrainAPI 作为本地库调用，无需额外 HTTP 服务。
+通过 HTTP 访问独立运行的脑虫 Brain Server（可在 Docker 容器中），
+而非本地实例化 BrainAPI。连接地址与鉴权令牌通过环境变量配置：
+  CEREBRATE_SERVER_URL   — 脑虫服务地址，默认 http://127.0.0.1:8765
+  CEREBRATE_SERVER_TOKEN — Bearer 鉴权令牌，留空则不鉴权
 """
 import sys
 import os
-
-# 必须在导入 cerebrate 包之前设置路径
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.dirname(_script_dir)
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
-os.chdir(_project_root)
-
-import time
 import json
-
-from cerebrate.server.api import BrainAPI
-
-
-_api: BrainAPI | None = None
+import urllib.request
+import urllib.error
 
 
-def _get_api() -> BrainAPI:
-    global _api
-    if _api is None:
-        _api = BrainAPI()
-    return _api
+_SERVER_URL = os.environ.get("CEREBRATE_SERVER_URL", "") or "http://127.0.0.1:8765"
+_SERVER_TOKEN = os.environ.get("CEREBRATE_SERVER_TOKEN", "")
+
+
+def _request(method: str, path: str, body: dict = None) -> dict:
+    """向脑虫 Brain Server 发起 HTTP 请求，返回 v5 协议 JSON 信封。"""
+    full_url = _SERVER_URL.rstrip("/") + path
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if _SERVER_TOKEN:
+        headers["Authorization"] = f"Bearer {_SERVER_TOKEN}"
+    if body is not None:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(full_url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8") if e.fp else "{}"
+        try:
+            return json.loads(err_body)
+        except json.JSONDecodeError:
+            return {"status": "error", "error": {"code": e.code, "message": err_body}}
+    except urllib.error.URLError as e:
+        return {"status": "error", "error": {"code": 503, "message": f"无法连接脑虫服务 {full_url}: {e.reason}"}}
 
 
 # ── 工具定义 ────────────────────────────────────────────────
@@ -221,31 +232,29 @@ TOOLS = [
 
 
 def _handle_call(name: str, args: dict) -> dict:
-    api = _get_api()
     try:
         if name == "cerebrate_sense":
-            return {"status": "ok", "data": api.sense()}
+            return _request("GET", "/v1/sense")
 
         elif name == "cerebrate_help":
-            return {"status": "ok", "data": api.help()}
+            return _request("GET", "/v1/help")
 
         elif name == "cerebrate_doctrines":
-            return {"status": "ok", "data": api.doctrines()}
+            return _request("GET", "/v1/doctrines")
 
         elif name == "cerebrate_assess":
-            return {"status": "ok", "data": api.assess()}
+            return _request("GET", "/v1/brain/assess")
 
         elif name == "cerebrate_query":
-            result = api.query({
+            return _request("POST", "/v1/query", {
                 "query": args["query"],
                 "user": args.get("user", "yangying"),
                 "agent_id": args.get("agent_id", "codex"),
                 "project_id": args.get("project_id", "")
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_propose":
-            result = api.propose_memory({
+            return _request("POST", "/v1/memories/propose", {
                 "title": args["title"],
                 "content": args["content"],
                 "category": args.get("category", "general"),
@@ -258,10 +267,9 @@ def _handle_call(name: str, args: dict) -> dict:
                 "validate": args.get("validate", True),
                 "project_id": args.get("project_id", "")
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_propose_skill":
-            result = api.propose_memory({
+            return _request("POST", "/v1/memories/propose", {
                 "title": args["title"],
                 "content": args["content"],
                 "category": "skill",
@@ -273,10 +281,9 @@ def _handle_call(name: str, args: dict) -> dict:
                 "confidence": 1.0,
                 "validate": args.get("validate", True),
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_propose_lesson":
-            result = api.propose_memory({
+            return _request("POST", "/v1/memories/propose", {
                 "title": args["title"],
                 "content": args["content"],
                 "category": "skill",
@@ -288,49 +295,46 @@ def _handle_call(name: str, args: dict) -> dict:
                 "confidence": 1.0,
                 "validate": args.get("validate", True),
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_use_start":
-            result = api.start_usage({
+            return _request("POST", "/v1/usages/start", {
                 "memory_id": args["memory_id"],
                 "agent": args["agent"],
                 "problem": args["problem"],
                 "project_id": args.get("project_id", "")
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_use_finish":
-            result = api.finish_usage({
+            return _request("POST", "/v1/usages/finish", {
                 "usage_id": args["usage_id"],
                 "outcome": args["outcome"],
                 "feedback": args.get("feedback", "")
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_register":
-            result = api.register_agent({
+            return _request("POST", "/v1/agents/register", {
                 "agent_id": args.get("agent_id", "codex"),
                 "agent_type": args.get("agent_type", "mcp"),
                 "capabilities": args.get("capabilities", "code_generation,debugging,refactoring,testing").split(","),
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_vote":
-            result = api.consensus_vote({
+            return _request("POST", "/v1/consensus/vote", {
                 "memory_id": args["memory_id"],
                 "agent": args["agent"],
                 "vote": args["vote"],
                 "evidence": args.get("evidence", ""),
                 "confidence": args.get("confidence", 1.0),
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_evolve":
-            result = api.evolve()
-            return {"status": "ok", "data": result}
+            return _request("POST", "/v1/evolve", {})
 
         elif name == "cerebrate_stats":
-            sense = api.sense()
+            envelope = _request("GET", "/v1/sense")
+            if envelope.get("status") != "ok":
+                return envelope
+            sense = envelope.get("data", {})
             return {"status": "ok", "data": {
                 "total_memories": sense.get("total_memories", 0),
                 "total_agents": sense.get("total_agents", 0),
@@ -342,25 +346,25 @@ def _handle_call(name: str, args: dict) -> dict:
             }}
 
         elif name == "cerebrate_recall":
-            return {"status": "ok", "data": api.get_personal()}
+            return _request("GET", "/v1/personal")
 
         elif name == "cerebrate_remember":
-            result = api.set_personal({
+            return _request("POST", "/v1/personal", {
                 "user": args.get("user", "yangying"),
                 "key": args["key"],
                 "value": args["value"]
             })
-            return {"status": "ok", "data": result}
 
         elif name == "cerebrate_batch_process":
-            result = api.batch_process({
+            return _request("POST", "/v1/batch/process", {
                 "limit": args.get("limit", 50)
             })
-            return {"status": "ok", "data": result}
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}
 
+    except KeyError as e:
+        return {"status": "error", "error": {"code": 400, "message": f"缺少必填参数: {e}"}}
     except Exception as e:
         return {"status": "error", "error": {"code": 500, "message": str(e)}}
 
@@ -373,16 +377,7 @@ def _send(msg: dict):
 
 
 def main():
-    _send({
-        "jsonrpc": "2.0",
-        "method": "server/info",
-        "params": {
-            "name": "cerebrate-mcp-v5",
-            "version": "5.0.0",
-            "capabilities": {"tools": {}}
-        }
-    })
-
+    # MCP server 不得在收到 initialize 前主动发消息，握手由客户端发起。
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -396,6 +391,11 @@ def main():
         method = req.get("method", "")
         params = req.get("params", {})
 
+        # JSON-RPC 通知（无 id，如 notifications/initialized、notifications/cancelled）
+        # 按规范不得返回任何响应，统一忽略。
+        if req_id is None:
+            continue
+
         if method == "initialize":
             client_version = params.get("protocolVersion", "2024-11-05")
             _send({
@@ -407,26 +407,30 @@ def main():
                     "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.0.0"}
                 }
             })
+        elif method == "ping":
+            # MCP 心跳：必须回空 result，否则客户端判定连接异常
+            _send({"jsonrpc": "2.0", "id": req_id, "result": {}})
         elif method == "tools/list":
             _send({"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}})
         elif method == "tools/call":
             tool_name = params.get("name", "")
             tool_args = params.get("arguments", {})
             result = _handle_call(tool_name, tool_args)
+            is_error = result.get("status") == "error"
             _send({
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]
+                    "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}],
+                    "isError": is_error
                 }
             })
-        elif method == "notifications/initialized":
-            pass
         else:
+            # JSON-RPC 标准错误码 -32601 Method not found
             _send({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "error": {"code": -1, "message": f"未知方法: {method}"}
+                "error": {"code": -32601, "message": f"未知方法: {method}"}
             })
 
 

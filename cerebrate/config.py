@@ -96,6 +96,7 @@ class CerebrateConfig:
     server_host: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_HOST", "127.0.0.1"))
     server_port: int = field(default_factory=lambda: int(os.environ.get("CEREBRATE_SERVER_PORT", "8765")))
     server_url: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_URL", ""))
+    server_token: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_TOKEN", ""))
 
     def __post_init__(self):
         self.personal_path = self.memory_root / "personal"
