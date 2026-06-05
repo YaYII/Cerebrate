@@ -220,6 +220,19 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_knowledge_search",
+        "description": "搜索权威知识库，查找策略、文档类知识。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词"},
+                "topic": {"type": "string", "description": "按主题过滤（可选）"},
+                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""}
+            },
+            "required": ["query"]
+        }
+    },
+    {
         "name": "cerebrate_batch_process",
         "description": "【会话结束时调用】批量处理 IPC 队列中的待办请求。",
         "inputSchema": {
@@ -228,6 +241,11 @@ TOOLS = [
                 "limit": {"type": "integer", "description": "最大处理数量", "default": 50}
             }
         }
+    },
+    {
+        "name": "cerebrate_evolve",
+        "description": "【会话结束时调用】触发脑虫进化：去重、技能蒸馏、教条提炼、记忆衰减。强制执行，不受夜间进化窗口限制。",
+        "inputSchema": {"type": "object", "properties": {}}
     }
 ]
 
@@ -360,10 +378,24 @@ def _handle_call(name: str, args: dict) -> dict:
                 "value": args["value"]
             })
 
+        elif name == "cerebrate_knowledge_search":
+            from urllib.parse import urlencode
+            q = args.get("query", "")
+            qparams = {"q": q}
+            if args.get("topic"):
+                qparams["topic"] = args["topic"]
+            if args.get("project_id"):
+                qparams["project_id"] = args["project_id"]
+            return _request("GET", f"/v1/knowledge?{urlencode(qparams)}")
+
         elif name == "cerebrate_batch_process":
             return _request("POST", "/v1/batch/process", {
                 "limit": args.get("limit", 50)
             })
+
+        elif name == "cerebrate_evolve":
+            # force=true 强制触发，不受服务端夜间进化窗口限制
+            return _request("POST", "/v1/evolve?force=true", {})
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}

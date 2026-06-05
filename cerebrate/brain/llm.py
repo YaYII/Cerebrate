@@ -325,6 +325,191 @@ class CerebrateLLM:
             pass
         return None
 
+    # ==================== 知识蒸馏 ====================
+
+    def distill_knowledge(self, memories: list[dict], topic: str) -> Optional[dict]:
+        """将多条相关实战记忆提炼为学术级结构化知识文档。
+
+        采用四层知识架构：概念 → 原理 → 方法 → 实践。
+        每条论断标注证据等级和原始记忆引用。
+        """
+        if not self.is_available() or not self._sdk_ready():
+            return None
+        client = self._get_client()
+        if not client:
+            return None
+
+        # 构建记忆列表（按复用次数降序）
+        sorted_mems = sorted(memories, key=lambda m: m.get("reuse_count", 0), reverse=True)
+        memory_blocks = []
+        for i, m in enumerate(sorted_mems):
+            tags = m.get("tags", "")
+            if isinstance(tags, list):
+                tags = ",".join(tags)
+            memory_blocks.append(
+                f"### 记忆源 #{i+1} (复用{m.get('reuse_count',0)}次, 成功率{m.get('success_count',0)/max(m.get('reuse_count',1),1):.0%})\n"
+                f"- 标题: {m.get('title','')}\n"
+                f"- 场景: {m.get('problem_solved','')}\n"
+                f"- 方案: {m.get('solution','')}\n"
+                f"- 详情: {m.get('content','')[:600]}\n"
+                f"- 标签: {tags}\n"
+                f"- 来源: {m.get('source_agent','')} | {m.get('physical_user','')}\n"
+            )
+
+        prompt = f"""你是一位计算机科学领域的高级研究员（清华大学博士水平）。请将以下多条工程实战记忆，提炼为一份符合学术规范的结构化知识文档。
+
+## 研究主题
+{topic}
+
+## 原始数据（按复用验证次数降序）
+{chr(10).join(memory_blocks)}
+
+## ⚠️ 质量红线
+
+**如果原始数据不足以形成一篇合格的知识文档（信息碎片化、内容空泛、缺少具体细节），请返回 skip 标记而非强行生成低质量内容：**
+
+```json
+{{"skip": true, "reason": "具体原因（如：缺少根因分析数据、无具体命令示例、方案步骤不完整等）"}}
+```
+
+合格标准：
+1. 每个核心概念必须有至少一条记忆提供准确定义
+2. 每个解决方案必须有可执行的具体步骤或命令
+3. 陷阱/边界情况必须有实际发生的案例支撑
+4. abstract 不少于 150 字，全文有效内容不少于 2000 字
+5. 每个 section 不能出现"可能"、"也许"等无实质内容的占位表述
+
+## 知识文档结构规范
+
+请严格按以下 JSON Schema 输出，所有内容必须来源于原始数据，严禁编造：
+
+```json
+{{
+  "meta": {{
+    "title": "知识标题（精准描述，≤50字，必须有具体技术名词）",
+    "topic": "学科/技术领域",
+    "version": "1.0.0",
+    "distilled_at": "生成时间ISO格式",
+    "source_count": "原始记忆数量",
+    "total_reuse": "总复用次数",
+    "confidence": 0.0-1.0
+  }},
+  "abstract": "学术摘要（≥150字）：问题域、核心发现、方法论要点、适用范围。必须包含具体的技术名词和数据",
+  "concept_layer": {{
+    "description": "概念层：定义核心概念和术语体系",
+    "concepts": [
+      {{
+        "term": "术语名（必须具体，不能是通用词）",
+        "definition": "精确定义（≥30字，包含技术细节）",
+        "evidence_level": "A/B/C",
+        "refs": [1, 3]
+      }}
+    ]
+  }},
+  "principle_layer": {{
+    "description": "原理层：问题产生的根本原因和触发机制",
+    "root_causes": [
+      {{
+        "cause": "根因描述（≥20字，包含因果逻辑链）",
+        "mechanism": "触发机制（说明在什么条件下触发）",
+        "evidence_level": "A/B/C",
+        "refs": [1]
+      }}
+    ]
+  }},
+  "methodology_layer": {{
+    "description": "方法论层：可复用的解决模式",
+    "patterns": [
+      {{
+        "name": "模式名称（具体，非"解决方案"这种通用名）",
+        "steps": ["步骤1: 包含具体命令/参数/配置的完整描述", "步骤2: ..."],
+        "preconditions": "前置条件（环境、权限、依赖等）",
+        "expected_outcome": "预期结果（可验证的具体指标）",
+        "evidence_level": "A/B/C",
+        "refs": [1, 2, 4]
+      }}
+    ]
+  }},
+  "practice_layer": {{
+    "description": "实践层：可直接复制执行的操作指南",
+    "guides": [
+      {{
+        "scenario": "操作场景（具体描述）",
+        "commands": ["完整的、可直接复制执行的命令"],
+        "verification": "验证方法（如何确认操作成功）",
+        "rollback": "回滚方案（操作失败时如何恢复）",
+        "evidence_level": "A/B/C",
+        "refs": [2]
+      }}
+    ]
+  }},
+  "pitfalls_and_edge_cases": [
+    {{
+      "description": "陷阱/边界情况描述（≥30字）",
+      "consequence": "后果（具体影响）",
+      "mitigation": "缓解措施（具体步骤）",
+      "refs": [1]
+    }}
+  ],
+  "knowledge_graph": {{
+    "prerequisites": ["前置知识（具体的技术栈/概念名）"],
+    "related_topics": ["关联主题（具体的、有实际关联的）"],
+    "conflicts": ["已知矛盾点描述（如有不同记忆给出矛盾方案）"]
+  }},
+  "references": [
+    {{
+      "index": 1,
+      "memory_id": "原始记忆ID",
+      "title": "记忆标题",
+      "contribution": "该记忆对本文档的具体贡献（≥15字）"
+    }}
+  ],
+  "reproducibility": {{
+    "can_reproduce": true/false,
+    "estimated_time": "预估复现耗时",
+    "required_env": "所需环境（OS/依赖/版本等）"
+  }}
+}}
+```
+
+## 证据等级标准
+- **A 级**：≥3 次独立复用且成功率 ≥80%，结论高度可信
+- **B 级**：1-2 次复用或成功率 60-80%，结论可信但需进一步验证
+- **C 级**：单次经验或推论，标注为"[待验证]"
+
+## 铁律
+1. 无具体数据 → 不写。每个字段必须是具体的技术内容，不能是空泛的套话
+2. 来源可追溯：每个论断标注 refs，无来源不写入
+3. 区分事实与观点：事实用陈述句，推论标注"[推断]"或"[待验证]"
+4. 保留分歧：矛盾方案不强行统一，记录在 conflicts 中
+5. 可复现：操作步骤包含验证方法 + 回滚方案
+6. 术语一致：同一概念全文统一术语，技术名词保留英文原名
+7. 禁止编造：不确定的内容标注"[待验证]"，严禁编造填补空白
+8. 去重合并：同一问题的多条描述合并，保留最完整版本
+
+只返回 JSON，不要其他文字。"""
+
+        try:
+            kwargs = {
+                "model": self._model,
+                "max_tokens": 4096,
+                "temperature": 0.2,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if self._provider == "anthropic":
+                response = client.messages.create(**kwargs)
+                text = response.content[0].text if response.content else ""
+            else:
+                response = client.chat.completions.create(**kwargs)
+                text = response.choices[0].message.content if response.choices else ""
+
+            match = re.search(r'\{[\s\S]*\}', text)
+            if match:
+                return json.loads(match.group())
+        except Exception:
+            pass
+        return None
+
     def detect_conflicts(self, text_a: str, text_b: str) -> Optional[str]:
         """检测两段知识是否存在矛盾"""
         if not self.is_available() or not self._sdk_ready():

@@ -81,11 +81,21 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.help()
         if method == "GET" and path == "/v1/doctrines":
             return self.api.doctrines()
+        if method == "GET" and path == "/v1/knowledge/topics":
+            return self.api.list_knowledge_topics()
+        if method == "GET" and path.startswith("/v1/knowledge"):
+            q = (params.get("q") or [""])[0]
+            topic = (params.get("topic") or [""])[0]
+            pid = (params.get("project_id") or [""])[0]
+            return {"results": self.api.search_knowledge(q, topic=topic, project_id=pid)}
         if method == "GET" and path == "/v1/personal":
             return self.api.get_personal()
         if method == "POST" and path == "/v1/personal":
             payload = self._read_json()
             return self.api.set_personal(payload)
+        if method == "POST" and path == "/v1/knowledge":
+            payload = self._read_json()
+            return self.api.store_knowledge(payload)
 
         payload = self._read_json()
         if method == "POST" and path == "/v1/agents/register":

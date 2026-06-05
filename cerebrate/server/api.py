@@ -4,6 +4,7 @@ Clients submit observations and requests. The server alone writes group
 memory, appends durable events, and controls memory promotion.
 """
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from cerebrate.brain.mind import CerebrateMind, Metacognition
@@ -124,6 +125,51 @@ class BrainAPI:
                             "matches": len(all_matches)},
                            project_id or "")
         return data
+
+    def _link_to_knowledge(self, memory_id: str, title: str, content: str,
+                           category: str, tags: list, source_agent: str,
+                           physical_user: str, project_id: str):
+        """检查新记忆与已有知识库的关联，自动增量追加入库。"""
+        try:
+            kb_results = self.mm.lookup_knowledge(
+                f"{title} {content[:200]}", project_id=project_id)
+            if not kb_results or kb_results[0].get("score", 0) < 0.6:
+                return  # 无强关联，不更新
+
+            best = kb_results[0]
+            doc_id = best.get("doc_id", "")
+            if not doc_id:
+                return
+
+            # 追加新内容到已有知识文档
+            existing_content = best.get("content", "")
+            append_text = (
+                f"\n\n---\n"
+                f"## 增量更新 (来源: {source_agent} | {physical_user})\n"
+                f"**场景**: {title}\n"
+                f"**补充内容**: {content[:800]}\n"
+                f"**关联记忆**: {memory_id}\n"
+            )
+            updated_content = existing_content + append_text
+
+            # 更新知识库文档（直接 upsert 到已有 doc_id，绕过哈希去重）
+            now = datetime.now(timezone.utc).isoformat()
+            meta = {
+                "title": best.get("title", title),
+                "content": updated_content,
+                "source": f"{best.get('source','')},{source_agent}",
+                "topics": ",".join(best.get("topics", [])),
+                "is_policy": str(best.get("is_policy", False)),
+                "policy_name": best.get("policy_name", ""),
+                "version": best.get("version", "1.0"),
+                "author": best.get("author", source_agent),
+                "project_id": project_id,
+                "updated": now,
+            }
+            search_text = f"{best.get('title', title)}\n{updated_content[:500]}"
+            self.mm.knowledge._store.upsert(doc_id, search_text, meta)
+        except Exception:
+            pass  # 知识关联非关键路径
 
     @staticmethod
     def _generate_memory_id(title: str, category: str) -> str:
@@ -466,6 +512,12 @@ class BrainAPI:
             "authority": "brain_server",
         }
         self.events.append("memory.proposed", source_agent, data, project_id)
+
+        # ── 自动关联：新记忆与已有知识库关联时增量追加入库 ──
+        _cat = payload.get("category", "general")
+        self._link_to_knowledge(memory_id, title, content, _cat, tags,
+                                source_agent, physical_user, project_id)
+
         return data
 
     def start_usage(self, payload: dict) -> dict:
@@ -750,6 +802,44 @@ class BrainAPI:
         result = EvolutionEngine(config.evolution_path, self.mm).evolve(force=force)
         self.events.append("brain.evolved", "brain-server", result)
         return result
+
+    # ── 权威知识库 ──────────────────────────────────────
+
+    def search_knowledge(self, query: str, topic: str = "",
+                         project_id: str = "") -> list[dict]:
+        """向量语义搜索权威知识库。"""
+        t = topic.strip() if topic else None
+        pid = project_id.strip() if project_id else None
+        return self.mm.lookup_knowledge(query, topic=t, project_id=pid)
+
+    def store_knowledge(self, payload: dict) -> dict:
+        """手动写入权威知识库。"""
+        title = payload.get("title", "")
+        content = payload.get("content", "")
+        if not title or not content:
+            raise ValueError("title and content are required")
+        topics = payload.get("topics", [])
+        if isinstance(topics, str):
+            topics = [t.strip() for t in topics.split(",") if t.strip()]
+        doc_id = self.mm.store_knowledge(
+            title=title,
+            content=content,
+            source=payload.get("source", "manual"),
+            topics=topics,
+            is_policy=payload.get("is_policy", False),
+            policy_name=payload.get("policy_name", ""),
+            version=payload.get("version", "1.0"),
+            author=payload.get("author", ""),
+            project_id=payload.get("project_id", ""),
+        )
+        self.events.append("knowledge.stored", payload.get("agent_id", "manual"),
+                           {"doc_id": doc_id, "title": title})
+        return {"doc_id": doc_id}
+
+    def list_knowledge_topics(self) -> dict:
+        """列出知识库所有主题。"""
+        return {"topics": self.mm.knowledge.list_topics(),
+                "policies": self.mm.knowledge.list_policies()}
 
     def cleanup_expired_origins(self, days: int = 365,
                                 backup_dir: str = "/data/origin_backups") -> dict:

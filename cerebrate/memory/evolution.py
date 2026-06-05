@@ -7,6 +7,7 @@ from typing import Optional
 
 from cerebrate.config import config
 from cerebrate.core.decay import calculate_decay, should_archive
+from cerebrate.brain.llm import CerebrateLLM
 
 
 class EvolutionEngine:
@@ -190,54 +191,113 @@ class EvolutionEngine:
         swarm = self.manager.swarm
         created = 0
 
+        # ── 收集高复用记忆，按主题(tags)分组 ──
+        topic_groups: dict[str, list[dict]] = {}
         for mid in swarm.get_all_memory_ids():
             mem = swarm._load_memory(mid)
-            if not mem:
+            if not mem or mem.get("life_stage") in {"quarantined", "archived"}:
                 continue
-            if mem.get("life_stage") in {"quarantined", "archived"}:
-                continue
-            reuse = mem.get("reuse_count", 0)
-            success = mem.get("success_count", 0)
-
+            reuse = int(mem.get("reuse_count", 0))
+            success = int(mem.get("success_count", 0))
             if reuse < 3 or success / max(reuse, 1) < 0.7:
                 continue
 
+            raw_tags = mem.get("tags", "")
+            if isinstance(raw_tags, list):
+                raw_tags = ",".join(raw_tags)
+            tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+
+            mem["memory_id"] = mid
+            mem["reuse_count"] = reuse
+            mem["success_count"] = success
+            for tag in tags_list:
+                topic_groups.setdefault(tag, []).append(mem)
+
+        # ── 尝试 LLM 蒸馏，失败则回退模板 ──
+        llm = CerebrateLLM()
+        for topic, mems in topic_groups.items():
+            # ── 质量门控：记忆数量、复用次数、代理多样性 ──
+            if len(mems) < 3:
+                continue
+            total_reuse = sum(m.get("reuse_count", 0) for m in mems)
+            if total_reuse < 5:
+                continue
+            unique_agents = {m.get("source_agent", "") for m in mems if m.get("source_agent")}
+            unique_agents.discard("")
+            if len(unique_agents) < 2:
+                continue
+
             existing = swarm.query(
-                f"distilled skill {mem.get('title', '')}",
-                category="distilled_skill",
-                project_id=None,
-                limit=1,
+                f"distilled skill {topic}",
+                category="distilled_skill", project_id=None, limit=1,
             )
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
 
-            skill_title = f"[已验证技能] {mem.get('title', '')}"
-            skill_content = (
-                f"问题: {mem.get('problem_solved', mem.get('content', ''))}\n"
-                f"方案: {mem.get('solution', mem.get('content', ''))}\n"
-                f"验证: 复用 {reuse} 次, 成功率 {success / reuse:.0%}"
-            )
-            # ── 继承源记忆的 origin_ids ──
-            mem_origin_ids_str = mem.get("origin_ids", "")
-            mem_origin_ids = [s for s in mem_origin_ids_str.split(",") if s] if mem_origin_ids_str else []
+            # 收集所有 origin_ids 和 supersedes
+            all_origin_ids = set()
+            supersedes_ids = []
+            for m in mems:
+                oids = (m.get("origin_ids") or "").split(",")
+                all_origin_ids.update(o for o in oids if o)
+                supersedes_ids.append(m.get("memory_id", ""))
 
-            raw_tags = mem.get("tags", [])
-            if isinstance(raw_tags, str):
-                raw_tags = [t for t in raw_tags.split(",") if t]
+            all_origin_ids.discard("")
+            mem_origin_ids = list(all_origin_ids)
+
+            # 尝试 LLM 蒸馏
+            doc = llm.distill_knowledge(mems, topic) if llm.is_available() else None
+
+            # ── 处理 skip 标记 ──
+            if doc and doc.get("skip"):
+                continue  # 数据不足以形成知识，跳过
+
+            if doc and doc.get("meta"):
+                meta = doc["meta"]
+                title = meta.get("title", f"[已验证技能] {topic}")
+                abstract = doc.get("abstract", "")
+                content_parts = [abstract] if abstract else []
+                # 方法论
+                meth = doc.get("methodology_layer", {})
+                for p in meth.get("patterns", []):
+                    steps = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(p.get("steps", [])))
+                    content_parts.append(f"## {p.get('name', '模式')} [{p.get('evidence_level','B')}级]")
+                    content_parts.append(steps)
+                # 陷阱
+                pits = doc.get("pitfalls_and_edge_cases", [])
+                if pits:
+                    content_parts.append("## 注意事项")
+                    for p in pits:
+                        content_parts.append(f"- ⚠ {p.get('description','')}: {p.get('mitigation','')}")
+                content = "\n\n".join(content_parts) or abstract or f"蒸馏主题: {topic}"
+                confidence = meta.get("confidence", 0.85)
+            else:
+                # LLM 不可用，回退模板拼接
+                best = mems[0]
+                title = f"[已验证技能] {topic}"
+                content = f"问题: {best.get('problem_solved', best.get('content',''))}\n方案: {best.get('solution', best.get('content',''))}\n来源: {len(mems)} 条相关记忆, 总复用 {total_reuse} 次"
+                confidence = 1.0
+
+            # 收集 tags
+            all_tags = {"verified_skill", topic}
+            for m in mems:
+                rt = m.get("tags", "")
+                if isinstance(rt, str):
+                    all_tags.update(t for t in rt.split(",") if t)
+
             swarm.share(
-                title=skill_title,
-                content=skill_content,
+                title=title, content=content,
                 category="distilled_skill",
-                tags=raw_tags + ["verified_skill"],
+                tags=list(all_tags),
                 source_agent="cerebrate-evolution",
-                problem_solved=mem.get("problem_solved", ""),
-                solution=mem.get("solution", ""),
+                problem_solved=mems[0].get("problem_solved", ""),
+                solution=mems[0].get("solution", ""),
                 outcome="success",
-                project_id=mem.get("project_id", ""),
+                project_id="",
                 life_stage="verified_skill",
-                confidence=1.0,
-                evidence=f"复用 {reuse} 次, 成功率 {success / reuse:.0%}",
-                supersedes=[mid],
+                confidence=confidence,
+                evidence=f"LLM蒸馏: {len(mems)}条记忆, 总复用{total_reuse}次" if doc else f"模板蒸馏: {len(mems)}条记忆",
+                supersedes=supersedes_ids,
                 origin_ids=mem_origin_ids,
             )
             created += 1
@@ -247,48 +307,97 @@ class EvolutionEngine:
     def _distill_doctrines(self) -> int:
         swarm = self.manager.swarm
         created = 0
-        categories: dict[str, set[str]] = {}
-        samples: dict[str, dict] = {}
+
+        # ── 收集高复用记忆，按 category 分组 ──
+        cat_groups: dict[str, list[dict]] = {}
         for mid in swarm.get_all_memory_ids():
             mem = swarm._load_memory(mid)
             if not mem or mem.get("life_stage") not in {"verified_skill", "memory"}:
                 continue
-            reuse = mem.get("reuse_count", 0)
-            success = mem.get("success_count", 0)
+            reuse = int(mem.get("reuse_count", 0))
+            success = int(mem.get("success_count", 0))
             if reuse < 3 or success / max(reuse, 1) < 0.8:
                 continue
             cat = mem.get("category", "general")
-            categories.setdefault(cat, set()).add(
-                mem.get("project_id", "") or "global")
-            samples.setdefault(cat, mem)
+            mem["memory_id"] = mid
+            mem["reuse_count"] = reuse
+            mem["success_count"] = success
+            cat_groups.setdefault(cat, []).append(mem)
 
-        for cat, projects in categories.items():
+        llm = CerebrateLLM()
+        for cat, mems in cat_groups.items():
+            projects = {m.get("project_id", "") or "global" for m in mems}
             if len(projects) < 2:
                 continue
+
             existing = swarm.query(
                 f"doctrine {cat}", category="doctrine", project_id=None, limit=1)
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
-            sample = samples[cat]
-            # ── 继承源记忆的 origin_ids ──
-            sample_origin_ids_str = sample.get("origin_ids", "")
-            sample_origin_ids = [s for s in sample_origin_ids_str.split(",") if s] if sample_origin_ids_str else []
+
+            # 收集 origin_ids
+            all_origin_ids = set()
+            supersedes_ids = []
+            for m in mems:
+                oids = (m.get("origin_ids") or "").split(",")
+                all_origin_ids.update(o for o in oids if o)
+                supersedes_ids.append(m.get("memory_id", ""))
+            all_origin_ids.discard("")
+            mem_origin_ids = list(all_origin_ids)
+
+            # 尝试 LLM 蒸馏
+            doc = llm.distill_knowledge(mems, cat) if llm.is_available() else None
+
+            # ── 处理 skip 标记 ──
+            if doc and doc.get("skip"):
+                continue
+
+            if doc and doc.get("meta"):
+                meta = doc["meta"]
+                title = meta.get("title", f"[脑虫教条] {cat}")
+                abstract = doc.get("abstract", "")
+                content_parts = [abstract] if abstract else []
+                principle = doc.get("principle_layer", {})
+                for rc in principle.get("root_causes", []):
+                    content_parts.append(f"- 根因: {rc.get('cause','')} [{rc.get('evidence_level','B')}级]")
+                meth = doc.get("methodology_layer", {})
+                for p in meth.get("patterns", []):
+                    steps = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(p.get("steps", [])))
+                    content_parts.append(f"## {p.get('name','方案')}\n{steps}")
+                content = "\n\n".join(content_parts) or abstract or f"跨项目稳定策略: {mems[0].get('solution','')}"
+                confidence = meta.get("confidence", 0.9)
+            else:
+                best = mems[0]
+                title = f"[脑虫教条] {cat}"
+                content = f"跨项目稳定策略: {best.get('solution') or best.get('content')}\n来源: {len(mems)}条记忆, {len(projects)}个项目"
+                confidence = 1.0
 
             swarm.share(
-                title=f"[脑虫教条] {cat}",
-                content=f"跨项目稳定策略: {sample.get('solution') or sample.get('content')}",
+                title=title, content=content,
                 category="doctrine",
                 tags=["doctrine", cat],
                 source_agent="cerebrate-evolution",
-                problem_solved=sample.get("problem_solved", ""),
-                solution=sample.get("solution", ""),
+                problem_solved=mems[0].get("problem_solved", ""),
+                solution=mems[0].get("solution", ""),
                 outcome="success",
                 project_id="",
                 life_stage="doctrine",
-                confidence=1.0,
-                evidence=f"覆盖项目: {', '.join(sorted(projects))}",
-                supersedes=[sample.get("memory_id", "")],
-                origin_ids=sample_origin_ids,
+                confidence=confidence,
+                evidence=f"LLM蒸馏: {len(mems)}条记忆, {len(projects)}个项目" if doc else f"覆盖项目: {', '.join(sorted(projects))}",
+                supersedes=supersedes_ids,
+                origin_ids=mem_origin_ids,
+            )
+            # ── 同步写入权威知识库 ──
+            self.manager.knowledge.store(
+                title=title,
+                content=content,
+                source="cerebrate-evolution",
+                topics=["doctrine", cat],
+                is_policy=True,
+                policy_name=cat,
+                version="1.0",
+                author="cerebrate-evolution",
+                project_id="",
             )
             created += 1
         return created
