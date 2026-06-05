@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cerebrate-brain": {
+      "command": "python3",
+      "args": [
+        "/home/as-workstation01/Documents/project/Cerebrate/cerebrate/mcp.py"
+      ],
+      "env": {
+        "CEREBRATE_SERVER_URL": "http://127.0.0.1:8765",
+        "CEREBRATE_SERVER_TOKEN": "96437c75a284677a6240dfad2e6695826081b8ca100c6f06dc05fb76a1806c2d"
+      }
+    }
+  }
+}
