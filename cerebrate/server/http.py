@@ -104,8 +104,15 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             force = (params.get("force") or ["false"])[0].lower() == "true"
             return self.api.evolve(force=force)
         if method == "POST" and path == "/v1/origins/cleanup":
-            days = int((params.get("days") or ["365"])[0])
+            days_raw = (params.get("days") or ["365"])[0]
+            try:
+                days = max(int(days_raw), 180)
+            except (ValueError, TypeError):
+                days = 365
+            # 备份目录必须在 /data 下，防止路径遍历
             backup_dir = (params.get("backup_dir") or ["/data/origin_backups"])[0]
+            if not backup_dir.startswith("/data/"):
+                backup_dir = "/data/origin_backups"
             return self.api.cleanup_expired_origins(days=days, backup_dir=backup_dir)
         if method == "POST" and path == "/v1/batch/process":
             return self.api.batch_process(payload)

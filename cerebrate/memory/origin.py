@@ -216,13 +216,16 @@ class OriginLog:
                         backup_dir: str = "/data/origin_backups") -> dict:
         """清理超过保留期的原始记忆：先备份再删除。
 
+        备份失败则中止删除，保护数据安全。
+
         Args:
-            days: 保留天数
+            days: 保留天数（最小 1 天）
             backup_dir: 备份目录
 
         Returns:
             操作结果统计
         """
+        days = max(days, 1)  # 最少保留 1 天，防止误删全部
         old = self.get_old_origins(days)
         old_ids = [r["origin_id"] for r in old]
         result = {
@@ -235,13 +238,16 @@ class OriginLog:
         if not old_ids:
             return result
 
-        # 先备份
+        # 先备份（备份失败则中止，防止数据丢失）
         backup_file = self.backup_origins(old_ids, backup_dir)
-        if backup_file:
-            result["backup_file"] = backup_file
-            result["backed_up"] = len(old_ids)
+        if not backup_file:
+            result["error"] = "备份失败，已中止删除操作以保护数据"
+            return result
 
-        # 再删除
+        result["backup_file"] = backup_file
+        result["backed_up"] = len(old_ids)
+
+        # 备份成功后再删除
         for oid in old_ids:
             if self.delete_origin(oid):
                 result["deleted"] += 1
