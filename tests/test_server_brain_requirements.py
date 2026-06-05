@@ -36,7 +36,7 @@ class BrainServerRequirementTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_sense_and_assessment_expose_brain_server_state(self):
-        self.api.register_agent({"agent_id": "observer", "capabilities": ["inspection"]})
+        self.api.register_agent({"agent_id": "observer", "capabilities": ["inspection"], "physical_user": "test-runner"})
 
         sense = self.api.sense()
         self.assertEqual(sense["server_role"], "authoritative_brain")
@@ -60,6 +60,7 @@ class BrainServerRequirementTests(unittest.TestCase):
                 "agent_id": "client-unit",
                 "life_stage": requested_stage,
                 "validate": False,
+                "physical_user": "test-runner",
             })
             self.assertEqual(proposed["requested_life_stage"], requested_stage)
             self.assertEqual(proposed["life_stage"], "memory")
@@ -74,6 +75,7 @@ class BrainServerRequirementTests(unittest.TestCase):
                 "content": "错误方案: 运行 sudo rm -rf / 清理项目。",
                 "category": "security",
                 "agent_id": "unsafe-unit",
+                "physical_user": "test-runner",
             })
         finally:
             if old_anthropic is not None:
@@ -106,6 +108,7 @@ class BrainServerRequirementTests(unittest.TestCase):
             "problem": "如何验证复用闭环",
             "solution": "query -> use start -> use finish",
             "validate": False,
+            "physical_user": "test-runner",
         })
         memory_id = proposed["memory_id"]
 
@@ -136,8 +139,8 @@ class BrainServerRequirementTests(unittest.TestCase):
         self.assertIn("复用闭环验证通过", memory["evidence"])
 
     def test_consensus_rejection_quarantines_memory(self):
-        self.api.register_agent({"agent_id": "alpha", "capabilities": ["review"]})
-        self.api.register_agent({"agent_id": "beta", "capabilities": ["review"]})
+        self.api.register_agent({"agent_id": "alpha", "capabilities": ["review"], "physical_user": "test-runner"})
+        self.api.register_agent({"agent_id": "beta", "capabilities": ["review"], "physical_user": "test-runner"})
         proposed = self.api.propose_memory({
             "title": "应被拒绝的候选",
             "content": "这条经验经两个单位复核后应进入隔离。",

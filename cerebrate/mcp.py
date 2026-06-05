@@ -10,9 +10,15 @@ Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务
 import sys
 import os
 import json
+import getpass
 import urllib.request
 import urllib.error
 
+# ── 获取物理用户身份（操作系统登录用户名），用于安全溯源 ──
+try:
+    _PHYSICAL_USER = os.environ.get("USER") or os.environ.get("LOGNAME") or getpass.getuser()
+except Exception:
+    _PHYSICAL_USER = "unknown"
 
 _SERVER_URL = os.environ.get("CEREBRATE_SERVER_URL", "") or "http://127.0.0.1:8765"
 _SERVER_TOKEN = os.environ.get("CEREBRATE_SERVER_TOKEN", "")
@@ -95,7 +101,8 @@ TOOLS = [
                 "life_stage": {"type": "string", "enum": ["memory", "nutrient"], "description": "记忆生命阶段", "default": "memory"},
                 "confidence": {"type": "number", "description": "信心分数 0-1", "default": 1.0},
                 "validate": {"type": "boolean", "description": "是否触发免疫验证", "default": True},
-                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""}
+                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
+                "supersedes": {"type": "string", "description": "血缘关系：逗号分隔的被取代记忆ID列表，声明当前记忆基于哪些旧记忆"}
             },
             "required": ["title", "content", "tags", "problem", "solution"]
         }
@@ -163,13 +170,14 @@ TOOLS = [
     },
     {
         "name": "cerebrate_register",
-        "description": "【首次使用前调用】注册当前 AI 代理到虫群系统。",
+        "description": "【首次使用前调用】注册当前 AI 代理到虫群系统。自动上报物理用户身份用于安全溯源。",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "agent_id": {"type": "string", "default": "codex"},
                 "agent_type": {"type": "string", "default": "mcp"},
-                "capabilities": {"type": "string", "default": "code_generation,debugging,refactoring,testing"}
+                "capabilities": {"type": "string", "default": "code_generation,debugging,refactoring,testing"},
+                "physical_user": {"type": "string", "description": "物理用户（自动获取操作系统用户名）"}
             }
         }
     },
@@ -265,7 +273,9 @@ def _handle_call(name: str, args: dict) -> dict:
                 "life_stage": args.get("life_stage", "memory"),
                 "confidence": args.get("confidence", 1.0),
                 "validate": args.get("validate", True),
-                "project_id": args.get("project_id", "")
+                "project_id": args.get("project_id", ""),
+                "supersedes": args.get("supersedes", ""),
+                "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
 
         elif name == "cerebrate_propose_skill":
@@ -280,6 +290,7 @@ def _handle_call(name: str, args: dict) -> dict:
                 "life_stage": "memory",
                 "confidence": 1.0,
                 "validate": args.get("validate", True),
+                "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
 
         elif name == "cerebrate_propose_lesson":
@@ -294,6 +305,7 @@ def _handle_call(name: str, args: dict) -> dict:
                 "life_stage": "memory",
                 "confidence": 1.0,
                 "validate": args.get("validate", True),
+                "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
 
         elif name == "cerebrate_use_start":
@@ -316,6 +328,7 @@ def _handle_call(name: str, args: dict) -> dict:
                 "agent_id": args.get("agent_id", "codex"),
                 "agent_type": args.get("agent_type", "mcp"),
                 "capabilities": args.get("capabilities", "code_generation,debugging,refactoring,testing").split(","),
+                "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
 
         elif name == "cerebrate_vote":

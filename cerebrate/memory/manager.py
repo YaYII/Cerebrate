@@ -64,13 +64,15 @@ class MemoryManager:
                        solution: str = "", outcome: str = "success",
                        project_id: str = "", life_stage: str = "memory",
                        nutrient_score: float = 1.0, confidence: float = 1.0,
-                       evidence: str = "", supersedes: Optional[list[str]] = None) -> str:
+                       evidence: str = "", supersedes: Optional[list[str]] = None,
+                       physical_user: str = "") -> str:
         memory_id = self.swarm.share(title, content, category, tags,
                                      source_agent, problem_solved, solution, outcome,
                                      project_id, life_stage=life_stage,
                                      nutrient_score=nutrient_score,
                                      confidence=confidence, evidence=evidence,
-                                     supersedes=supersedes)
+                                     supersedes=supersedes,
+                                     physical_user=physical_user)
         self.agents.record_action(source_agent, "memory_shared", project_id, outcome,
                                   {"memory_id": memory_id, "life_stage": life_stage})
         return memory_id
@@ -195,8 +197,10 @@ class MemoryManager:
 
     def register_agent(self, agent_id: str, agent_type: str = "cli",
                        capabilities: Optional[list[str]] = None,
-                       metadata: Optional[dict] = None) -> dict:
-        return self.agents.register(agent_id, agent_type, capabilities, metadata)
+                       metadata: Optional[dict] = None,
+                       physical_user: str = "") -> dict:
+        return self.agents.register(agent_id, agent_type, capabilities, metadata,
+                                    physical_user=physical_user)
 
     def list_agents(self) -> list[str]:
         return self.agents.list_active()

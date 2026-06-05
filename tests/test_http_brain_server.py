@@ -46,7 +46,7 @@ class BrainAPITests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_brain_api_records_events_and_feedback(self):
-        self.api.register_agent({"agent_id": "api-unit", "capabilities": ["testing"]})
+        self.api.register_agent({"agent_id": "api-unit", "capabilities": ["testing"], "physical_user": "test-runner"})
         proposed = self.api.propose_memory({
             "title": "API 脑虫测试记忆",
             "content": "BrainAPI 代表服务端权威入口。",
@@ -73,7 +73,7 @@ class BrainAPITests(unittest.TestCase):
         self.assertIn("usage.finished", event_types)
 
     def test_consensus_vote_is_event_not_direct_doctrine_mutation(self):
-        self.api.register_agent({"agent_id": "api-unit", "capabilities": ["testing"]})
+        self.api.register_agent({"agent_id": "api-unit", "capabilities": ["testing"], "physical_user": "test-runner"})
         proposed = self.api.propose_memory({
             "title": "共识候选",
             "content": "投票只是事件，不直接晋升规则。",
@@ -93,8 +93,8 @@ class BrainAPITests(unittest.TestCase):
         self.assertEqual(self.api.get_memory(proposed["memory_id"])["life_stage"], "memory")
 
     def test_consensus_quorum_promotes_to_verified_skill_not_doctrine(self):
-        self.api.register_agent({"agent_id": "alpha", "capabilities": ["review"]})
-        self.api.register_agent({"agent_id": "beta", "capabilities": ["review"]})
+        self.api.register_agent({"agent_id": "alpha", "capabilities": ["review"], "physical_user": "test-runner"})
+        self.api.register_agent({"agent_id": "beta", "capabilities": ["review"], "physical_user": "test-runner"})
         proposed = self.api.propose_memory({
             "title": "可共识技能",
             "content": "两个独立单位支持后，服务端可晋升为 verified_skill。",
@@ -150,6 +150,7 @@ class BrainAPITests(unittest.TestCase):
             "category": "architecture",
             "agent_id": "api-unit",
             "life_stage": "doctrine",
+            "physical_user": "test-runner",
         })
         self.assertEqual(proposed["requested_life_stage"], "doctrine")
         self.assertEqual(proposed["life_stage"], "memory")
@@ -162,6 +163,7 @@ class HttpBrainServerTests(unittest.TestCase):
         self.env["CEREBRATE_MEMORY_ROOT"] = str(Path(self.tmp.name) / "memory")
         self.env["CEREBRATE_EMBEDDING_MODEL"] = "not-a-real-local-model"
         self.env["CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD"] = "false"
+        self.env["CEREBRATE_SERVER_TOKEN"] = ""
         self.env["PYTHONPYCACHEPREFIX"] = str(Path(self.tmp.name) / "pycache")
         self.proc = subprocess.Popen(
             [
@@ -234,6 +236,7 @@ class HttpBrainServerTests(unittest.TestCase):
             "agent_id": "server-unit",
             "agent_type": "http",
             "capabilities": ["debugging"],
+            "physical_user": "test-runner",
         })
         self.assert_v5_ok(registered)
 
@@ -302,7 +305,7 @@ class HttpBrainServerTests(unittest.TestCase):
         self.assertIn("consensus.vote", event_types)
 
     def test_sse_once_stream_is_resumable(self):
-        self.post("/v1/agents/register", {"agent_id": "sse-unit"})
+        self.post("/v1/agents/register", {"agent_id": "sse-unit", "physical_user": "test-runner"})
         time.sleep(0.1)
         with urlopen(f"{self.base_url}/v1/events/stream?cursor=0&once=true&limit=5", timeout=10) as response:
             body = response.read().decode("utf-8")

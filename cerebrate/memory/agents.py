@@ -84,7 +84,8 @@ class AgentRegistry:
 
     def register(self, agent_id: str, agent_type: str = "cli",
                  capabilities: Optional[list[str]] = None,
-                 metadata: Optional[dict] = None) -> dict:
+                 metadata: Optional[dict] = None,
+                 physical_user: str = "") -> dict:
         now = datetime.now(timezone.utc).isoformat()
         with self._cache_lock:
             if agent_id in self._cache:
@@ -93,6 +94,7 @@ class AgentRegistry:
                 info = {
                     "agent_id": agent_id,
                     "agent_type": agent_type,
+                    "physical_user": physical_user or "",
                     "capabilities": capabilities or [],
                     "metadata": metadata or {},
                     "registered_at": now,
@@ -104,6 +106,8 @@ class AgentRegistry:
                     "action_log": [],
                 }
 
+            if physical_user:
+                info["physical_user"] = physical_user
             info["agent_type"] = agent_type
             if capabilities:
                 info["capabilities"] = list(
@@ -142,6 +146,7 @@ class AgentRegistry:
                 result.append({
                     "agent_id": aid,
                     "agent_type": info.get("agent_type", ""),
+                    "physical_user": info.get("physical_user", ""),
                     "capabilities": info.get("capabilities", []),
                     "total_actions": info.get("total_actions", 0),
                     "memory_contributions": info.get("memory_contributions", 0),
@@ -197,6 +202,14 @@ class AgentRegistry:
 
             self._cache[agent_id] = info
         self._persist(agent_id)
+
+    def get_physical_user(self, agent_id: str) -> str:
+        """查询 agent 对应的物理用户（操作系统用户名），用于安全溯源。"""
+        with self._cache_lock:
+            info = self._cache.get(agent_id)
+            if info:
+                return info.get("physical_user", "")
+        return ""
 
     def get_stats(self, agent_id: str) -> Optional[dict]:
         with self._cache_lock:

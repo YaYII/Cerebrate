@@ -36,7 +36,7 @@ async function main() {
     case "events": return await brain.getEvents(parseInt(flag("cursor","0")), parseInt(flag("limit","100")));
     case "memory-get": return await brain.getMemory(flag("memory-id",""));
     case "evolve": return await brain.evolve();
-    case "register": return await brain.registerAgent({ agent_id: flag("id",""), agent_type: flag("type","node"), capabilities: flag("capabilities","").split(",").filter(Boolean), metadata:{ client:"cerebrate-node-cli" } });
+    case "register": return await brain.registerAgent({ agent_id: flag("id",""), agent_type: flag("type","node"), capabilities: flag("capabilities","").split(",").filter(Boolean), metadata:{ client:"cerebrate-node-cli" }, physical_user: flag("physical-user", process.env.USER ?? process.env.LOGNAME ?? "") });
     default: return { status: "error", error: { code: 400, message: `unknown command: ${cmd || "(empty)"}` }, meta: { protocol: "v5" } };
   }
 }

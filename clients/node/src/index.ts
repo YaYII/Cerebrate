@@ -94,7 +94,7 @@ export class BrainClient {
   useStart(params: UseStartParams) { return this.post<UseStartData>("/v1/usages/start", params as unknown as Record<string, unknown>); }
   useFinish(params: UseFinishParams) { return this.post<UseFinishData>("/v1/usages/finish", params as unknown as Record<string, unknown>); }
   vote(params: VoteParams) { return this.post<VoteData>("/v1/consensus/vote", params as unknown as Record<string, unknown>); }
-  registerAgent(params: RegisterParams) { return this.post<RegisterData>("/v1/agents/register", { agent_id: params.agent_id, agent_type: params.agent_type ?? "http", capabilities: params.capabilities ?? [], metadata: params.metadata ?? {} }); }
+  registerAgent(params: RegisterParams) { return this.post<RegisterData>("/v1/agents/register", { agent_id: params.agent_id, agent_type: params.agent_type ?? "http", capabilities: params.capabilities ?? [], metadata: params.metadata ?? {}, physical_user: params.physical_user ?? process.env.USER ?? process.env.LOGNAME ?? "" }); }
   getMemory(memoryId: string) { return this.get<unknown>(`/v1/memories/${encodeURIComponent(memoryId)}`); }
   getEvents(cursor = 0, limit = 100) { return this.get<EventsData>("/v1/events", { cursor, limit }); }
   getPersonal() { return this.get<unknown>("/v1/personal"); }

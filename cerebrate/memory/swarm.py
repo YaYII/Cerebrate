@@ -66,7 +66,8 @@ class SwarmMemory:
               project_id: str = "", language: str = "",
               life_stage: str = "memory", nutrient_score: float = 1.0,
               confidence: float = 1.0, evidence: str = "",
-              supersedes: Optional[list[str]] = None) -> str:
+              supersedes: Optional[list[str]] = None,
+              physical_user: str = "") -> str:
         project_id = project_id or config.current_project_id
         language = language or config.default_language
         now = datetime.now(timezone.utc).isoformat()
@@ -84,6 +85,7 @@ class SwarmMemory:
             "category": category,
             "tags": ",".join(tags),
             "source_agent": source_agent,
+            "physical_user": physical_user or "",
             "problem_solved": problem_solved,
             "solution": solution,
             "outcome": outcome,
@@ -192,6 +194,7 @@ class SwarmMemory:
                 "category": meta.get("category", ""),
                 "tags": (meta.get("tags") or "").split(","),
                 "source_agent": meta.get("source_agent", "unknown"),
+                "physical_user": meta.get("physical_user", ""),
                 "project_id": meta.get("project_id", ""),
                 "language": meta.get("language", ""),
             })
@@ -286,6 +289,7 @@ class SwarmMemory:
             "category": meta.get("category", ""),
             "tags": (meta.get("tags") or "").split(","),
             "source_agent": meta.get("source_agent", ""),
+            "physical_user": meta.get("physical_user", ""),
             "project_id": meta.get("project_id", ""),
             "created": meta.get("created", ""),
         }

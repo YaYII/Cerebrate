@@ -71,6 +71,7 @@ export interface ProposeParams {
   confidence?: number;
   evidence?: string;
   validate?: boolean;
+  physical_user?: string;
 }
 
 export interface ProposeData {
@@ -126,6 +127,7 @@ export interface RegisterParams {
   agent_type?: string;
   capabilities?: string[];
   metadata?: Record<string, unknown>;
+  physical_user?: string;
 }
 
 export interface RegisterData {

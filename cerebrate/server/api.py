@@ -50,14 +50,17 @@ class BrainAPI:
         agent_id = payload.get("agent_id") or payload.get("id")
         if not agent_id:
             raise ValueError("agent_id is required")
+        physical_user = payload.get("physical_user", "")
         info = self.mm.register_agent(
             agent_id=agent_id,
             agent_type=payload.get("agent_type", payload.get("type", "http")),
             capabilities=payload.get("capabilities") or [],
             metadata=payload.get("metadata") or {},
+            physical_user=physical_user,
         )
         self.events.append("agent.registered", agent_id,
-                           {"agent_id": agent_id})
+                           {"agent_id": agent_id,
+                            "physical_user": physical_user})
         return info
 
     def query(self, payload: dict) -> dict:
@@ -392,6 +395,14 @@ class BrainAPI:
 
         source_agent = payload.get("agent") or payload.get(
             "agent_id") or "unknown"
+        # ── 安全溯源：从 agent 注册表获取物理用户身份 ──
+        physical_user = payload.get("physical_user") or self.mm.agents.get_physical_user(source_agent) or ""
+        if not physical_user:
+            raise ValueError("physical_user is required for security traceability; memory write rejected")
+        # ── 血缘关系：处理 supersedes 参数（字符串或列表） ──
+        supersedes_raw = payload.get("supersedes") or []
+        if isinstance(supersedes_raw, str):
+            supersedes_raw = [s.strip() for s in supersedes_raw.split(",") if s.strip()]
         project_id = payload.get("project") or payload.get("project_id", "")
         requested_stage = payload.get("life_stage", "memory")
         life_stage = requested_stage if requested_stage in self.CLIENT_LIFE_STAGES else "memory"
@@ -425,7 +436,8 @@ class BrainAPI:
             nutrient_score=float(payload.get("nutrient_score", 1.0)),
             confidence=confidence,
             evidence=evidence,
-            supersedes=payload.get("supersedes") or [],
+            supersedes=supersedes_raw,
+            physical_user=physical_user,
         )
         data = {
             "memory_id": memory_id,
