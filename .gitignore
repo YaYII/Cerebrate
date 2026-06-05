@@ -17,7 +17,6 @@ cerebrate/memory/.archived/
 cerebrate/memory/_semantic_index*.json
 cerebrate/memory/_semantic_index.kb_index.json
 cerebrate/memory/chroma_data/
-memory/knowledge_files/
 
 # 允许明确导出的脑虫养分种子入库
 !cerebrate/memory/seeds/

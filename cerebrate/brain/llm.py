@@ -35,6 +35,8 @@ class CerebrateLLM:
             self._available = bool(os.environ.get("ANTHROPIC_API_KEY"))
         elif self._provider == "openai":
             self._available = bool(os.environ.get("OPENAI_API_KEY"))
+        elif self._provider == "deepseek":
+            self._available = bool(os.environ.get("DEEPSEEK_API_KEY"))
         else:
             self._available = False
         return self._available
@@ -53,6 +55,12 @@ class CerebrateLLM:
             elif self._provider == "openai":
                 import openai
                 self._client = openai.OpenAI()
+            elif self._provider == "deepseek":
+                import openai
+                self._client = openai.OpenAI(
+                    base_url="https://api.deepseek.com/v1",
+                    api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                )
             else:
                 self._sdk_available = False
                 return False
@@ -490,12 +498,17 @@ class CerebrateLLM:
 只返回 JSON，不要其他文字。"""
 
         try:
-            kwargs = {
+            is_reasoner = self._provider == "deepseek" and "reasoner" in self._model
+            kwargs: dict = {
                 "model": self._model,
-                "max_tokens": 4096,
-                "temperature": 0.2,
                 "messages": [{"role": "user", "content": prompt}],
             }
+            # deepseek-reasoner 不支持 temperature/max_tokens
+            if not is_reasoner:
+                kwargs["max_tokens"] = 4096
+                kwargs["temperature"] = 0.2
+            else:
+                kwargs["max_tokens"] = 65536  # reasoner 大输出
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
                 text = response.content[0].text if response.content else ""

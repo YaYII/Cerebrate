@@ -216,16 +216,17 @@ class EvolutionEngine:
         # ── 尝试 LLM 蒸馏，失败则回退模板 ──
         llm = CerebrateLLM()
         for topic, mems in topic_groups.items():
-            # ── 质量门控：记忆数量、复用次数、代理多样性 ──
-            if len(mems) < 3:
+            # ── 质量门控 ──
+            # 智者可能是孤独的：单代理+高复用的知识同样有价值
+            if len(mems) < 2:
                 continue
             total_reuse = sum(m.get("reuse_count", 0) for m in mems)
-            if total_reuse < 5:
+            if total_reuse < 3:
                 continue
             unique_agents = {m.get("source_agent", "") for m in mems if m.get("source_agent")}
             unique_agents.discard("")
-            if len(unique_agents) < 2:
-                continue
+            # 单代理 → 可蒸馏但证据等级降为 B（缺乏交叉验证）
+            is_solo = len(unique_agents) < 2
 
             existing = swarm.query(
                 f"distilled skill {topic}",
@@ -283,7 +284,7 @@ class EvolutionEngine:
                 project_id="",
                 life_stage="verified_skill",
                 confidence=confidence,
-                evidence=f"LLM蒸馏: {len(mems)}条记忆, 总复用{total_reuse}次" if doc else f"模板蒸馏: {len(mems)}条记忆",
+                evidence=f"LLM蒸馏: {len(mems)}条记忆, 总复用{total_reuse}次, {'单源验证(B级)' if is_solo else '交叉验证(A级)'}" if doc else f"模板蒸馏: {len(mems)}条记忆",
                 supersedes=supersedes_ids,
                 origin_ids=mem_origin_ids,
             )

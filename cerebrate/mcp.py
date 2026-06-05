@@ -233,16 +233,6 @@ TOOLS = [
         }
     },
     {
-        "name": "cerebrate_knowledge_export",
-        "description": "将权威知识库导出为人类可读的 Markdown 文档，写入本地目录（默认 .虫群）。每条知识一个 md 文件 + README 索引，方便人工翻阅。",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "output_dir": {"type": "string", "description": "导出目录（相对 MCP 进程工作目录或绝对路径）", "default": ".虫群"}
-            }
-        }
-    },
-    {
         "name": "cerebrate_batch_process",
         "description": "【会话结束时调用】批量处理 IPC 队列中的待办请求。",
         "inputSchema": {
@@ -252,11 +242,6 @@ TOOLS = [
             }
         }
     },
-    {
-        "name": "cerebrate_evolve",
-        "description": "【会话结束时调用】触发脑虫进化：去重、技能蒸馏、教条提炼、记忆衰减。强制执行，不受夜间进化窗口限制。",
-        "inputSchema": {"type": "object", "properties": {}}
-    }
 ]
 
 # ── 工具调用实现 ────────────────────────────────────────────
@@ -398,70 +383,10 @@ def _handle_call(name: str, args: dict) -> dict:
                 qparams["project_id"] = args["project_id"]
             return _request("GET", f"/v1/knowledge?{urlencode(qparams)}")
 
-        elif name == "cerebrate_knowledge_export":
-            import os
-            import re
-            envelope = _request("GET", "/v1/knowledge/all")
-            if envelope.get("status") != "ok":
-                return envelope
-            docs = envelope.get("data", {}).get("documents", [])
-            out_dir = args.get("output_dir") or ".虫群"
-            os.makedirs(out_dir, exist_ok=True)
-
-            index = [
-                "# 🧠 虫群知识库",
-                "",
-                f"> 共 **{len(docs)}** 条知识，由 Cerebrate 脑虫从群体记忆中沉淀提炼。",
-                "> 本目录由 `cerebrate_knowledge_export` 自动生成，供人工翻阅。",
-                "",
-                "## 索引",
-                "",
-            ]
-            written = []
-            for i, d in enumerate(docs, 1):
-                title = d.get("title", "无标题")
-                safe = re.sub(r"\W+", "_", title, flags=re.UNICODE).strip("_")[:50] or f"doc{i}"
-                fname = f"{i:02d}-{safe}.md"
-                topics = ", ".join(d.get("topics", []))
-                badge = f" 🏛️ 策略:{d.get('policy_name')}" if d.get("is_policy") else ""
-                verified = " ✅已验证" if d.get("verified") else ""
-                doc_md = "\n".join([
-                    f"# {title}",
-                    "",
-                    f"- **doc_id**: `{d.get('doc_id', '')}`",
-                    f"- **主题**: {topics or '—'}",
-                    f"- **来源**: {d.get('source', '') or '—'}",
-                    f"- **版本**: {d.get('version', '') or '—'}{badge}{verified}",
-                    f"- **作者**: {d.get('author', '') or '—'}",
-                    f"- **更新时间**: {d.get('updated', '') or '—'}",
-                    "",
-                    "---",
-                    "",
-                    d.get("content", "") or "（无内容）",
-                    "",
-                ])
-                with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
-                    f.write(doc_md)
-                written.append(fname)
-                index.append(f"{i}. [{title}](./{fname}) — {topics}{badge}{verified}")
-
-            with open(os.path.join(out_dir, "README.md"), "w", encoding="utf-8") as f:
-                f.write("\n".join(index) + "\n")
-
-            return {"status": "ok", "data": {
-                "exported": len(docs),
-                "output_dir": os.path.abspath(out_dir),
-                "files": ["README.md"] + written,
-            }}
-
         elif name == "cerebrate_batch_process":
             return _request("POST", "/v1/batch/process", {
                 "limit": args.get("limit", 50)
             })
-
-        elif name == "cerebrate_evolve":
-            # force=true 强制触发，不受服务端夜间进化窗口限制
-            return _request("POST", "/v1/evolve?force=true", {})
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}

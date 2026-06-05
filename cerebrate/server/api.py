@@ -828,10 +828,6 @@ class BrainAPI:
                            {"doc_id": doc_id, "title": title})
         return {"doc_id": doc_id}
 
-    def export_knowledge_pdf(self, doc_id: str) -> Optional[bytes]:
-        """导出知识文档为 PDF。"""
-        return self.mm.knowledge.export_pdf(doc_id)
-
     def list_all_knowledge(self) -> list[dict]:
         """列出知识库所有文档摘要。"""
         docs = []
@@ -847,6 +843,60 @@ class BrainAPI:
                     "updated": m.get("updated", ""),
                 })
         return docs
+
+    def distill_knowledge_on_demand(self, payload: dict) -> dict:
+        """按需蒸馏：根据 topic 搜索记忆，LLM 生成知识文档并入库。"""
+        topic = payload.get("topic", "").strip()
+        if not topic:
+            raise ValueError("topic is required")
+
+        # 搜索相关记忆
+        memories = self.mm.query_swarm(topic, limit=20)
+        if len(memories) < 2:
+            return {"distilled": False, "reason": f"相关记忆不足（当前{len(memories)}条，至少需要2条）。请先积累更多相关经验后再蒸馏。"}
+
+        # 补充完整数据
+        full_memories = []
+        for m in memories:
+            mem = self.mm.get_swarm_memory(m.get("memory_id", ""))
+            if mem:
+                full_memories.append(mem)
+
+        if len(full_memories) < 2:
+            return {"distilled": False, "reason": "无法加载完整记忆数据"}
+
+        # 调用 LLM 蒸馏
+        from cerebrate.brain.llm import CerebrateLLM
+        llm = CerebrateLLM()
+        if not llm.is_available():
+            return {"distilled": False, "reason": "LLM 不可用，请配置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY"}
+
+        doc = llm.distill_knowledge(full_memories, topic)
+        if not doc or doc.get("skip"):
+            reason = doc.get("reason", "数据不足") if doc else "LLM 蒸馏失败"
+            return {"distilled": False, "reason": f"蒸馏跳过: {reason}。请提供更丰富的记忆数据。"}
+
+        # 构建完整文档并入库
+        from cerebrate.memory.evolution import EvolutionEngine
+        meta = doc.get("meta", {})
+        title = meta.get("title", topic)
+        content = EvolutionEngine._build_knowledge_document(doc, topic)
+        confidence = meta.get("confidence", 0.85)
+
+        doc_id = self.mm.store_knowledge(
+            title=title, content=content,
+            source="cerebrate-evolution",
+            topics=[topic],
+            is_policy=True,
+            policy_name=topic,
+            version="1.0",
+            author="cerebrate-evolution",
+            project_id=payload.get("project_id", ""),
+        )
+        self.events.append("knowledge.distilled", "on-demand",
+                           {"doc_id": doc_id, "topic": topic, "source_count": len(full_memories)})
+        return {"distilled": True, "doc_id": doc_id, "title": title,
+                "source_count": len(full_memories), "confidence": confidence}
 
     def list_knowledge_topics(self) -> dict:
         """列出知识库所有主题。"""
