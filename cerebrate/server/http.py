@@ -83,6 +83,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.doctrines()
         if method == "GET" and path == "/v1/knowledge/topics":
             return self.api.list_knowledge_topics()
+        if method == "GET" and path == "/v1/knowledge/all":
+            return {"documents": self.api.list_all_knowledge()}
         if method == "GET" and path.startswith("/v1/knowledge"):
             q = (params.get("q") or [""])[0]
             topic = (params.get("topic") or [""])[0]

@@ -841,6 +841,34 @@ class BrainAPI:
         return {"topics": self.mm.knowledge.list_topics(),
                 "policies": self.mm.knowledge.list_policies()}
 
+    def list_all_knowledge(self) -> list[dict]:
+        """列出知识库全部文档（含完整内容），用于导出/人工浏览。"""
+        kb = self.mm.knowledge
+        docs = []
+        for did in kb._store.get_all_ids():
+            item = kb._store.get(did)
+            if not item:
+                continue
+            m = item["metadata"]
+            docs.append({
+                "doc_id": did,
+                "title": m.get("title", ""),
+                "content": m.get("content", ""),
+                "topics": [t for t in (m.get("topics") or "").split(",") if t],
+                "source": m.get("source", ""),
+                "is_policy": m.get("is_policy") == "True",
+                "policy_name": m.get("policy_name", ""),
+                "version": m.get("version", ""),
+                "author": m.get("author", ""),
+                "verified": m.get("verified") == "True",
+                "deprecated": m.get("deprecated") == "True",
+                "project_id": m.get("project_id", ""),
+                "created": m.get("created", ""),
+                "updated": m.get("updated", ""),
+            })
+        docs.sort(key=lambda d: d.get("updated", ""), reverse=True)
+        return docs
+
     def cleanup_expired_origins(self, days: int = 365,
                                 backup_dir: str = "/data/origin_backups") -> dict:
         """清理超过保留期的原始记忆：先备份再删除。"""
