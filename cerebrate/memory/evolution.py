@@ -255,22 +255,9 @@ class EvolutionEngine:
             if doc and doc.get("meta"):
                 meta = doc["meta"]
                 title = meta.get("title", f"[已验证技能] {topic}")
-                abstract = doc.get("abstract", "")
-                content_parts = [abstract] if abstract else []
-                # 方法论
-                meth = doc.get("methodology_layer", {})
-                for p in meth.get("patterns", []):
-                    steps = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(p.get("steps", [])))
-                    content_parts.append(f"## {p.get('name', '模式')} [{p.get('evidence_level','B')}级]")
-                    content_parts.append(steps)
-                # 陷阱
-                pits = doc.get("pitfalls_and_edge_cases", [])
-                if pits:
-                    content_parts.append("## 注意事项")
-                    for p in pits:
-                        content_parts.append(f"- ⚠ {p.get('description','')}: {p.get('mitigation','')}")
-                content = "\n\n".join(content_parts) or abstract or f"蒸馏主题: {topic}"
                 confidence = meta.get("confidence", 0.85)
+                # ── 构建完整论文级知识文档 ──
+                content = self._build_knowledge_document(doc, topic)
             else:
                 # LLM 不可用，回退模板拼接
                 best = mems[0]
@@ -355,17 +342,8 @@ class EvolutionEngine:
             if doc and doc.get("meta"):
                 meta = doc["meta"]
                 title = meta.get("title", f"[脑虫教条] {cat}")
-                abstract = doc.get("abstract", "")
-                content_parts = [abstract] if abstract else []
-                principle = doc.get("principle_layer", {})
-                for rc in principle.get("root_causes", []):
-                    content_parts.append(f"- 根因: {rc.get('cause','')} [{rc.get('evidence_level','B')}级]")
-                meth = doc.get("methodology_layer", {})
-                for p in meth.get("patterns", []):
-                    steps = "\n".join(f"  {i+1}. {s}" for i, s in enumerate(p.get("steps", [])))
-                    content_parts.append(f"## {p.get('name','方案')}\n{steps}")
-                content = "\n\n".join(content_parts) or abstract or f"跨项目稳定策略: {mems[0].get('solution','')}"
                 confidence = meta.get("confidence", 0.9)
+                content = self._build_knowledge_document(doc, cat)
             else:
                 best = mems[0]
                 title = f"[脑虫教条] {cat}"
@@ -456,6 +434,151 @@ class EvolutionEngine:
         if self._history:
             return self._history[-1].get("timestamp")
         return None
+
+    @staticmethod
+    def _build_knowledge_document(doc: dict, topic: str) -> str:
+        """将 LLM 蒸馏返回的完整四级结构序列化为论文级 Markdown 文档。"""
+        parts = []
+
+        meta = doc.get("meta", {})
+        title = meta.get("title", topic)
+        parts.append(f"# {title}")
+        parts.append(f"> 版本: {meta.get('version','1.0.0')} | "
+                      f"来源记忆: {meta.get('source_count',0)}条 | "
+                      f"总复用: {meta.get('total_reuse',0)}次 | "
+                      f"置信度: {meta.get('confidence',0):.0%}")
+        parts.append("")
+
+        abstract = doc.get("abstract", "")
+        if abstract:
+            parts.append("## 摘要")
+            parts.append(abstract)
+            parts.append("")
+
+        # 概念层
+        concept = doc.get("concept_layer", {})
+        if concept.get("concepts"):
+            parts.append("## 1. 核心概念")
+            for c in concept["concepts"]:
+                lvl = c.get("evidence_level", "B")
+                refs = c.get("refs", [])
+                ref_str = f" → [记忆源{','.join(str(r) for r in refs)}]" if refs else ""
+                parts.append(f"### {c.get('term','')} [{lvl}级]{ref_str}")
+                parts.append(c.get("definition", ""))
+                parts.append("")
+
+        # 原理层
+        principle = doc.get("principle_layer", {})
+        if principle.get("root_causes"):
+            parts.append("## 2. 根因分析")
+            for rc in principle["root_causes"]:
+                lvl = rc.get("evidence_level", "B")
+                refs = rc.get("refs", [])
+                ref_str = f" [记忆源{','.join(str(r) for r in refs)}]" if refs else ""
+                parts.append(f"### {rc.get('cause','')} [{lvl}级]{ref_str}")
+                mech = rc.get("mechanism", "")
+                if mech:
+                    parts.append(f"触发机制: {mech}")
+                parts.append("")
+
+        # 方法论层
+        meth = doc.get("methodology_layer", {})
+        if meth.get("patterns"):
+            parts.append("## 3. 解决方案")
+            for i, p in enumerate(meth["patterns"]):
+                lvl = p.get("evidence_level", "B")
+                refs = p.get("refs", [])
+                ref_str = f" [记忆源{','.join(str(r) for r in refs)}]" if refs else ""
+                parts.append(f"### 3.{i+1} {p.get('name','')} [{lvl}级]{ref_str}")
+                pre = p.get("preconditions", "")
+                if pre:
+                    parts.append(f"**前置条件**: {pre}")
+                steps = p.get("steps", [])
+                if steps:
+                    parts.append("**步骤**:")
+                    for j, s in enumerate(steps):
+                        parts.append(f"  {j+1}. {s}")
+                outcome = p.get("expected_outcome", "")
+                if outcome:
+                    parts.append(f"**预期结果**: {outcome}")
+                parts.append("")
+
+        # 实践层
+        practice = doc.get("practice_layer", {})
+        if practice.get("guides"):
+            parts.append("## 4. 操作指南")
+            for g in practice["guides"]:
+                lvl = g.get("evidence_level", "B")
+                refs = g.get("refs", [])
+                ref_str = f" [记忆源{','.join(str(r) for r in refs)}]" if refs else ""
+                parts.append(f"### {g.get('scenario','')} [{lvl}级]{ref_str}")
+                cmds = g.get("commands", [])
+                if cmds:
+                    parts.append("```bash")
+                    for cmd in cmds:
+                        parts.append(cmd)
+                    parts.append("```")
+                verify = g.get("verification", "")
+                if verify:
+                    parts.append(f"**验证**: {verify}")
+                rollback = g.get("rollback", "")
+                if rollback:
+                    parts.append(f"**回滚**: {rollback}")
+                parts.append("")
+
+        # 陷阱
+        pits = doc.get("pitfalls_and_edge_cases", [])
+        if pits:
+            parts.append("## 5. 注意事项与边界情况")
+            for p in pits:
+                refs = p.get("refs", [])
+                ref_str = f" [记忆源{','.join(str(r) for r in refs)}]" if refs else ""
+                parts.append(f"### ⚠ {p.get('description','')}{ref_str}")
+                cons = p.get("consequence", "")
+                if cons:
+                    parts.append(f"**后果**: {cons}")
+                mit = p.get("mitigation", "")
+                if mit:
+                    parts.append(f"**缓解**: {mit}")
+                parts.append("")
+
+        # 知识图谱
+        graph = doc.get("knowledge_graph", {})
+        if graph:
+            prereqs = graph.get("prerequisites", [])
+            related = graph.get("related_topics", [])
+            conflicts = graph.get("conflicts", [])
+            if prereqs or related or conflicts:
+                parts.append("## 6. 知识关联")
+                if prereqs:
+                    parts.append(f"**前置知识**: {', '.join(prereqs)}")
+                if related:
+                    parts.append(f"**相关主题**: {', '.join(related)}")
+                if conflicts:
+                    parts.append("**已知矛盾**:")
+                    for c in conflicts:
+                        parts.append(f"  - {c}")
+                parts.append("")
+
+        # 参考文献
+        refs = doc.get("references", [])
+        if refs:
+            parts.append("## 7. 参考文献")
+            for r in refs:
+                parts.append(f"- [{r.get('index','?')}] {r.get('title','')} "
+                             f"({r.get('memory_id','')}): {r.get('contribution','')}")
+            parts.append("")
+
+        # 可复现性
+        repro = doc.get("reproducibility", {})
+        if repro:
+            parts.append("## 8. 可复现性")
+            parts.append(f"- 可复现: {'是' if repro.get('can_reproduce') else '否'}")
+            parts.append(f"- 预估耗时: {repro.get('estimated_time','未知')}")
+            parts.append(f"- 所需环境: {repro.get('required_env','未知')}")
+            parts.append("")
+
+        return "\n".join(parts)
 
     def should_evolve(self, interval_hours: int = 24) -> bool:
         last = self.get_last_evolution_time()

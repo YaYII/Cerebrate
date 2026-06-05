@@ -85,6 +85,20 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.list_knowledge_topics()
         if method == "GET" and path == "/v1/knowledge/all":
             return {"documents": self.api.list_all_knowledge()}
+        if method == "GET" and path.endswith("/pdf") and "/v1/knowledge/" in path:
+            parts = path.rstrip("/").split("/")
+            doc_id = parts[-2]
+            pdf_data = self.api.export_knowledge_pdf(doc_id)
+            if pdf_data:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Disposition",
+                                 f'attachment; filename="knowledge_{doc_id[:8]}.pdf"')
+                self.send_header("Content-Length", str(len(pdf_data)))
+                self.end_headers()
+                self.wfile.write(pdf_data)
+                return {}
+            raise KeyError(f"PDF导出失败: {doc_id}")
         if method == "GET" and path.startswith("/v1/knowledge"):
             q = (params.get("q") or [""])[0]
             topic = (params.get("topic") or [""])[0]

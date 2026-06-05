@@ -152,22 +152,14 @@ class BrainAPI:
             )
             updated_content = existing_content + append_text
 
-            # 更新知识库文档（直接 upsert 到已有 doc_id，绕过哈希去重）
-            now = datetime.now(timezone.utc).isoformat()
-            meta = {
-                "title": best.get("title", title),
-                "content": updated_content,
-                "source": f"{best.get('source','')},{source_agent}",
-                "topics": ",".join(best.get("topics", [])),
-                "is_policy": str(best.get("is_policy", False)),
-                "policy_name": best.get("policy_name", ""),
-                "version": best.get("version", "1.0"),
-                "author": best.get("author", source_agent),
-                "project_id": project_id,
-                "updated": now,
-            }
-            search_text = f"{best.get('title', title)}\n{updated_content[:500]}"
-            self.mm.knowledge._store.upsert(doc_id, search_text, meta)
+            # 更新知识库文档（同步 ChromaDB + Markdown 文件）
+            self.mm.knowledge.update_document(
+                doc_id=doc_id,
+                title=best.get("title", title),
+                content=updated_content,
+                metadata={"source": f"{best.get('source','')},{source_agent}",
+                          "author": best.get("author", source_agent)},
+            )
         except Exception:
             pass  # 知识关联非关键路径
 
@@ -835,6 +827,26 @@ class BrainAPI:
         self.events.append("knowledge.stored", payload.get("agent_id", "manual"),
                            {"doc_id": doc_id, "title": title})
         return {"doc_id": doc_id}
+
+    def export_knowledge_pdf(self, doc_id: str) -> Optional[bytes]:
+        """导出知识文档为 PDF。"""
+        return self.mm.knowledge.export_pdf(doc_id)
+
+    def list_all_knowledge(self) -> list[dict]:
+        """列出知识库所有文档摘要。"""
+        docs = []
+        for did in self.mm.knowledge._store.get_all_ids():
+            item = self.mm.knowledge._store.get(did)
+            if item:
+                m = item["metadata"]
+                docs.append({
+                    "doc_id": item["id"],
+                    "title": m.get("title", ""),
+                    "topics": (m.get("topics") or "").split(","),
+                    "is_policy": m.get("is_policy") == "True",
+                    "updated": m.get("updated", ""),
+                })
+        return docs
 
     def list_knowledge_topics(self) -> dict:
         """列出知识库所有主题。"""

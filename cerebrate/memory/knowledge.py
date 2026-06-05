@@ -1,5 +1,7 @@
-"""权威知识库层 v5 — 服务端权威知识 + ChromaDB 向量存储"""
+"""权威知识库层 v5 — 服务端权威知识 + ChromaDB 向量存储 + Markdown 文件持久化"""
 import hashlib
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -75,6 +77,11 @@ class KnowledgeBase:
 
         self._store.add(doc_id, search_text, metadata)
         self._hash_index[doc_hash] = doc_id
+
+        # ── 双写：同步写入人类可读的 Markdown 文件 ──
+        self._write_markdown(doc_id, title, content, metadata, topics,
+                             is_policy, policy_name)
+
         return doc_id
 
     # ==================== 查询 ====================
@@ -188,3 +195,157 @@ class KnowledgeBase:
             if item and item["metadata"].get("policy_name"):
                 policies.add(item["metadata"]["policy_name"])
         return list(policies)
+
+    # ── Markdown 文件持久化 ──────────────────────────────
+
+    def export_pdf(self, doc_id: str) -> Optional[bytes]:
+        """将知识文档导出为 PDF 文件内容。"""
+        item = self._store.get(doc_id)
+        if not item:
+            return None
+        meta = item["metadata"]
+        title = meta.get("title", "Untitled")
+        content = meta.get("content", "")
+
+        try:
+            from fpdf import FPDF
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_auto_page_break(auto=True, margin=15)
+
+            # 标题
+            pdf.set_font("Helvetica", "B", 16)
+            pdf.multi_cell(0, 10, title)
+            pdf.ln(4)
+
+            # 元数据
+            pdf.set_font("Helvetica", "I", 9)
+            meta_line = f"来源: {meta.get('source','')} | 版本: {meta.get('version','')} | {meta.get('updated','')[:10]}"
+            pdf.cell(0, 6, meta_line, ln=True)
+            topics = meta.get("topics", "")
+            if topics:
+                pdf.cell(0, 6, f"主题: {topics}", ln=True)
+            pdf.ln(6)
+
+            # 正文
+            pdf.set_font("Helvetica", "", 10)
+            # 处理 Markdown 基本格式
+            for line in content.split("\n"):
+                line = line.strip()
+                if not line:
+                    pdf.ln(3)
+                    continue
+
+                if line.startswith("# ") and not line.startswith("##"):
+                    pdf.set_font("Helvetica", "B", 13)
+                    pdf.cell(0, 8, line[2:], ln=True)
+                    pdf.set_font("Helvetica", "", 10)
+                elif line.startswith("## "):
+                    pdf.set_font("Helvetica", "B", 11)
+                    pdf.cell(0, 7, line[3:], ln=True)
+                    pdf.set_font("Helvetica", "", 10)
+                elif line.startswith("### "):
+                    pdf.set_font("Helvetica", "BI", 10)
+                    pdf.cell(0, 6, line[4:], ln=True)
+                    pdf.set_font("Helvetica", "", 10)
+                elif line.startswith("```"):
+                    pdf.set_font("Courier", "", 9)
+                elif line.startswith("- ") or line.startswith("* "):
+                    pdf.set_x(pdf.l_margin + 5)
+                    pdf.multi_cell(0, 5, "  " + line[2:])
+                elif line.startswith("  ") and pdf.font_family == "Courier":
+                    pdf.set_font("Courier", "", 9)
+                    pdf.cell(0, 5, line, ln=True)
+                elif line.startswith("> "):
+                    pdf.set_font("Helvetica", "I", 9)
+                    pdf.multi_cell(0, 5, line[2:])
+                    pdf.set_font("Helvetica", "", 10)
+                else:
+                    pdf.multi_cell(0, 5, line)
+
+            return pdf.output()
+        except ImportError:
+            return None
+        except Exception:
+            return None
+
+    def _get_files_dir(self) -> Path:
+        """知识库 Markdown 文件存储目录。"""
+        d = config.memory_root / "knowledge_files"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _safe_name(s: str) -> str:
+        """安全文件名：仅保留字母数字和中文，替换特殊字符。"""
+        s = re.sub(r'[<>:"/\\|?*\s]+', '_', s.strip())
+        return s[:80] if s else "untitled"
+
+    def _write_markdown(self, doc_id: str, title: str, content: str,
+                        metadata: dict, topics: list, is_policy: bool,
+                        policy_name: str):
+        """将知识文档写入人类可读的 Markdown 文件。"""
+        try:
+            files_dir = self._get_files_dir()
+
+            # 按类型和主题分子目录
+            category = "policies" if is_policy else "knowledge"
+            topic_dir = self._safe_name(policy_name or (topics[0] if topics else "general"))
+            target_dir = files_dir / category / topic_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # 写 .md 文件
+            safe_title = self._safe_name(title)
+            filepath = target_dir / f"{safe_title}_{doc_id[:8]}.md"
+
+            header = (
+                f"---\n"
+                f"doc_id: {doc_id}\n"
+                f"title: {title}\n"
+                f"topics: {', '.join(topics)}\n"
+                f"policy: {is_policy}\n"
+                f"policy_name: {policy_name}\n"
+                f"source: {metadata.get('source','')}\n"
+                f"version: {metadata.get('version','')}\n"
+                f"author: {metadata.get('author','')}\n"
+                f"created: {metadata.get('created','')}\n"
+                f"updated: {metadata.get('updated','')}\n"
+                f"---\n\n"
+            )
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(header + content)
+
+            # 写索引文件，方便按时间浏览所有知识
+            index_path = files_dir / "INDEX.md"
+            if not index_path.exists():
+                with open(index_path, "w", encoding="utf-8") as f:
+                    f.write("# 虫群知识库索引\n\n")
+            with open(index_path, "a", encoding="utf-8") as f:
+                f.write(f"- [{title}]({filepath.relative_to(files_dir)})\n")
+
+        except Exception:
+            pass  # 文件写入非关键路径
+
+    def update_document(self, doc_id: str, title: str, content: str,
+                        metadata: dict = None):
+        """更新已有文档的 ChromaDB 记录，并同步更新 Markdown 文件。"""
+        item = self._store.get(doc_id)
+        if not item:
+            return False
+        meta = item["metadata"]
+        meta["content"] = content
+        meta["title"] = title
+        meta["updated"] = datetime.now(timezone.utc).isoformat()
+        if metadata:
+            meta.update(metadata)
+        text = f"{title}\n{content[:500]}"
+        self._store.upsert(doc_id, text, meta)
+
+        # 重写 Markdown 文件
+        topics = (meta.get("topics") or "").split(",")
+        is_policy = meta.get("is_policy", "False") == "True"
+        policy_name = meta.get("policy_name", "")
+        self._write_markdown(doc_id, title, content, meta, topics,
+                             is_policy, policy_name)
+        return True
