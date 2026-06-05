@@ -5,21 +5,22 @@
 
 # ───────── 运行时数据 ─────────
 # 记忆数据 (运行时数据，不入库)
-memory/personal/
-memory/swarm/
-memory/knowledge/
-memory/agents/
-memory/evolution/
-memory/usage/
-memory/events/
-memory/.archived/
-memory/_semantic_index*.json
-memory/_semantic_index.kb_index.json
-memory/chroma_data/
+# 注意: 实际路径在 cerebrate/memory/ 下，需带包前缀才能生效
+cerebrate/memory/personal/
+cerebrate/memory/swarm/
+cerebrate/memory/knowledge/
+cerebrate/memory/agents/
+cerebrate/memory/evolution/
+cerebrate/memory/usage/
+cerebrate/memory/events/
+cerebrate/memory/.archived/
+cerebrate/memory/_semantic_index*.json
+cerebrate/memory/_semantic_index.kb_index.json
+cerebrate/memory/chroma_data/
 
 # 允许明确导出的脑虫养分种子入库
-!memory/seeds/
-!memory/seeds/*.jsonl
+!cerebrate/memory/seeds/
+!cerebrate/memory/seeds/*.jsonl
 
 # ───────── 编译产物 / 二进制文件 ─────────
 __pycache__/
