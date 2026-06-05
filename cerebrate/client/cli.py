@@ -2,6 +2,7 @@
 """Cerebrate v5 — HTTP client CLI. Talks to a running Brain Server."""
 import argparse
 import json
+import os
 import sys
 import urllib.request
 import urllib.error
@@ -12,6 +13,9 @@ def client_request(url: str, method: str, path: str, body: dict = None) -> dict:
     full_url = url.rstrip("/") + path
     data = None
     headers = {"Content-Type": "application/json"}
+    token = os.environ.get("CEREBRATE_SERVER_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if body:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(

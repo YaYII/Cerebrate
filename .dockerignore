@@ -1,0 +1,34 @@
+# 版本控制与缓存
+.git
+.gitignore
+**/__pycache__
+*.py[cod]
+*.so
+
+# 密钥与本地配置
+.env
+.claude
+
+# Node.js 客户端（容器只跑 Python 服务端）
+clients/node/node_modules
+clients/node/dist
+
+# 运行时记忆数据（容器用独立 volume，构建上下文不应包含宿主机数据）
+cerebrate/memory/chroma_data
+cerebrate/memory/personal
+cerebrate/memory/swarm
+cerebrate/memory/knowledge
+cerebrate/memory/agents
+cerebrate/memory/evolution
+cerebrate/memory/events
+cerebrate/memory/usage
+cerebrate/memory/.archived
+cerebrate/memory/_semantic_index*.json
+
+# 测试与文档
+tests
+docs
+*.md
+
+# 计划与临时文件
+.claude/plans
