@@ -70,7 +70,14 @@ class BrainAPI:
         agent_id = payload.get("agent_id", user_id)
         decision = DecisionRouter(self.mm).decide(
             user_id, query, context={"project_id": project_id})
-        best = decision.get("swarm_knowledge", {}).get("best_match")
+        swarm = decision.get("swarm_knowledge", {})
+        best = swarm.get("best_match")
+        related = swarm.get("related", [])
+        # ── 构建全量匹配列表，让 AI 智能体能看到所有检索结果 ──
+        all_matches = []
+        if best:
+            all_matches.append(best)
+        all_matches.extend(related)
         recommendation = "new_experience"
         task = None
         if best:
@@ -79,13 +86,13 @@ class BrainAPI:
             if score > 0.5:
                 recommendation = "reuse"
                 task = self._build_task(
-                    "reuse_memory", memory_id, agent_id, query)
+                    "reuse_memory", memory_id, agent_id, query, all_matches)
             elif score > 0.2:
                 recommendation = "verify"
                 task = self._build_task(
-                    "verify_reference", memory_id, agent_id, query)
+                    "verify_reference", memory_id, agent_id, query, all_matches)
         if task is None:
-            task = self._build_task("solve_fresh", "", agent_id, query)
+            task = self._build_task("solve_fresh", "", agent_id, query, all_matches)
         if decision.get("policy_result"):
             recommendation = "cite_policy"
             task = {
@@ -102,29 +109,48 @@ class BrainAPI:
             "query": query,
             "found": bool(best),
             "swarm_result": best,
+            "swarm_results": all_matches,
+            "total_matches": len(all_matches),
             "policy_result": decision.get("policy_result"),
             "personal": decision.get("personal_tone", {}),
             "recommendation": recommendation,
             "task": task,
         }
         self.events.append("memory.queried", payload.get("agent_id", user_id),
-                           {"query": query, "recommendation": recommendation},
+                           {"query": query, "recommendation": recommendation,
+                            "matches": len(all_matches)},
                            project_id or "")
         return data
 
     @staticmethod
-    def _build_task(action: str, memory_id: str, agent_id: str, problem: str) -> dict:
+    def _build_task(action: str, memory_id: str, agent_id: str, problem: str, all_matches: list = None) -> dict:
+        # ── 多结果警告：当虫群返回多条匹配时，在 instructions 开头列出其余匹配 ──
+        other_matches_hint = ""
+        if all_matches and len(all_matches) > 1:
+            others = [m for m in all_matches if (m.get("memory_id") or m.get("id")) != memory_id]
+            if others:
+                lines = ["虫群返回了多条匹配（共 {} 条），除最佳匹配外还有：".format(len(all_matches))]
+                for m in others[:10]:
+                    mid = m.get("memory_id") or m.get("id", "?")
+                    title = m.get("title", "无标题")
+                    sc = m.get("score", 0)
+                    lines.append(f"  - [{mid}] {title} (评分:{sc:.3f})")
+                other_matches_hint = "\n".join(lines)
+
         if action == "reuse_memory":
+            inst = ["1. 读取记忆内容作为解决方案"]
+            if other_matches_hint:
+                inst.insert(0, "0. 【多结果警告】" + other_matches_hint)
+            inst.extend([
+                "2. 执行解决方案中的步骤",
+                f"3. 完成后调用 POST /v1/usages/start 记录复用 (memory_id={memory_id}, agent={agent_id})",
+                "4. 完成后调用 POST /v1/usages/finish 报告结果"
+            ])
             return {
                 "action": "reuse_memory",
                 "description": "直接复用虫群记忆中的方案",
                 "memory_id": memory_id,
-                "instructions": [
-                    "1. 读取记忆内容作为解决方案",
-                    "2. 执行解决方案中的步骤",
-                    f"3. 完成后调用 POST /v1/usages/start 记录复用 (memory_id={memory_id}, agent={agent_id})",
-                    "4. 完成后调用 POST /v1/usages/finish 报告结果"
-                ],
+                "instructions": inst,
                 "next_commands": [
                     {"command": "use start", "method": "POST", "path": "/v1/usages/start",
                      "params": {"memory_id": memory_id, "agent": agent_id, "problem": problem}},
@@ -134,17 +160,22 @@ class BrainAPI:
                 ]
             }
         elif action == "verify_reference":
+            inst = [
+                "1. 读取记忆内容作为参考",
+                "2. 独立验证方案的可行性",
+            ]
+            if other_matches_hint:
+                inst.insert(0, "0. 【多结果警告】" + other_matches_hint)
+            inst.extend([
+                "3. 根据验证结果调整并执行",
+                f"4. 完成后调用 POST /v1/memories/propose 提交新记忆",
+                f"5. 可选: 调用 POST /v1/usages/start 记录参考 (memory_id={memory_id}, agent={agent_id})"
+            ])
             return {
                 "action": "verify_reference",
                 "description": "参考虫群记忆，但需独立验证",
                 "memory_id": memory_id,
-                "instructions": [
-                    "1. 读取记忆内容作为参考",
-                    "2. 独立验证方案的可行性",
-                    "3. 根据验证结果调整并执行",
-                    f"4. 完成后调用 POST /v1/memories/propose 提交新记忆",
-                    f"5. 可选: 调用 POST /v1/usages/start 记录参考 (memory_id={memory_id}, agent={agent_id})"
-                ],
+                "instructions": inst,
                 "next_commands": [
                     {"command": "memory get", "method": "GET", "path": f"/v1/memories/{memory_id}",
                      "params": {}},
