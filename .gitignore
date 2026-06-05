@@ -52,3 +52,12 @@ Thumbs.db
 
 # ───────── 日志 ─────────
 *.log
+
+# Docker 默认 bind mount 目录（运行时数据，不入库）
+/data/
+
+# 含真实 token 的本地 MCP 配置（开源参考 docs/DEPLOY.md 的占位示例）
+mcp.json
+
+# deepseek 等第三方 AI 工具的本地状态（含本地路径，不入库）
+.deepseek/
