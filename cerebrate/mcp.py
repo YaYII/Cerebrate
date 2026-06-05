@@ -377,16 +377,7 @@ def _send(msg: dict):
 
 
 def main():
-    _send({
-        "jsonrpc": "2.0",
-        "method": "server/info",
-        "params": {
-            "name": "cerebrate-mcp-v5",
-            "version": "5.0.0",
-            "capabilities": {"tools": {}}
-        }
-    })
-
+    # MCP server 不得在收到 initialize 前主动发消息，握手由客户端发起。
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -400,6 +391,11 @@ def main():
         method = req.get("method", "")
         params = req.get("params", {})
 
+        # JSON-RPC 通知（无 id，如 notifications/initialized、notifications/cancelled）
+        # 按规范不得返回任何响应，统一忽略。
+        if req_id is None:
+            continue
+
         if method == "initialize":
             client_version = params.get("protocolVersion", "2024-11-05")
             _send({
@@ -411,26 +407,30 @@ def main():
                     "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.0.0"}
                 }
             })
+        elif method == "ping":
+            # MCP 心跳：必须回空 result，否则客户端判定连接异常
+            _send({"jsonrpc": "2.0", "id": req_id, "result": {}})
         elif method == "tools/list":
             _send({"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}})
         elif method == "tools/call":
             tool_name = params.get("name", "")
             tool_args = params.get("arguments", {})
             result = _handle_call(tool_name, tool_args)
+            is_error = result.get("status") == "error"
             _send({
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]
+                    "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}],
+                    "isError": is_error
                 }
             })
-        elif method == "notifications/initialized":
-            pass
         else:
+            # JSON-RPC 标准错误码 -32601 Method not found
             _send({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "error": {"code": -1, "message": f"未知方法: {method}"}
+                "error": {"code": -32601, "message": f"未知方法: {method}"}
             })
 
 
