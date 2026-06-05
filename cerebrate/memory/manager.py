@@ -9,6 +9,7 @@ from typing import Optional
 from cerebrate.memory.personal import PersonalMemory
 from cerebrate.memory.swarm import SwarmMemory
 from cerebrate.memory.knowledge import KnowledgeBase
+from cerebrate.memory.origin import OriginLog
 from cerebrate.config import config
 
 
@@ -22,6 +23,8 @@ class MemoryManager:
         self._agent_registry = None  # 延迟加载
         self._agent_registry_lock = threading.Lock()
         self._usage_lock = threading.Lock()
+        self._origin_log: Optional[OriginLog] = None  # 延迟加载
+        self._origin_lock = threading.Lock()
         self._query_log: list[dict] = []
 
     @property
@@ -32,6 +35,14 @@ class MemoryManager:
                     from cerebrate.memory.agents import AgentRegistry
                     self._agent_registry = AgentRegistry(config.agents_path)
         return self._agent_registry
+
+    @property
+    def origin(self) -> OriginLog:
+        if self._origin_log is None:
+            with self._origin_lock:
+                if self._origin_log is None:
+                    self._origin_log = OriginLog()
+        return self._origin_log
 
     # ==================== 个人记忆接口 ====================
 
@@ -60,19 +71,23 @@ class MemoryManager:
     # ==================== 虫群共享记忆接口 ====================
 
     def share_to_swarm(self, title: str, content: str, category: str, tags: list[str],
-                       source_agent: str = "unknown", problem_solved: str = "",
-                       solution: str = "", outcome: str = "success",
-                       project_id: str = "", life_stage: str = "memory",
-                       nutrient_score: float = 1.0, confidence: float = 1.0,
-                       evidence: str = "", supersedes: Optional[list[str]] = None,
-                       physical_user: str = "") -> str:
+                        source_agent: str = "unknown", problem_solved: str = "",
+                        solution: str = "", outcome: str = "success",
+                        project_id: str = "", life_stage: str = "memory",
+                        nutrient_score: float = 1.0, confidence: float = 1.0,
+                        evidence: str = "", supersedes: Optional[list[str]] = None,
+                        origin_ids: Optional[list[str]] = None,
+                        physical_user: str = "",
+                        memory_id: Optional[str] = None) -> str:
         memory_id = self.swarm.share(title, content, category, tags,
                                      source_agent, problem_solved, solution, outcome,
                                      project_id, life_stage=life_stage,
                                      nutrient_score=nutrient_score,
                                      confidence=confidence, evidence=evidence,
                                      supersedes=supersedes,
-                                     physical_user=physical_user)
+                                     origin_ids=origin_ids,
+                                     physical_user=physical_user,
+                                     memory_id=memory_id)
         self.agents.record_action(source_agent, "memory_shared", project_id, outcome,
                                   {"memory_id": memory_id, "life_stage": life_stage})
         return memory_id

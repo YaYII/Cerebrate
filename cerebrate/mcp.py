@@ -197,11 +197,6 @@ TOOLS = [
         }
     },
     {
-        "name": "cerebrate_evolve",
-        "description": "【会话结束时调用】触发脑进化：去重、技能提取、衰减清理。",
-        "inputSchema": {"type": "object", "properties": {}}
-    },
-    {
         "name": "cerebrate_stats",
         "description": "查看虫群系统统计信息：记忆数、代理数、共识状态等。",
         "inputSchema": {"type": "object", "properties": {}}
@@ -339,9 +334,6 @@ def _handle_call(name: str, args: dict) -> dict:
                 "evidence": args.get("evidence", ""),
                 "confidence": args.get("confidence", 1.0),
             })
-
-        elif name == "cerebrate_evolve":
-            return _request("POST", "/v1/evolve", {})
 
         elif name == "cerebrate_stats":
             envelope = _request("GET", "/v1/sense")

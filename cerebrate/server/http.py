@@ -70,7 +70,12 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return {"events": self.api.events.read_after(cursor, limit)}
         if method == "GET" and path.startswith("/v1/consensus/"):
             return self.api.consensus_snapshot(path.rsplit("/", 1)[-1])
+        if method == "GET" and path.startswith("/v1/origins/"):
+            return self.api.get_origin(path.rsplit("/", 1)[-1])
         if method == "GET" and path.startswith("/v1/memories/"):
+            mem_path = path.split("/")
+            if len(mem_path) >= 5 and mem_path[-1] == "origins":
+                return self.api.get_memory_origins(mem_path[-2])
             return self.api.get_memory(path.rsplit("/", 1)[-1])
         if method == "GET" and path == "/v1/help":
             return self.api.help()
@@ -96,7 +101,12 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/consensus/vote":
             return self.api.consensus_vote(payload)
         if method == "POST" and path == "/v1/evolve":
-            return self.api.evolve()
+            force = (params.get("force") or ["false"])[0].lower() == "true"
+            return self.api.evolve(force=force)
+        if method == "POST" and path == "/v1/origins/cleanup":
+            days = int((params.get("days") or ["365"])[0])
+            backup_dir = (params.get("backup_dir") or ["/data/origin_backups"])[0]
+            return self.api.cleanup_expired_origins(days=days, backup_dir=backup_dir)
         if method == "POST" and path == "/v1/batch/process":
             return self.api.batch_process(payload)
         raise RuntimeError(f"unknown endpoint: {method} {path}")
@@ -193,6 +203,14 @@ def serve(host: str = "", port: int = 0, quiet: bool = False):
     print(json.dumps(ok({
         "base_url": f"http://{actual_host}:{actual_port}",
     }, protocol="v5"), ensure_ascii=False), flush=True)
+
+    # ── 启动后台调度器（自动进化 + 原始记忆清理）──
+    try:
+        from cerebrate.server.scheduler import start_scheduler
+        start_scheduler(server.api)
+    except Exception:
+        pass  # 调度器非关键路径，启动失败不影响主服务
+
     # 忽略 SIGPIPE，防止客户端断连时进程退出
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     try:

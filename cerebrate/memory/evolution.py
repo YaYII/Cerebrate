@@ -50,9 +50,34 @@ class EvolutionEngine:
         }
         store.upsert(self.EVO_LOG_DOC, "evolution history log", meta)
 
-    def evolve(self) -> dict:
+    def evolve(self, force: bool = False) -> dict:
+        now = datetime.now(timezone.utc)
+
+        # ── 时间窗口检查：仅在 21:00-09:00 (晚9到早9) 之间运行 ──
+        if not force:
+            hour = now.hour
+            in_window = (hour >= 21 or hour < 9)
+            if not in_window:
+                return {
+                    "timestamp": now.isoformat(),
+                    "actions": [],
+                    "insights": ["进化窗口未开放（21:00-09:00），跳过执行"],
+                    "stats": {"merged": 0, "skills_created": 0, "doctrines_created": 0, "archived": 0, "conflicts": 0},
+                    "skipped": True,
+                    "reason": "outside_evolution_window",
+                }
+            if not self.should_evolve():
+                return {
+                    "timestamp": now.isoformat(),
+                    "actions": [],
+                    "insights": [f"距上次进化不足 {config.evolution_interval_hours}h，跳过"],
+                    "stats": {"merged": 0, "skills_created": 0, "doctrines_created": 0, "archived": 0, "conflicts": 0},
+                    "skipped": True,
+                    "reason": "too_soon",
+                }
+
         result = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
             "actions": [],
             "insights": [],
             "stats": {"merged": 0, "skills_created": 0, "doctrines_created": 0, "archived": 0, "conflicts": 0},
@@ -143,6 +168,13 @@ class EvolutionEngine:
                         "reuse_count", 0) + victim_mem.get("reuse_count", 0)
                     keeper_mem["success_count"] = keeper_mem.get(
                         "success_count", 0) + victim_mem.get("success_count", 0)
+                    # ── 合并 origin_ids：保留者吸收被合并者的原始来源 ──
+                    keeper_origins = set((keeper_mem.get("origin_ids") or "").split(","))
+                    victim_origins = set((victim_mem.get("origin_ids") or "").split(","))
+                    keeper_origins.discard("")
+                    victim_origins.discard("")
+                    all_origins = keeper_origins | victim_origins
+                    keeper_mem["origin_ids"] = ",".join(sorted(all_origins))
                     keeper_mem["updated"] = datetime.now(
                         timezone.utc).isoformat()
                     text = f"{keeper_mem.get('title', '')}\n{keeper_mem.get('content', '')}\n{keeper_mem.get('problem_solved', '')}\n{keeper_mem.get('solution', '')}"
@@ -185,6 +217,10 @@ class EvolutionEngine:
                 f"方案: {mem.get('solution', mem.get('content', ''))}\n"
                 f"验证: 复用 {reuse} 次, 成功率 {success / reuse:.0%}"
             )
+            # ── 继承源记忆的 origin_ids ──
+            mem_origin_ids_str = mem.get("origin_ids", "")
+            mem_origin_ids = [s for s in mem_origin_ids_str.split(",") if s] if mem_origin_ids_str else []
+
             raw_tags = mem.get("tags", [])
             if isinstance(raw_tags, str):
                 raw_tags = [t for t in raw_tags.split(",") if t]
@@ -202,6 +238,7 @@ class EvolutionEngine:
                 confidence=1.0,
                 evidence=f"复用 {reuse} 次, 成功率 {success / reuse:.0%}",
                 supersedes=[mid],
+                origin_ids=mem_origin_ids,
             )
             created += 1
 
@@ -233,6 +270,10 @@ class EvolutionEngine:
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
             sample = samples[cat]
+            # ── 继承源记忆的 origin_ids ──
+            sample_origin_ids_str = sample.get("origin_ids", "")
+            sample_origin_ids = [s for s in sample_origin_ids_str.split(",") if s] if sample_origin_ids_str else []
+
             swarm.share(
                 title=f"[脑虫教条] {cat}",
                 content=f"跨项目稳定策略: {sample.get('solution') or sample.get('content')}",
@@ -247,6 +288,7 @@ class EvolutionEngine:
                 confidence=1.0,
                 evidence=f"覆盖项目: {', '.join(sorted(projects))}",
                 supersedes=[sample.get("memory_id", "")],
+                origin_ids=sample_origin_ids,
             )
             created += 1
         return created

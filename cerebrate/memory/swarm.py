@@ -67,14 +67,17 @@ class SwarmMemory:
               life_stage: str = "memory", nutrient_score: float = 1.0,
               confidence: float = 1.0, evidence: str = "",
               supersedes: Optional[list[str]] = None,
-              physical_user: str = "") -> str:
+              origin_ids: Optional[list[str]] = None,
+              physical_user: str = "",
+              memory_id: Optional[str] = None) -> str:
         project_id = project_id or config.current_project_id
         language = language or config.default_language
         now = datetime.now(timezone.utc).isoformat()
 
-        memory_id = hashlib.sha256(
-            f"{title}{category}{now}".encode()
-        ).hexdigest()[:16]
+        if memory_id is None:
+            memory_id = hashlib.sha256(
+                f"{title}{category}{now}".encode()
+            ).hexdigest()[:16]
 
         life_stage = life_stage if life_stage in LIFE_STAGES else "memory"
         supersedes = supersedes or []
@@ -99,6 +102,7 @@ class SwarmMemory:
             "confidence": float(confidence),
             "evidence": evidence,
             "supersedes": ",".join(supersedes),
+            "origin_ids": ",".join(origin_ids or []),
             "created": now,
             "updated": now,
         }
@@ -191,6 +195,7 @@ class SwarmMemory:
                 "confidence": meta.get("confidence", 1.0),
                 "evidence": meta.get("evidence", ""),
                 "supersedes": [s for s in (meta.get("supersedes") or "").split(",") if s],
+                "origin_ids": [s for s in (meta.get("origin_ids") or "").split(",") if s],
                 "category": meta.get("category", ""),
                 "tags": (meta.get("tags") or "").split(","),
                 "source_agent": meta.get("source_agent", "unknown"),
@@ -286,6 +291,7 @@ class SwarmMemory:
             "confidence": meta.get("confidence", 1.0),
             "evidence": meta.get("evidence", ""),
             "supersedes": [s for s in (meta.get("supersedes") or "").split(",") if s],
+            "origin_ids": [s for s in (meta.get("origin_ids") or "").split(",") if s],
             "category": meta.get("category", ""),
             "tags": (meta.get("tags") or "").split(","),
             "source_agent": meta.get("source_agent", ""),

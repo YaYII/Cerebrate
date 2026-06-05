@@ -126,6 +126,16 @@ class BrainAPI:
         return data
 
     @staticmethod
+    def _generate_memory_id(title: str, category: str) -> str:
+        """预生成 memory_id，与 swarm.share() 中默认逻辑一致。"""
+        import hashlib
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        return hashlib.sha256(
+            f"{title}{category}{now}".encode()
+        ).hexdigest()[:16]
+
+    @staticmethod
     def _build_task(action: str, memory_id: str, agent_id: str, problem: str, all_matches: list = None) -> dict:
         # ── 多结果警告：当虫群返回多条匹配时，在 instructions 开头列出其余匹配 ──
         other_matches_hint = ""
@@ -421,6 +431,11 @@ class BrainAPI:
                 evidence = (evidence + "\n" if evidence else "") + \
                     f"server immune quarantine: {reason}"
 
+        # ── 预生成 memory_id，先写不可变原始记忆日志 ──
+        pre_memory_id = self._generate_memory_id(title, payload.get("category", "general"))
+        origin_id = self.mm.origin.add(pre_memory_id, payload)
+        origin_ids = [origin_id]
+
         memory_id = self.mm.share_to_swarm(
             title=title,
             content=content,
@@ -437,10 +452,13 @@ class BrainAPI:
             confidence=confidence,
             evidence=evidence,
             supersedes=supersedes_raw,
+            origin_ids=origin_ids,
             physical_user=physical_user,
+            memory_id=pre_memory_id,
         )
         data = {
             "memory_id": memory_id,
+            "origin_id": origin_id,
             "requested_life_stage": requested_stage,
             "life_stage": life_stage,
             "agent": source_agent,
@@ -648,6 +666,30 @@ class BrainAPI:
                     "weighted": snapshot["weighted"],
                 }, memory.get("project_id", ""))
 
+    def get_origin(self, origin_id: str) -> dict:
+        """读取不可变原始记忆完整内容。"""
+        origin = self.mm.origin.get(origin_id)
+        if not origin:
+            raise KeyError(f"原始记忆不存在: {origin_id}")
+        return origin
+
+    def get_memory_origins(self, memory_id: str) -> dict:
+        """查询共享记忆的原始来源列表。"""
+        memory = self.mm.get_swarm_memory(memory_id)
+        if not memory:
+            raise KeyError(f"共享记忆不存在: {memory_id}")
+        origin_ids = memory.get("origin_ids", [])
+        origins = []
+        for oid in origin_ids:
+            o = self.mm.origin.get(oid)
+            if o:
+                origins.append(o)
+        return {
+            "memory_id": memory_id,
+            "origin_ids": origin_ids,
+            "origins": origins,
+        }
+
     def get_memory(self, memory_id: str) -> dict:
         memory = self.mm.get_swarm_memory(memory_id)
         if not memory:
@@ -704,7 +746,17 @@ class BrainAPI:
             self.mm.flush_all()
         return {"processed": processed, "limit": limit, "dry_run": dry_run}
 
-    def evolve(self) -> dict:
-        result = EvolutionEngine(config.evolution_path, self.mm).evolve()
+    def evolve(self, force: bool = False) -> dict:
+        result = EvolutionEngine(config.evolution_path, self.mm).evolve(force=force)
         self.events.append("brain.evolved", "brain-server", result)
+        return result
+
+    def cleanup_expired_origins(self, days: int = 365,
+                                backup_dir: str = "/data/origin_backups") -> dict:
+        """清理超过保留期的原始记忆：先备份再删除。"""
+        result = self.mm.origin.cleanup_expired(days=days, backup_dir=backup_dir)
+        self.events.append("origin.cleanup", "brain-server",
+                           {"cleaned": result["deleted"],
+                            "backed_up": result["backed_up"],
+                            "backup_file": result["backup_file"]})
         return result
