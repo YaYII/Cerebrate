@@ -6,6 +6,7 @@ import os
 import sys
 import urllib.request
 import urllib.error
+from pathlib import Path
 
 
 def client_request(url: str, method: str, path: str, body: dict = None) -> dict:
@@ -149,6 +150,26 @@ def cmd_memory_get(args):
     output(client_request(args.url, "GET", f"/v1/memories/{args.memory_id}"))
 
 
+def cmd_ingest(args):
+    """知识蒸馏吸入：将本地文档目录批量吸入脑虫知识库。"""
+    from cerebrate.tools.ingest import ingest_directory
+    root = Path(args.dir).resolve()
+    if not root.is_dir():
+        print(json.dumps({"status": "error",
+                          "error": {"code": 400, "message": f"目录不存在: {root}"}},
+                         ensure_ascii=False))
+        sys.exit(1)
+    report = ingest_directory(
+        root=root,
+        project_id=args.project or "",
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+    )
+    print(json.dumps({"status": "ok", "data": report,
+                      "meta": {"protocol": "v5"}},
+                     ensure_ascii=False, indent=2))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Cerebrate v5 — HTTP Client CLI")
@@ -258,6 +279,13 @@ def main(argv=None):
     p = sub.add_parser("memory-get", help="读取指定记忆")
     p.add_argument("--memory-id", required=True)
     p.set_defaults(func=cmd_memory_get)
+
+    p = sub.add_parser("ingest", help="📥 知识蒸馏吸入：将本地文档批量吸入脑虫知识库")
+    p.add_argument("--dir", "-d", required=True, help="文档目录路径")
+    p.add_argument("--project", "-p", default="", help="项目 ID（用于隔离）")
+    p.add_argument("--dry-run", action="store_true", help="预览模式，不写入")
+    p.add_argument("--verbose", "-v", action="store_true", help="显示详细日志")
+    p.set_defaults(func=cmd_ingest)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):

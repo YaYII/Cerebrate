@@ -69,3 +69,6 @@ mcp.json
 # ───────── 会话文件 / 临时脚本 ─────────
 SESSION.md
 _restart.py
+
+# ───────── 知识吸入缓存 ─────────
+.ingest_cache.json
