@@ -1,12 +1,20 @@
-# Cerebrate v5 脑虫 Brain Server — 容器镜像
+# Cerebrate v5 脑虫 Brain Server — 生产容器镜像
 # 权威记忆中枢，独立运行；MCP / CLI 客户端通过 HTTP + Bearer token 远程连接。
-FROM python:3.12-slim
+# ============================================================
+# 构建:  docker compose build
+# 运行:  docker compose up -d
+# 验证:  curl http://127.0.0.1:8765/v1/sense
 
-# 运行时所需的系统依赖（chromadb / onnxruntime 需要 libgomp）
+FROM python:3.12-slim AS base
+
+# ── 系统依赖 ──
+# chromadb / onnxruntime 需要 libgomp
+# gosu 用于安全降权（entrypoint 以 root 初始化后切换到 cerebrate 用户）
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 \
+    && apt-get install -y --no-install-recommends libgomp1 gosu \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Python 依赖 ──
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/models
@@ -23,11 +31,19 @@ RUN pip install -r requirements.txt
 # 构建阶段预下载 BGE 模型，固化进镜像层，运行时离线读取
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh-v1.5')"
 
-# 复制服务端运行所需代码（数据目录与 node 客户端由 .dockerignore 排除）
+# ── 创建非 root 用户 ──
+RUN groupadd --gid 1000 cerebrate \
+    && useradd --uid 1000 --gid cerebrate --home-dir /app --no-create-home cerebrate
+
+# ── 复制应用代码 ──
+# .dockerignore 排除了 node 客户端、测试、文档等
 COPY cerebrate.py ./
 COPY cerebrate ./cerebrate
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
-# 容器运行时默认配置
+# ── 容器运行时默认配置 ──
+# docker-compose.yml 会覆盖 HOST/PORT/MEMORY_ROOT
 ENV CEREBRATE_SERVER_HOST=0.0.0.0 \
     CEREBRATE_SERVER_PORT=8765 \
     CEREBRATE_MEMORY_ROOT=/data \
@@ -40,4 +56,4 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD python3 -c "import os,urllib.request as u; t=os.environ.get('CEREBRATE_SERVER_TOKEN',''); h={'Authorization':'Bearer '+t} if t else {}; u.urlopen(u.Request('http://127.0.0.1:8765/v1/sense',headers=h),timeout=4)" || exit 1
 
-ENTRYPOINT ["python3", "cerebrate.py", "serve"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

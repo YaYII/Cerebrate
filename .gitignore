@@ -42,6 +42,7 @@ build/
 .vscode/
 .idea/
 .claude/settings.local.json
+.codegraph/
 
 # ───────── OS 系统文件 ─────────
 .DS_Store

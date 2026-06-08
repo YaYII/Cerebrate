@@ -2,6 +2,13 @@
 
 把权威脑虫服务端（Brain Server）打包成 Docker 容器独立运行，其他 MCP / CLI 客户端通过 HTTP + Bearer token 远程连接。
 
+> **快速开始（30 秒）**
+> ```bash
+> cd /home/as-workstation01/Documents/project/Cerebrate
+> docker compose up -d --build
+> curl http://127.0.0.1:8765/v1/sense
+> ```
+
 ## 架构
 
 ```
@@ -14,7 +21,7 @@
 └─────────────────────────────┘        └──────────────────────────────┘
 ```
 
-- 服务端在容器内监听 `0.0.0.0:8765`，挂载 named volume `cerebrate-data` 到 `/data` 持久化全部记忆。
+- 服务端在容器内监听 `0.0.0.0:8765`，挂载宿主机目录（由 `.env` 的 `CEREBRATE_DATA_DIR` 指定）到 `/data` 持久化全部记忆。
 - 鉴权：`CEREBRATE_SERVER_TOKEN` 非空时，服务端对所有请求强制校验 `Authorization: Bearer <token>`。
 - Embedding：BGE 模型（`BAAI/bge-small-zh-v1.5`）已在构建时打包进镜像，运行时离线加载（512 维）。
 
@@ -103,8 +110,33 @@ docker compose exec cerebrate python3 cerebrate.py migrate --reindex
 ## 六、运维命令
 
 ```bash
+# 通过 Makefile（推荐）
+make build          # 构建镜像
+make up-d           # 后台启动
+make logs           # 查看日志
+make ps             # 查看状态
+make down           # 停止（保留数据）
+make restart        # 重启
+make shell          # 进入容器 shell
+make test           # 运行测试套件
+make smoke          # 烟雾测试（curl sense）
+make clean          # 停止并清理构建缓存
+
+# 或直接 docker compose
 docker compose restart cerebrate     # 重启
-docker compose down                  # 停止（保留数据卷）
+docker compose down                  # 停止（保留数据）
 docker compose down -v               # 停止并删除数据卷（清空全部记忆，慎用）
-docker volume inspect cerebrate_cerebrate-data   # 查看数据卷位置
 ```
+
+### 数据目录说明
+
+宿主机数据目录由 `.env` 的 `CEREBRATE_DATA_DIR` 指定，默认为项目内 `./data/`。
+当前生产环境指向 `/home/as-workstation01/cerebrate-data/`，包含：
+
+```
+cerebrate-data/
+├── chroma_data/       # ChromaDB 向量数据库（全部记忆存储于此）
+└── knowledge_files/   # 知识库文件（可选）
+```
+
+> ⚠️ 迁移宿主机时，只需拷走整个 `CEREBRATE_DATA_DIR` 目录到新机器，再调整 `.env` 中的路径即可恢复全部记忆。

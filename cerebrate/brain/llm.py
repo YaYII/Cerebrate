@@ -1,9 +1,11 @@
-"""LLM 客户端 — 脑虫的灵魂与免疫系统
+"""LLM 客户端 — 脑虫的记忆管理者（Chief Memory Curator）
 
 核心职责:
 1. 验证虫群记忆质量，过滤有毒/低质内容
-2. 自动总结和打标签
-3. 检测知识库冲突
+2. 评估知识价值，识别低价值/重复提交
+3. 自动分类归档、打标签、关联建议
+4. 检测知识库冲突
+5. 智能总结与知识蒸馏
 """
 
 import json
@@ -16,7 +18,17 @@ from cerebrate.config import config
 
 
 class CerebrateLLM:
-    """脑虫的 LLM 大脑 — 可选的智能增强层，无 API Key 时回退到规则引擎"""
+    """脑虫的记忆管理者（Chief Memory Curator）
+
+    智能增强层。无 API Key 时回退到规则引擎。
+
+    角色定位：
+    - 安全审核员 → 检查内容安全性
+    - 知识管理员 → 评估知识价值、判断重复、建议归档
+    - 标签专家 → 自动生成分类标签
+    - 高级研究员 → 知识蒸馏为结构化文档
+    - 冲突调解员 → 检测记忆间的矛盾
+    """
 
     def __init__(self):
         self._client = None
@@ -86,6 +98,9 @@ class CerebrateLLM:
             "fallback": "deterministic rule immune validation",
             "responsibilities": [
                 "memory safety validation",
+                "knowledge value assessment",
+                "duplication detection",
+                "curator categorization suggestions",
                 "quality scoring",
                 "tag suggestions",
                 "summarization",
@@ -104,10 +119,13 @@ class CerebrateLLM:
     # ==================== 免疫系统 ====================
 
     def validate_memory(self, content: str, source_agent: str = "unknown") -> dict:
-        """验证记忆质量，检测有毒/低质内容
+        """验证记忆质量，检测有毒/低质内容，评估知识价值
 
         Returns:
-            {"safe": bool, "quality": float, "issues": list[str], "suggested_tags": list[str]}
+            {"safe": bool, "quality": float, "issues": list[str],
+             "suggested_tags": list[str], "has_knowledge_value": bool,
+             "is_duplicate_likely": bool, "curator_note": str,
+             "suggested_category": str}
         """
         issues = []
         quality = 1.0
@@ -119,10 +137,18 @@ class CerebrateLLM:
 
         # LLM 层检查 (SDK 可用且免疫开启时执行)
         immune_active = self.is_available() and self._sdk_ready() and self._immune_enabled
+        has_knowledge_value = True
+        is_duplicate_likely = False
+        curator_note = ""
+        suggested_category = ""
         if immune_active:
             llm_result = self._llm_validate(content, source_agent)
             issues.extend(llm_result.get("issues", []))
             quality *= llm_result.get("quality", 1.0)
+            has_knowledge_value = llm_result.get("has_knowledge_value", True)
+            is_duplicate_likely = llm_result.get("is_duplicate_likely", False)
+            curator_note = llm_result.get("curator_note", "")
+            suggested_category = llm_result.get("suggested_category", "")
 
         safe = quality >= self._immune_threshold
         return {
@@ -131,6 +157,10 @@ class CerebrateLLM:
             "issues": issues,
             "suggested_tags": rule_result.get("suggested_tags", []),
             "immune_active": immune_active,
+            "has_knowledge_value": has_knowledge_value,
+            "is_duplicate_likely": is_duplicate_likely,
+            "curator_note": curator_note,
+            "suggested_category": suggested_category,
         }
 
     def _rule_validate(self, content: str, source_agent: str) -> dict:
@@ -183,40 +213,50 @@ class CerebrateLLM:
         }
 
     def _llm_validate(self, content: str, source_agent: str) -> dict:
-        """使用 LLM 进行深度内容验证"""
+        """使用 LLM 进行深度记忆管理审核
+
+        升级为「记忆管理者」角色，不仅做安全检查，
+        还评估知识价值、归档建议、去重提示等图书管理员职责。
+        """
         client = self._get_client()
         if not client:
             return {"issues": [], "quality": 1.0}
 
-        prompt = f"""你是一个 AI 编程知识库的安全审核员。请评估以下内容的可信度和质量。
+        prompt = f"""你是一位经验丰富的编程知识库管理者（Chief Memory Curator）。
+你的职责不仅是安全检查，更要确保虫群的每条记忆都有知识价值，归档得当。
 
 来源智能体: {source_agent}
 
-内容:
+收到的候选记忆内容:
 {content[:3000]}
 
-请分析并返回 JSON:
+请评估并返回 JSON：
 {{
   "is_safe": true/false,
+  "has_knowledge_value": true/false,
+  "is_duplicate_likely": true/false,
   "quality": 0.0-1.0,
-  "issues": ["问题1", "问题2"],
-  "is_code_related": true/false,
-  "suggested_category": "类别",
-  "suggested_tags": ["标签1"]
+  "suggested_category": "架构|编码|调试|运维|性能|安全|测试|配置",
+  "suggested_tags": ["标签1"],
+  "issues": ["问题1"],
+  "curator_note": "管理员的归档建议或关联提示"
 }}
 
 评估标准:
-- 是否是有效的编程知识/经验?
-- 内容是否恶意(破坏性命令、安全漏洞利用)?
-- 是否有明显错误或误导性信息?
-- 来源格式是否符合编程社区规范?
+1. **知识价值**（核心）：是否包含具体的解决方案、根因分析、可复用的经验模式？
+2. **内容质量**：是否有具体的技术细节、命令、配置、代码片段？
+3. **完整性**：问题描述、原因、解决方案、验证方法是否四要素齐全？
+4. **安全性**：是否包含恶意内容、破坏性命令、注入攻击代码？
+5. **唯一性**：在虫群中可能已有相似的现有记忆？
+6. **分类匹配**：内容最匹配哪个类别？（架构/编码/调试/运维/性能/安全/测试/配置）
+7. **归档建议**：用 curator_note 给出管理员角度的建议，如"建议与XXX话题关联"或"缺少验证步骤，建议补充"
 
 只返回 JSON，不要其他文字。"""
 
         try:
             kwargs = {
                 "model": self._model,
-                "max_tokens": 500,
+                "max_tokens": 600,
                 "temperature": 0,
                 "messages": [{"role": "user", "content": prompt}],
             }
@@ -239,6 +279,9 @@ class CerebrateLLM:
                     "quality": result.get("quality", 1.0),
                     "suggested_tags": result.get("suggested_tags", []),
                     "suggested_category": result.get("suggested_category", ""),
+                    "has_knowledge_value": result.get("has_knowledge_value", True),
+                    "is_duplicate_likely": result.get("is_duplicate_likely", False),
+                    "curator_note": result.get("curator_note", ""),
                 }
         except Exception:
             pass
@@ -305,17 +348,24 @@ class CerebrateLLM:
         if not client:
             return None
 
-        prompt = f"""为以下编程相关内容生成 3-5 个英文标签(小写,单个词或连字符):
+        prompt = f"""你是编程知识库的管理员（Knowledge Curator）。
+为以下编程相关内容推荐分类标签，帮助其他智能体快速检索到它：
 
 {content[:2000]}
 
-返回 JSON: {{"tags": ["tag1", "tag2"]}}，不要其他文字。"""
+要求:
+- 3-5 个英文标签，小写，单个词或连字符
+- 第一个标签反映技术栈/语言（如 python、docker、react）
+- 第二个标签反映问题类型（如 bug、setup、performance）
+- 其余标签补充关键上下文
+
+返回 JSON: {{"tags": ["tag1", "tag2", "tag3"]}}，不要其他文字。"""
 
         try:
             kwargs = {
                 "model": self._model,
                 "max_tokens": 100,
-                "temperature": 0,
+                "temperature": 0.1,
                 "messages": [{"role": "user", "content": prompt}],
             }
             if self._provider == "anthropic":
