@@ -242,6 +242,20 @@ TOOLS = [
             }
         }
     },
+    {
+        "name": "cerebrate_ingest",
+        "description": "【知识蒸馏吸入】将本地文档目录批量吸入脑虫知识库。扫描 MD/TXT/RST/YML/JSON 等文件，智能分块后写入权威知识库，支持增量去重。\n\n用法示例:\n  AI智能体: 调用 cerebrate_ingest 并传 dir=/path/to/docs project=my-project\n\n决策矩阵:\n  - 需要将大量文档灌入脑虫时直接调用此工具\n  - 配合 cerebrate_knowledge_search 验证知识是否已入库",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dir": {"type": "string", "description": "要扫描的文档目录路径（绝对路径或相对路径）"},
+                "project": {"type": "string", "description": "项目 ID（用于知识隔离，相同项目可集中检索）", "default": ""},
+                "dry_run": {"type": "boolean", "description": "预览模式：扫描+分块但不写入知识库", "default": False},
+                "verbose": {"type": "boolean", "description": "显示详细处理日志", "default": False}
+            },
+            "required": ["dir"]
+        }
+    },
 ]
 
 # ── 工具调用实现 ────────────────────────────────────────────
@@ -387,6 +401,20 @@ def _handle_call(name: str, args: dict) -> dict:
             return _request("POST", "/v1/batch/process", {
                 "limit": args.get("limit", 50)
             })
+
+        elif name == "cerebrate_ingest":
+            from pathlib import Path
+            root = Path(args["dir"]).resolve()
+            if not root.is_dir():
+                return {"status": "error", "error": {"code": 400, "message": f"目录不存在: {root}"}}
+            from cerebrate.tools.ingest import ingest_directory
+            report = ingest_directory(
+                root=root,
+                project_id=args.get("project", ""),
+                dry_run=args.get("dry_run", False),
+                verbose=args.get("verbose", False),
+            )
+            return {"status": "ok", "data": report, "meta": {"protocol": "v5"}}
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}
