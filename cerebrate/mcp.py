@@ -16,11 +16,13 @@ import urllib.error
 
 # ── 获取物理用户身份（操作系统登录用户名），用于安全溯源 ──
 try:
-    _PHYSICAL_USER = os.environ.get("USER") or os.environ.get("LOGNAME") or getpass.getuser()
+    _PHYSICAL_USER = os.environ.get("USER") or os.environ.get(
+        "LOGNAME") or getpass.getuser()
 except Exception:
     _PHYSICAL_USER = "unknown"
 
-_SERVER_URL = os.environ.get("CEREBRATE_SERVER_URL", "") or "http://127.0.0.1:8765"
+_SERVER_URL = os.environ.get(
+    "CEREBRATE_SERVER_URL", "") or "http://127.0.0.1:8765"
 _SERVER_TOKEN = os.environ.get("CEREBRATE_SERVER_TOKEN", "")
 
 
@@ -33,7 +35,8 @@ def _request(method: str, path: str, body: dict = None) -> dict:
         headers["Authorization"] = f"Bearer {_SERVER_TOKEN}"
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(full_url, data=data, headers=headers, method=method)
+    req = urllib.request.Request(
+        full_url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -256,6 +259,20 @@ TOOLS = [
             "required": ["dir"]
         }
     },
+    {
+        "name": "cerebrate_knowledge_store",
+        "description": "【存入知识】将一段文档内容直接存入脑虫权威知识库。不依赖文件路径，跨网络也可使用。\n\n用法示例:\n  AI智能体: 调用 cerebrate_knowledge_store title=\"xxx\" content=\"xxx\"\n\n与 cerebrate_ingest 的区别:\n  - ingest: 服务端扫描本地目录，自动分块\n  - knowledge_store: 直接接受内容，适合内网MCP客户端→公网脑虫场景",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "文档标题"},
+                "content": {"type": "string", "description": "文档正文内容（纯文本或 Markdown）"},
+                "topics": {"type": "string", "description": "主题标签，逗号分隔", "default": ""},
+                "project": {"type": "string", "description": "项目 ID", "default": ""}
+            },
+            "required": ["title", "content"]
+        }
+    },
 ]
 
 # ── 工具调用实现 ────────────────────────────────────────────
@@ -403,18 +420,26 @@ def _handle_call(name: str, args: dict) -> dict:
             })
 
         elif name == "cerebrate_ingest":
-            from pathlib import Path
-            root = Path(args["dir"]).resolve()
-            if not root.is_dir():
-                return {"status": "error", "error": {"code": 400, "message": f"目录不存在: {root}"}}
-            from cerebrate.tools.ingest import ingest_directory
-            report = ingest_directory(
-                root=root,
-                project_id=args.get("project", ""),
-                dry_run=args.get("dry_run", False),
-                verbose=args.get("verbose", False),
-            )
-            return {"status": "ok", "data": report, "meta": {"protocol": "v5"}}
+            return _request("POST", "/v1/ingest", {
+                "dir": args["dir"],
+                "project": args.get("project", ""),
+                "dry_run": args.get("dry_run", False),
+                "verbose": args.get("verbose", False),
+            })
+
+        elif name == "cerebrate_knowledge_store":
+            topics_raw = args.get("topics", "")
+            topics = [t.strip() for t in topics_raw.split(
+                ",") if t.strip()] if topics_raw else []
+            return _request("POST", "/v1/knowledge", {
+                "title": args["title"],
+                "content": args["content"],
+                "topics": topics,
+                "source": "mcp-knowledge-store",
+                "is_policy": False,
+                "author": args.get("author", "mcp-client"),
+                "project_id": args.get("project", ""),
+            })
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}

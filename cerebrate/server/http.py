@@ -125,12 +125,15 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 days = 365
             # 备份目录必须在 /data 下，防止路径遍历
-            backup_dir = (params.get("backup_dir") or ["/data/origin_backups"])[0]
+            backup_dir = (params.get("backup_dir") or [
+                          "/data/origin_backups"])[0]
             if not backup_dir.startswith("/data/"):
                 backup_dir = "/data/origin_backups"
             return self.api.cleanup_expired_origins(days=days, backup_dir=backup_dir)
         if method == "POST" and path == "/v1/batch/process":
             return self.api.batch_process(payload)
+        if method == "POST" and path == "/v1/ingest":
+            return self._handle_ingest(payload)
         raise RuntimeError(f"unknown endpoint: {method} {path}")
 
     def _check_auth(self) -> bool:
@@ -208,6 +211,24 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         finally:
             if not once:
                 self._sse_semaphore.release()
+
+    def _handle_ingest(self, payload: dict) -> dict:
+        """处理知识蒸馏吸入请求（POST /v1/ingest）。"""
+        from pathlib import Path
+        dir_raw = payload.get("dir", "")
+        if not dir_raw:
+            raise ValueError("缺少必填参数: dir")
+        root = Path(dir_raw).resolve()
+        if not root.is_dir():
+            raise ValueError(f"目录不存在: {root}")
+        # 在 Brain Server 进程内直接调用 ingest 模块，Python 环境完整可用
+        from cerebrate.tools.ingest import ingest_directory
+        return ingest_directory(
+            root=root,
+            project_id=payload.get("project", ""),
+            dry_run=payload.get("dry_run", False),
+            verbose=payload.get("verbose", False),
+        )
 
 
 def create_server(host: str = "", port: int = 0, quiet: bool = False) -> ThreadingHTTPServer:

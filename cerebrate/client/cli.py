@@ -151,8 +151,13 @@ def cmd_memory_get(args):
 
 
 def cmd_ingest(args):
-    """知识蒸馏吸入：将本地文档目录批量吸入脑虫知识库。"""
+    """知识蒸馏吸入：将本地文档批量吸入脑虫知识库。"""
     from cerebrate.tools.ingest import ingest_directory
+    import cerebrate.tools.ingest as _ingest_mod
+    # 传递远程 URL 和 Token，使 ingest_directory 内部 _api_post 发到正确地址
+    _ingest_mod._SERVER_URL = args.url
+    if hasattr(args, 'token') and args.token:
+        _ingest_mod._SERVER_TOKEN = args.token
     root = Path(args.dir).resolve()
     if not root.is_dir():
         print(json.dumps({"status": "error",

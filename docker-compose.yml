@@ -26,6 +26,11 @@ services:
     # bind mount 到宿主机真实目录，数据与程序分离：升级镜像、重装 Docker 都不丢，
     # 换电脑只需拷走该目录再挂载即可。默认项目内 ./data；
     # 生产建议在 .env 设 CEREBRATE_DATA_DIR 为独立绝对路径，如 /home/<user>/cerebrate-data。
+    #
+    # 代码卷挂载（开发模式）：Python 代码实时同步，改完只需 docker compose restart 无需 --build
+    # 生产环境或正式部署请移除或注释掉此挂载
     volumes:
       - ${CEREBRATE_DATA_DIR:-./data}:/data
+      - ./cerebrate:/app/cerebrate
+      - ./cerebrate.py:/app/cerebrate.py
     restart: unless-stopped
