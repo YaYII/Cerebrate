@@ -60,6 +60,9 @@ def _read_content_files(docstore: DocumentStore) -> list[dict]:
                 except Exception:
                     pass
             content = (content_dir / fname).read_text(encoding='utf-8')
+            # 跳过超短内容（< 50 字符的无意义碎片）
+            if len(content.strip()) < 50:
+                continue
             files.append({
                 "id": doc_id,
                 "title": meta.get("title", doc_id),
@@ -223,6 +226,21 @@ def _execute_judgment(judgment: dict, archive_dir: Path, dry_run: bool = False) 
             keeper = f
         elif i in to_archive:
             victims.append(f)
+
+    # ── 安全覆盖：如果 LLM 选的 keeper 明显比 victim 短，选更长的那个 ──
+    if keeper and victims:
+        k_len = len(keeper.get("content", ""))
+        for v in victims:
+            v_len = len(v.get("content", ""))
+            if v_len > k_len * 2:  # victim 比 keeper 长 2 倍以上
+                log.warning(f"  ⚠️  LLM 判断有误: {keeper['title'][:20]}({k_len}字符) < {v['title'][:20]}({v_len}字符)")
+                log.warning(f"     安全覆盖: 保留更长的文档")
+                # 交换角色
+                victim_idx = next(i for i, f in enumerate(group) if f["id"] == v["id"])
+                keeper_idx = victim_idx
+                keeper = v
+                victims = [f for f in victims if f["id"] != v["id"]]
+                break
 
     if action == "merge" and keeper:
         merger_title = judgment.get("merger_title", keeper["title"])
