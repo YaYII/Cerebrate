@@ -255,6 +255,25 @@ class BrainAPI:
                 ]
             }
 
+    def read_logs(self, lines: int = 50, level: str = "",
+                   module: str = "") -> dict:
+        """读取虫群运行日志。"""
+        try:
+            from cerebrate.brain.logger import get_logger
+            log = get_logger()
+            entries = log.read_tail(lines=lines, level=level or None,
+                                    module=module or None)
+            return {
+                "entries": entries,
+                "total": len(entries),
+                "filters": {
+                    "level": level or None,
+                    "module": module or None,
+                },
+            }
+        except Exception as e:
+            return {"entries": [], "total": 0, "error": str(e)}
+
     def help(self) -> dict:
         return {
             "server": "Cerebrate Brain Server v5",
@@ -980,6 +999,7 @@ class BrainAPI:
     def evolve(self, force: bool = False) -> dict:
         result = EvolutionEngine(config.evolution_path, self.mm).evolve(force=force)
         self.events.append("brain.evolved", "brain-server", result)
+        # 运行日志由 EvolutionEngine.evolve() 内部写入
         return result
 
     def answer(self, payload: dict) -> dict:

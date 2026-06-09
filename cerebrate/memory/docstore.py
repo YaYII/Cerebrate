@@ -1,20 +1,25 @@
-"""文档存储层 — 按目录分层存储记忆的原始完整内容
+"""文档存储层 — 按类型分层 + 子目录 content/meta
 
 目录结构:
   {storage_path}/
-    content/              ← .md 文件（纯 Markdown 正文）
-      {doc_id}.md
-      {doc_id}_c0000.md   ← 分块片段
-    meta/                 ← .json 文件（运营元数据，不含 content 字段）
-      {doc_id}.json
-      {doc_id}_c0000.json ← 分块元数据
-    index.json            ← 标题索引: { "slug": { "id": "doc_id", "title": "..." } }
+    memory/               ← 原始记忆（短内容，可全文入向量库）
+      content/{id}.md     ← 纯 Markdown 正文
+      meta/{id}.json      ← 运营元数据（无 content）
+    skill/                ← 已验证技能、蒸馏技能
+      content/{id}.md
+      meta/{id}.json
+    evolution/            ← 进化总结、脑虫教条
+      content/{id}.md
+      meta/{id}.json
+    index.json            ← 全局标题索引
 
-兼容旧版（扁平结构）：读取时先查新目录，找不到则回退到扁平目录。
+类型映射规则:
+  memory, general           → memory/
+  skill, verified_skill,    → skill/
+    distilled_skill
+  doctrine                  → evolution/
 
-与 ChromaDB 向量索引分离设计：
-  - Document Store = 源文档持久化（Markdown 文件）
-  - ChromaDB = 纯向量索引（doc_id + 向量 + 最小运营元数据）
+读取时兼容旧扁平目录（storage_path/ 直放），迁移期间双读。
 """
 import json
 import logging
@@ -29,46 +34,70 @@ logger = logging.getLogger(__name__)
 CONTENT_KEY = "content"
 FULL_CONTENT_KEY = "full_content"
 
+# 生命周期 → 子目录类型映射
+LIFE_STAGE_TO_TYPE = {
+    "memory": "memory",
+    "nutrient": "memory",
+    "skill": "skill",
+    "verified_skill": "skill",
+    "distilled_skill": "skill",
+    "doctrine": "evolution",
+}
+
+
+def doc_type_for(life_stage: str) -> str:
+    """根据生命周期返回对应的子目录类型。"""
+    return LIFE_STAGE_TO_TYPE.get(life_stage, "memory")
+
 
 class DocumentStore:
-    """文件系统文档存储（分层目录）
+    """文件系统文档存储（按类型分层）
 
     每篇文档存为两个文件：
-      content/{doc_id}.md      ← 原始内容（纯文本，无 JSON 包裹）
-      meta/{doc_id}.json       ← 运营元数据（小 JSON，无 content）
+      {type}/content/{doc_id}.md     ← 原始内容（纯文本，无 JSON 包裹）
+      {type}/meta/{doc_id}.json      ← 运营元数据（小 JSON，无 content）
 
     分块文档：
-      content/{memory_id}.md          → 完整文档 Markdown
-      meta/{memory_id}.json           → 父条目元数据
-      content/{memory_id}_c0000.md    → 第 0 块片段文本
-      meta/{memory_id}_c0000.json     → 第 0 块元数据
+      {type}/content/{memory_id}.md         → 完整文档 Markdown
+      {type}/meta/{memory_id}.json          → 父条目元数据
+      {type}/content/{memory_id}_c0000.md   → 第 0 块片段文本
+      {type}/meta/{memory_id}_c0000.json    → 第 0 块元数据
 
     index.json：
-       存储标题→ID 映射，支持按语义名称快速查找。
+       存储标题→ID 映射，含 type 字段指明所属子目录。
     """
+
+    # 所有可能的类型子目录（含旧扁平路径，用于兼容读取）
+    ALL_TYPES = ["memory", "skill", "evolution"]
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
         self._lock = threading.Lock()
         os.makedirs(storage_path, exist_ok=True)
 
-        # 子目录
-        self._content_dir = storage_path / "content"
-        self._meta_dir = storage_path / "meta"
-        self._index_path = storage_path / "index.json"
-        os.makedirs(self._content_dir, exist_ok=True)
-        os.makedirs(self._meta_dir, exist_ok=True)
+        # 为每个类型创建子目录
+        self._type_dirs: dict[str, dict[str, Path]] = {}
+        for t in self.ALL_TYPES:
+            content_dir = storage_path / t / "content"
+            meta_dir = storage_path / t / "meta"
+            os.makedirs(content_dir, exist_ok=True)
+            os.makedirs(meta_dir, exist_ok=True)
+            self._type_dirs[t] = {"content": content_dir, "meta": meta_dir}
 
+        # 旧扁平路径（兼容读取）
+        self._flat_content = storage_path / "content"
+        self._flat_meta = storage_path / "meta"
+
+        self._index_path = storage_path / "index.json"
         self._title_index: dict[str, dict] = {}
         self._load_index()
-        logger.info(f"DocumentStore: {storage_path} (content/, meta/, index.json)")
+        logger.info(f"DocumentStore: {storage_path} (memory/skill/evolution)")
 
     # ═══════════════════════════════════════════════
     # 标题索引
     # ═══════════════════════════════════════════════
 
     def _load_index(self):
-        """加载标题索引。"""
         if self._index_path.exists():
             try:
                 with self._lock:
@@ -80,39 +109,42 @@ class DocumentStore:
             self._title_index = {}
 
     def _save_index(self):
-        """持久化标题索引。"""
         with self._lock:
             self._index_path.write_text(
                 json.dumps(self._title_index, ensure_ascii=False, indent=2),
                 encoding='utf-8')
 
     def _index_slug(self, title: str) -> str:
-        """将标题转为索引用 slug。"""
         slug = title.lower()
         slug = re.sub(r'[^\w\u4e00-\u9fff]+', '-', slug)
-        slug = slug.strip('-')
-        return slug[:80]
+        return slug.strip('-')[:80]
 
-    def put(self, doc_id: str, data: dict) -> str:
-        """存储或更新文档
+    # ═══════════════════════════════════════════════
+    # 写
+    # ═══════════════════════════════════════════════
 
-        自动拆分：
-          - content → content/{doc_id}.md（纯文本）
-          - 其余非内容字段 → meta/{doc_id}.json（元数据）
-          - 如有 title 字段 → 更新 index.json
+    def put(self, doc_id: str, data: dict, doc_type: str = "memory") -> str:
+        """存储或更新文档。
+
+        Args:
+            doc_id: 文档 ID
+            data: 数据字典（含 content / 元数据）
+            doc_type: 子目录类型: memory / skill / evolution
         """
         content = self._pop_content(data)
-        metadata = data  # 剩余字段
+        metadata = data
+
+        type_dirs = self._type_dirs.get(doc_type, self._type_dirs["memory"])
 
         # ── 写 .md 文件 ──
         if content:
-            md_path = self._content_dir / f"{doc_id}.md"
+            md_path = type_dirs["content"] / f"{doc_id}.md"
             with self._lock:
                 md_path.write_text(content, encoding='utf-8')
 
-        # ── 写 .json 文件（仅元数据） ──
+        # ── 写 .json 文件 ──
         if metadata:
-            json_path = self._meta_dir / f"{doc_id}.json"
+            json_path = type_dirs["meta"] / f"{doc_id}.json"
             with self._lock:
                 json_path.write_text(
                     json.dumps(metadata, ensure_ascii=False, indent=2),
@@ -125,6 +157,7 @@ class DocumentStore:
             self._title_index[slug] = {
                 "id": doc_id,
                 "title": title,
+                "type": doc_type,
                 "category": metadata.get("category", ""),
                 "life_stage": metadata.get("life_stage", ""),
             }
@@ -132,64 +165,129 @@ class DocumentStore:
 
         return doc_id
 
-    def get(self, doc_id: str) -> Optional[dict]:
-        """读取文档
+    # ═══════════════════════════════════════════════
+    # 读
+    # ═══════════════════════════════════════════════
 
-        从 content/{doc_id}.md 加载内容 + meta/{doc_id}.json 加载元数据。
-        兼容旧扁平结构：先查新目录，找不到则回退。
+    def get(self, doc_id: str, doc_type: Optional[str] = None) -> Optional[dict]:
+        """读取文档。
+
+        如果指定 doc_type，只查对应子目录。
+        如果未指定，按 memory → skill → evolution → 扁平 顺序尝试。
         """
         result = {}
         found = False
 
-        # ── 读 .md 文件（先新目录，再回退扁平） ──
-        md_content = self._read_file(self._content_dir / f"{doc_id}.md",
-                                     self.storage_path / f"{doc_id}.md")
-        if md_content is not None:
-            result["content"] = md_content
-            found = True
+        if doc_type:
+            md_content = self._read_file(
+                self._type_dirs[doc_type]["content"] / f"{doc_id}.md")
+            if md_content is not None:
+                result["content"] = md_content
+                found = True
 
-        # ── 读 .json 文件 ──
-        json_data = self._read_json(self._meta_dir / f"{doc_id}.json",
-                                    self.storage_path / f"{doc_id}.json")
-        if json_data is not None:
-            result.update(json_data)
-            found = True
+            json_data = self._read_json(
+                self._type_dirs[doc_type]["meta"] / f"{doc_id}.json")
+            if json_data is not None:
+                result.update(json_data)
+                found = True
+        else:
+            # 按 memory → skill → evolution → 扁平 顺序尝试
+            for t in self.ALL_TYPES:
+                md_content = self._read_file(
+                    self._type_dirs[t]["content"] / f"{doc_id}.md")
+                if md_content is not None:
+                    result["content"] = md_content
+                    found = True
+                    break
+
+            for t in self.ALL_TYPES:
+                json_data = self._read_json(
+                    self._type_dirs[t]["meta"] / f"{doc_id}.json")
+                if json_data is not None:
+                    result.update(json_data)
+                    found = True
+                    break
+
+            # 回退扁平目录
+            if not found:
+                md_content = self._read_file(
+                    self._flat_content / f"{doc_id}.md" if self._flat_content.exists() else None)
+                if md_content is not None:
+                    result["content"] = md_content
+                    found = True
+                json_data = self._read_json(
+                    self._flat_meta / f"{doc_id}.json" if self._flat_meta.exists() else None)
+                if json_data is not None:
+                    result.update(json_data)
+                    found = True
 
         return result if found else None
 
-    def get_content(self, doc_id: str) -> Optional[str]:
-        """仅读取 .md 内容（跳过 JSON 解析，更高效）"""
-        return self._read_file(
-            self._content_dir / f"{doc_id}.md",
-            self.storage_path / f"{doc_id}.md",
-        )
+    def get_content(self, doc_id: str, doc_type: Optional[str] = None) -> Optional[str]:
+        """仅读取 .md 内容。"""
+        if doc_type:
+            return self._read_file(
+                self._type_dirs[doc_type]["content"] / f"{doc_id}.md")
 
-    def get_metadata(self, doc_id: str) -> Optional[dict]:
-        """仅读取 .json 元数据（跳过 .md 读取）"""
-        return self._read_json(
-            self._meta_dir / f"{doc_id}.json",
-            self.storage_path / f"{doc_id}.json",
-        )
+        for t in self.ALL_TYPES:
+            result = self._read_file(self._type_dirs[t]["content"] / f"{doc_id}.md")
+            if result is not None:
+                return result
+        # 扁平回退
+        flat = self._flat_content / f"{doc_id}.md" if self._flat_content.exists() else None
+        if flat and flat.exists():
+            return self._read_file(flat)
+        return None
 
-    def delete(self, doc_id: str) -> bool:
-        """删除文档（同时清理新目录和旧扁平目录）"""
+    def get_metadata(self, doc_id: str, doc_type: Optional[str] = None) -> Optional[dict]:
+        """仅读取 .json 元数据。"""
+        if doc_type:
+            return self._read_json(self._type_dirs[doc_type]["meta"] / f"{doc_id}.json")
+
+        for t in self.ALL_TYPES:
+            result = self._read_json(self._type_dirs[t]["meta"] / f"{doc_id}.json")
+            if result is not None:
+                return result
+        # 扁平回退
+        flat = self._flat_meta / f"{doc_id}.json" if self._flat_meta.exists() else None
+        if flat and flat.exists():
+            return self._read_json(flat)
+        return None
+
+    # ═══════════════════════════════════════════════
+    # 删
+    # ═══════════════════════════════════════════════
+
+    def delete(self, doc_id: str, doc_type: Optional[str] = None) -> bool:
+        """删除文档。"""
         found = False
-        pairs = [
-            (self._content_dir / f"{doc_id}.md",
-             self.storage_path / f"{doc_id}.md"),
-            (self._meta_dir / f"{doc_id}.json",
-             self.storage_path / f"{doc_id}.json"),
-        ]
+        paths_to_check = []
+
+        if doc_type:
+            paths_to_check = [
+                self._type_dirs[doc_type]["content"] / f"{doc_id}.md",
+                self._type_dirs[doc_type]["meta"] / f"{doc_id}.json",
+            ]
+        else:
+            for t in self.ALL_TYPES:
+                paths_to_check.extend([
+                    self._type_dirs[t]["content"] / f"{doc_id}.md",
+                    self._type_dirs[t]["meta"] / f"{doc_id}.json",
+                ])
+            # 扁平路径
+            paths_to_check.extend([
+                self.storage_path / f"{doc_id}.md",
+                self.storage_path / f"{doc_id}.json",
+                self._flat_content / f"{doc_id}.md",
+                self._flat_meta / f"{doc_id}.json",
+            ])
+
         with self._lock:
-            for new_path, old_path in pairs:
-                if new_path.exists():
-                    new_path.unlink()
-                    found = True
-                if old_path.exists():
-                    old_path.unlink()
+            for p in paths_to_check:
+                if p and p.exists():
+                    p.unlink()
                     found = True
 
-        # 清理索引条目
         keys_to_remove = [
             k for k, v in self._title_index.items()
             if v.get("id") == doc_id
@@ -202,33 +300,33 @@ class DocumentStore:
         return found
 
     def exists(self, doc_id: str) -> bool:
-        """检查文档是否存在"""
-        return (
-            (self._content_dir / f"{doc_id}.md").exists()
-            or (self._meta_dir / f"{doc_id}.json").exists()
-            or (self.storage_path / f"{doc_id}.md").exists()
-            or (self.storage_path / f"{doc_id}.json").exists()
-        )
+        if (self._type_dirs["memory"]["content"] / f"{doc_id}.md").exists():
+            return True
+        for t in self.ALL_TYPES:
+            if (self._type_dirs[t]["meta"] / f"{doc_id}.json").exists():
+                return True
+        if (self.storage_path / f"{doc_id}.md").exists():
+            return True
+        if (self.storage_path / f"{doc_id}.json").exists():
+            return True
+        return False
 
     def get_available_ids(self) -> list[str]:
-        """列出所有可用的文档 ID"""
         ids = set()
-        with self._lock:
-            for d in [self._content_dir, self.storage_path]:
-                if not d.exists():
-                    continue
-                for fname in os.listdir(d):
+        for t in self.ALL_TYPES:
+            content_dir = self._type_dirs[t]["content"]
+            if content_dir.exists():
+                for fname in os.listdir(content_dir):
                     if fname.endswith(".md"):
                         ids.add(fname[:-3])
-                    elif fname.endswith(".json"):
+            meta_dir = self._type_dirs[t]["meta"]
+            if meta_dir.exists():
+                for fname in os.listdir(meta_dir):
+                    if fname.endswith(".json"):
                         ids.add(fname[:-5])
         return sorted(ids)
 
     def find_by_title(self, title_keyword: str) -> list[dict]:
-        """按标题关键词查找记忆。
-
-        遍历 index.json 中标题包含关键词的条目。
-        """
         keyword = title_keyword.lower()
         results = []
         for slug, entry in self._title_index.items():
@@ -236,30 +334,25 @@ class DocumentStore:
                 results.append(entry)
         return results
 
-    def list_evolution_results(self) -> list[dict]:
-        """列出所有进化结果（distilled_skill / doctrine）。"""
+    def list_by_type(self, doc_type: str) -> list[dict]:
+        """列出指定类型的所有条目。"""
         return [
             v for v in self._title_index.values()
-            if v.get("category") in ("distilled_skill", "doctrine")
+            if v.get("type") == doc_type
         ]
 
     # ═══════════════════════════════════════════════
     # 内部方法
     # ═══════════════════════════════════════════════
 
-    def _read_file(self, primary: Path, fallback: Path) -> Optional[str]:
-        """先读新路径，再回退旧路径。"""
+    def _read_file(self, path) -> Optional[str]:
+        if path is None or not path.exists():
+            return None
         with self._lock:
-            if primary.exists():
-                return primary.read_text(encoding='utf-8')
-            if fallback.exists():
-                return fallback.read_text(encoding='utf-8')
-        return None
+            return path.read_text(encoding='utf-8')
 
-    def _read_json(self, primary: Path, fallback: Path) -> Optional[dict]:
-        """先读新路径的 JSON，再回退旧路径。"""
-        path = primary if primary.exists() else (fallback if fallback.exists() else None)
-        if not path:
+    def _read_json(self, path) -> Optional[dict]:
+        if path is None or not path.exists():
             return None
         try:
             with self._lock:
@@ -269,5 +362,4 @@ class DocumentStore:
             return None
 
     def _pop_content(self, data: dict) -> str:
-        """从 data 中提取内容字段，拼接为纯文本"""
         return (data.pop("content", "") or data.pop("full_content", "") or "").strip()

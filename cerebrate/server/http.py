@@ -81,6 +81,11 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.help()
         if method == "GET" and path == "/v1/doctrines":
             return self.api.doctrines()
+        if method == "GET" and path.startswith("/v1/logs"):
+            lines = int((params.get("lines") or ["50"])[0])
+            level = (params.get("level") or [""])[0]
+            module = (params.get("module") or [""])[0]
+            return self.api.read_logs(lines=lines, level=level, module=module)
         if method == "GET" and path == "/v1/knowledge/topics":
             return self.api.list_knowledge_topics()
         if method == "GET" and path == "/v1/knowledge/all":

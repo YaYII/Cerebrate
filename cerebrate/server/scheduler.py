@@ -55,6 +55,14 @@ class CerebrateScheduler:
 
         logger.info("脑虫调度器已启动 (进化检查间隔=%dmin, 经验提取间隔=%dmin, 清理间隔=24h)",
                      self._check_interval // 60, self._extract_interval // 60)
+        try:
+            from cerebrate.brain.logger import get_logger
+            get_logger().info("system", "scheduler_start",
+                              "脑虫调度器已启动",
+                              details={"evolve_interval_min": self._check_interval // 60,
+                                       "extract_interval_min": self._extract_interval // 60})
+        except Exception:
+            pass
 
     def stop(self):
         """停止后台调度器。"""

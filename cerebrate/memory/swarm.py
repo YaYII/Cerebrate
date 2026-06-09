@@ -163,6 +163,9 @@ class SwarmMemory:
         origin_ids = origin_ids or []
 
         life_stage = life_stage if life_stage in LIFE_STAGES else "memory"
+        from cerebrate.memory.docstore import doc_type_for
+        doc_type = doc_type_for(life_stage)
+        is_short_memory = (life_stage == "memory" and not should_chunk)
 
         # ── 生成主 memory_id（文档级 ID）──
         if memory_id is None:
@@ -177,7 +180,7 @@ class SwarmMemory:
         )
 
         if not should_chunk:
-            # ── 不分块：内容→DocumentStore，运营元数据→ChromaDB ──
+            # ── 不分块：按类型路由 → DocumentStore，运营元数据→ChromaDB ──
             self._docstore_put(memory_id, {
                 "title": title, "content": content,
                 "problem_solved": problem_solved, "solution": solution,
@@ -185,12 +188,14 @@ class SwarmMemory:
                 "source_agent": source_agent,
                 "physical_user": physical_user or "",
                 "total_chunks": 1,
-            })
+            }, doc_type=doc_type)
             search_text = self._build_search_text(
                 title, content,
                 problem_solved=problem_solved,
                 solution=solution,
                 evidence=evidence)
+            # 短记忆（原始经验）：全文直接入向量库，查询无需 docstore 回填
+            chroma_doc = content if is_short_memory else search_text
             meta = self._build_metadata(
                 title=title, content="", category=category, tags=tags,
                 source_agent=source_agent, physical_user=physical_user,
@@ -202,7 +207,11 @@ class SwarmMemory:
                 created=now, updated=now,
                 chunk_index=0, total_chunks=1, full_content="",
             )
-            self._store.add(memory_id, search_text, meta)
+            # 短记忆标记位：让 enrich 知道内容已在 ChromaDB 中
+            if is_short_memory:
+                meta["_fast_content"] = "1"
+                meta["_content_len"] = str(len(content))
+            self._store.add(memory_id, chroma_doc, meta)
             with self._stats_lock:
                 self._stats["total"] += 1
                 self._dirty = True
@@ -232,7 +241,7 @@ class SwarmMemory:
             f"(共 {len(content)} 字符，每块 ≤{config.chunk_max_chars} 字符)"
         )
 
-        # ── 保存完整文档到 DocumentStore ──
+        # ── 保存完整文档到 DocumentStore（按类型路由）──
         self._docstore_put(memory_id, {
             "title": title, "content": content,
             "problem_solved": problem_solved, "solution": solution,
@@ -241,7 +250,7 @@ class SwarmMemory:
             "physical_user": physical_user or "",
             "total_chunks": total_chunks,
             "doc_group_id": doc_group_id,
-        })
+        }, doc_type=doc_type)
 
         for chunk in chunks:
             ci = chunk["index"]
@@ -249,7 +258,7 @@ class SwarmMemory:
             chunk_mid = f"{memory_id}_c{ci:04d}"
             chunk_origin_ids = origin_ids + [memory_id] if ci == 0 else [memory_id]
 
-            # 每块的片段文本也存到 DocumentStore（含偏移量）
+            # 每块的片段文本也存到 DocumentStore（按类型路由）
             self._docstore_put(chunk_mid, {
                 "doc_group_id": doc_group_id,
                 "chunk_index": ci,
@@ -257,7 +266,7 @@ class SwarmMemory:
                 "content": chunk_text,
                 "start_char": chunk.get("start_char", 0),
                 "end_char": chunk.get("end_char", len(chunk_text)),
-            })
+            }, doc_type=doc_type)
 
             search_text = self._build_search_text(
                 title, chunk_text)
@@ -305,11 +314,11 @@ class SwarmMemory:
                         confidence=confidence, total_chunks=total_chunks)
         return memory_id
 
-    def _docstore_put(self, doc_id: str, data: dict):
-        """安全写入 DocumentStore"""
+    def _docstore_put(self, doc_id: str, data: dict, doc_type: str = "memory"):
+        """安全写入 DocumentStore（按类型路由子目录）"""
         if self._docstore:
             try:
-                self._docstore.put(doc_id, data)
+                self._docstore.put(doc_id, data, doc_type)
             except Exception as e:
                 logger.error(f"DocumentStore 写入失败 {doc_id}: {e}")
 
@@ -343,10 +352,17 @@ class SwarmMemory:
     def _enrich_from_docstore(self, entry: dict) -> dict:
         """从 DocumentStore 加载完整内容并填充到条目中
 
+        对于短记忆（_fast_content=1），内容已在 ChromaDB 中，跳过 docstore。
+
         注意：evidence 是运营字段（feedback 动态追加），
         不从 docstore 覆盖，以 ChromaDB 中的为准。
         """
         mem_id = entry.get("memory_id", "")
+
+        # 短记忆：内容已在 ChromaDB document 字段
+        if entry.get("_fast_content") == "1":
+            entry["_docstore_loaded"] = True
+            return entry
 
         # 先查精准 memory_id
         doc = self._docstore_get(mem_id)
@@ -629,7 +645,7 @@ class SwarmMemory:
             scored.append({
                 "memory_id": item["id"],
                 "title": meta.get("title", ""),
-                "content": "",  # 完整内容在 DocumentStore 中
+                "content": item.get("document", "") if meta.get("_fast_content") == "1" else "",
                 "problem_solved": "",
                 "solution": "",
                 "outcome": meta.get("outcome", "unknown"),
@@ -1068,6 +1084,11 @@ class SwarmMemory:
                 result = self._aggregate_memory_from_chunks(memory_id, meta)
                 if result:
                     return {"memory_id": memory_id, **result}
+            # 短记忆：内容已在 ChromaDB document 字段
+            chroma_content = item.get("document", "")
+            if chroma_content and meta.get("_fast_content") == "1":
+                meta["content"] = chroma_content
+                return meta
             # 从 DocumentStore 加载内容
             doc = self._docstore_get(memory_id)
             if doc:

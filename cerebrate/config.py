@@ -48,6 +48,7 @@ class CerebrateConfig:
     evolution_path: Path = field(init=False)
     agents_path: Path = field(init=False)
     events_path: Path = field(init=False)
+    logs_path: Path = field(init=False)
     docstore_path: Path = field(init=False)
 
     # 项目上下文
@@ -183,6 +184,7 @@ class CerebrateConfig:
         self.evolution_path = self.memory_root / "evolution"
         self.agents_path = self.memory_root / "agents"
         self.events_path = self.memory_root / "events"
+        self.logs_path = self.memory_root / "logs"
         self.chroma_path = self.memory_root / "chroma_data"
         self.docstore_path = self.memory_root / "docstore"
 

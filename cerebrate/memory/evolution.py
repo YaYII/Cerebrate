@@ -113,6 +113,27 @@ class EvolutionEngine:
         if len(self._history) > 500:
             self._history = self._history[-200:]
         self._save_history()
+
+        # ── 写入运行日志 ──
+        try:
+            from cerebrate.brain.logger import get_logger
+            log = get_logger()
+            skipped = result.get("skipped", False)
+            actions = result.get("actions", [])
+            stats = result.get("stats", {})
+            log.info(
+                "evolution",
+                "evolve" if not skipped else "evolve_skip",
+                "; ".join(actions) if actions else ("跳过: " + result.get("reason", "")),
+                details={
+                    "skipped": skipped,
+                    "reason": result.get("reason", ""),
+                    "stats": stats,
+                },
+            )
+        except Exception:
+            pass
+
         return result
 
     def _cluster_semantic(self, threshold: float = 0.88) -> int:
