@@ -5,7 +5,7 @@
 2. 评估知识价值，识别低价值/重复提交
 3. 自动分类归档、打标签、关联建议
 4. 检测知识库冲突
-5. 智能总结与知识蒸馏
+5. 链式多轮知识整合（突破单次 token 限制）
 """
 
 import json
@@ -451,29 +451,46 @@ class CerebrateLLM:
             pass
         return None
 
-    # ==================== 知识蒸馏 ====================
+    # ==================== 知识蒸馏(链式多轮) ====================
 
-    def distill_knowledge(self, memories: list[dict], topic: str) -> Optional[dict]:
-        """将多条相关实战记忆综合整合为学术级结构化知识文档。
-
-        采用四层知识架构：概念 → 原理 → 方法 → 实践。
-        铁律：信息密度只增不减——输出必须完整保留所有源记忆的全部技术内容。
-        """
-        if not self.is_available() or not self._sdk_ready():
-            return None
+    def _chat_completion(self, messages: list[dict], max_tokens: int = 8192,
+                         temperature: float = 0.2) -> Optional[str]:
+        """统一的 LLM 对话补全调用，兼容 anthropic / openai / deepseek。"""
         client = self._get_client()
         if not client:
             return None
+        is_reasoner = self._provider == "deepseek" and "reasoner" in self._model
+        kwargs: dict = {
+            "model": self._model,
+            "messages": messages,
+        }
+        if not is_reasoner:
+            kwargs["max_tokens"] = max_tokens
+            kwargs["temperature"] = temperature
+        else:
+            kwargs["max_tokens"] = 65536
+        try:
+            if self._provider == "anthropic":
+                response = client.messages.create(**kwargs)
+                return response.content[0].text if response.content else None
+            else:
+                response = client.chat.completions.create(**kwargs)
+                return response.choices[0].message.content if response.choices else None
+        except Exception:
+            return None
 
-        # 构建记忆列表（按复用次数降序）
-        sorted_mems = sorted(memories, key=lambda m: m.get("reuse_count", 0), reverse=True)
-        memory_blocks = []
-        for i, m in enumerate(sorted_mems):
+    @staticmethod
+    def _format_memory_block(memories: list[dict], offset: int = 0) -> str:
+        """将记忆列表格式化为 LLM 可读的文本块，每条标注序号。"""
+        blocks = []
+        for i, m in enumerate(memories):
+            idx = offset + i + 1
             tags = m.get("tags", "")
             if isinstance(tags, list):
                 tags = ",".join(tags)
-            memory_blocks.append(
-                f"### 记忆源 #{i+1} (复用{m.get('reuse_count',0)}次, 成功率{m.get('success_count',0)/max(m.get('reuse_count',1),1):.0%})\n"
+            blocks.append(
+                f"### 记忆源 #{idx} (复用{m.get('reuse_count',0)}次)\n"
+                f"- 记忆ID: {m.get('memory_id', '')}\n"
                 f"- 标题: {m.get('title','')}\n"
                 f"- 场景: {m.get('problem_solved','')}\n"
                 f"- 方案: {m.get('solution','')}\n"
@@ -481,173 +498,228 @@ class CerebrateLLM:
                 f"- 标签: {tags}\n"
                 f"- 来源: {m.get('source_agent','')} | {m.get('physical_user','')}\n"
             )
+        return "\n".join(blocks)
 
-        prompt = f"""你是一位计算机科学领域的高级研究员（清华大学博士水平）。请将以下多条工程实战记忆**综合整合**为一份符合学术规范的结构化知识文档。
+    def _build_initial_prompt(self, topic: str, batch_mems: list[dict]) -> str:
+        """第一轮 prompt：从首批记忆中构建初始知识结构。"""
+        memory_block = self._format_memory_block(batch_mems)
+        return f"""你是一位计算机科学领域的高级研究员（清华大学博士水平）。请根据以下工程实战记忆，**综合整合**为一份符合学术规范的结构化知识文档。
 
-⚠️ 核心哲学：**综合整合 ≠ 压缩提炼。** 你是在做信息综合（synthesis），不是信息压缩（compression）。
-- 整合后的文档必须比任何一条源记忆都更完整、更详尽
-- 每条源记忆中的**每一个技术细节、代码示例、命令、配置参数、报错信息、边界情况**都必须保留
-- 输出长度只增不减——所有源记忆的技术信息密度不能降低
-- **多解法并存**：同一个问题可能有多种有效解法，每种对应不同场景——全部保留，用 scenario 标注各自的适用条件
+⚠️ 核心哲学：这是**多轮链式整合的第一轮**。本轮只处理第 1 批记忆（共多批）。请基于当前记忆构建**初始完整结构**，后续轮次会逐步补充更多内容。
 
 ## 研究主题
 {topic}
 
-## 原始数据（按复用验证次数降序）
-{chr(10).join(memory_blocks)}
+## 第 1 批原始数据
+{memory_block}
 
-## ⚠️ 质量红线
+## 输出要求
 
-**如果原始数据不足以形成一份合格的知识文档（信息碎片化、内容空泛、缺少具体细节），请返回 skip 标记而非强行生成低质量内容：**
-
-```json
-{{"skip": true, "reason": "具体原因（如：缺少根因分析数据、无具体命令示例、方案步骤不完整等）"}}
-```
-
-合格标准：
-1. 每个核心概念必须有至少一条记忆提供准确定义
-2. 每个解决方案必须有可执行的具体步骤或命令
-3. 陷阱/边界情况必须有实际发生的案例支撑
-4. **所有源记忆的每一条技术细节都必须保留在最终文档中，不压缩、不丢弃**
-5. 每个 section 不能出现"可能"、"也许"等无实质内容的占位表述
-
-## 知识文档结构规范
-
-请严格按以下 JSON Schema 输出，所有内容必须来源于原始数据，严禁编造：
+请严格按以下 JSON Schema 输出。所有内容必须来源于原始数据，**每条结论标注 refs 指向记忆源序号**：
 
 ```json
 {{
   "meta": {{
-    "title": "知识标题（精准描述，必须体现具体技术名词和所属领域）",
-    "topic": "学科/技术领域",
+    "title": "知识标题",
+    "topic": "{topic}",
     "version": "1.0.0",
-    "distilled_at": "生成时间ISO格式",
-    "source_count": "原始记忆数量",
-    "total_reuse": "总复用次数",
+    "source_count": {len(batch_mems)},
+    "total_reuse": {sum(m.get('reuse_count',0) for m in batch_mems)},
     "confidence": 0.0-1.0
   }},
-  "abstract": "学术摘要：问题域、核心发现、方法论要点、适用范围。必须包含每条源记忆提炼出的综合洞察",
+  "abstract": "学术摘要",
   "concept_layer": {{
-    "description": "概念层：定义核心概念和术语体系",
+    "description": "概念层定义",
     "concepts": [
-      {{
-        "term": "术语名（必须具体，不能是通用词）",
-        "definition": "精确定义（包含技术细节）",
-        "evidence_level": "A/B/C",
-        "refs": [1, 3]
-      }}
+      {{"term": "术语名", "definition": "定义", "evidence_level": "A/B/C", "refs": [1]}}
     ]
   }},
   "principle_layer": {{
-    "description": "原理层：问题产生的根本原因和触发机制",
+    "description": "原理层",
     "root_causes": [
-      {{
-        "cause": "根因描述（包含因果逻辑链）",
-        "mechanism": "触发机制（说明在什么条件下触发）",
-        "evidence_level": "A/B/C",
-        "refs": [1]
-      }}
+      {{"cause": "根因", "mechanism": "触发机制", "evidence_level": "A/B/C", "refs": [1]}}
     ]
   }},
   "methodology_layer": {{
-    "description": "方法论层：可复用的解决模式",
+    "description": "方法论层",
     "patterns": [
       {{
-        "name": "模式名称（具体，非"解决方案"这种通用名）",
-        "scenario": "该解法适用的具体场景（什么条件下选这条路）",
-        "steps": ["步骤1: 包含具体命令/参数/配置的完整描述", "步骤2: ..."],
-        "preconditions": "前置条件（环境、权限、依赖等）",
-        "expected_outcome": "预期结果（可验证的具体指标）",
-        "evidence_level": "A/B/C",
-        "refs": [1, 2, 4]
+        "name": "模式名称", "scenario": "适用场景", "steps": [],
+        "preconditions": "", "expected_outcome": "",
+        "evidence_level": "A/B/C", "refs": [1]
       }}
     ]
   }},
   "practice_layer": {{
-    "description": "实践层：不同场景下的可复制操作指南",
+    "description": "实践层",
     "guides": [
       {{
-        "scenario": "操作场景（具体描述，什么情况下使用本方案）",
-        "commands": ["完整的、可直接复制执行的命令"],
-        "verification": "验证方法（如何确认操作成功）",
-        "rollback": "回滚方案（操作失败时如何恢复）",
-        "evidence_level": "A/B/C",
-        "refs": [2]
+        "scenario": "场景", "commands": [],
+        "verification": "", "rollback": "",
+        "evidence_level": "A/B/C", "refs": [1]
       }}
     ]
   }},
   "pitfalls_and_edge_cases": [
-    {{
-      "description": "陷阱/边界情况描述（包含具体技术细节）",
-      "consequence": "后果（具体影响）",
-      "mitigation": "缓解措施（具体步骤）",
-      "refs": [1]
-    }}
+    {{"description": "陷阱描述", "consequence": "后果", "mitigation": "缓解", "refs": [1]}}
   ],
   "knowledge_graph": {{
-    "prerequisites": ["前置知识（具体的技术栈/概念名）"],
-    "related_topics": ["关联主题（具体的、有实际关联的）"],
-    "conflicts": ["已知矛盾点描述（如有不同记忆给出矛盾方案）"]
+    "prerequisites": [], "related_topics": [], "conflicts": []
   }},
   "references": [
-    {{
-      "index": 1,
-      "memory_id": "原始记忆ID",
-      "title": "记忆标题",
-      "contribution": "该记忆对本文档的具体贡献（≥15字）"
-    }}
+    {{"index": 1, "memory_id": "原始记忆ID", "title": "标题", "contribution": "贡献描述"}}
   ],
   "reproducibility": {{
-    "can_reproduce": true/false,
-    "estimated_time": "预估复现耗时",
-    "required_env": "所需环境（OS/依赖/版本等）"
+    "can_reproduce": true, "estimated_time": "", "required_env": ""
   }}
 }}
 ```
 
-## 证据等级标准
-- **A 级**：≥3 次独立复用且成功率 ≥80%，结论高度可信
-- **B 级**：1-2 次复用或成功率 60-80%，结论可信但需进一步验证
-- **C 级**：单次经验或推论，标注为"[待验证]"
-
 ## 铁律
-1. 完整保留：每条源记忆中的**全部内容**都必须体现在最终文档中，不压缩、不丢弃
-2. 来源可追溯：每个论断标注 refs，无来源不写入
-3. 区分事实与观点：事实用陈述句，推论标注"[推断]"或"[待验证]"
-4. 保留分歧：矛盾方案不强行统一，记录在 conflicts 中
-5. 可复现：操作步骤包含验证方法 + 回滚方案
-6. 术语一致：同一概念全文统一术语，技术名词保留英文原名
-7. 禁止编造：不确定的内容标注"[待验证]"，严禁编造填补空白
-8. 多解法并存：同一问题有多种有效解法时全部保留，用 scenario 字段区分适用条件，不合并、不筛选
-9. 横向全量：呈现 N 种方法对比，帮读者根据自身场景选择
+1. 所有内容来源于当前批次的记忆，refs 标注对应序号
+2. 完整保留每个技术细节，不压缩不丢弃
+3. 区分事实与观点，推论标注"[推断]"
+4. 多解法并存：有不同的模式全部列出
+5. 禁止编造
 
-只返回 JSON，不要其他文字。"""
+只返回 JSON，不要其他文字。如果数据不足以形成知识文档，返回 {{"skip": true, "reason": "原因"}}。"""
 
-        try:
-            is_reasoner = self._provider == "deepseek" and "reasoner" in self._model
-            kwargs: dict = {
-                "model": self._model,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            # deepseek-reasoner 不支持 temperature/max_tokens
-            if not is_reasoner:
-                kwargs["max_tokens"] = 8192
-                kwargs["temperature"] = 0.2
+    def _build_update_prompt(self, topic: str, new_batch: list[dict],
+                              previous_draft: dict, batch_index: int,
+                              total_batches: int, total_so_far: int) -> list[dict]:
+        """后续轮次 prompt：将新批次的记忆融入已有知识结构。"""
+        new_block = self._format_memory_block(new_batch, offset=total_so_far)
+        import json as _json
+        draft_json = _json.dumps(previous_draft, ensure_ascii=False, indent=2)
+        is_final = batch_index >= total_batches - 1
+
+        instruction = f"""你正在**链式整合知识文档第 {batch_index+1}/{total_batches} 轮**。以下是当前已有的知识文档草稿和一批新的原始记忆。
+
+## 研究主题
+{topic}
+
+## 当前知识文档草稿
+```json
+{draft_json}
+```
+
+## 需要整合的新记忆（第 {batch_index+1} 批）
+{new_block}
+
+## 任务
+
+{'这是最终轮：请整合所有新内容，输出一份完整、最终的知识文档。确保所有 refs 正确指向最终的记忆源序号。' if is_final else '请将新记忆的内容整合到知识文档中：补充/更新概念、根因、模式、操作指南、陷阱。不删除已有内容，只扩展。'}
+
+## 输出要求
+
+返回完整的 JSON（同前一轮的 schema），整合了新旧所有内容。
+- refs 必须使用全局序号（新批次的序号从 {total_so_far + 1} 开始）
+- 必须包含 references 段列出所有记忆源
+- 只返回 JSON，不要其他文字"""
+
+        return [
+            {"role": "user", "content": instruction},
+        ]
+
+    def chain_distill_knowledge(self, memories: list[dict], topic: str,
+                                 batch_size: int = 3) -> Optional[dict]:
+        """链式多轮知识整合：分批消化记忆，逐轮累加构建完整的结构化知识文档。
+
+        每轮：
+        1. 将一批新记忆送入 LLM
+        2. LLM 基于前一轮的草稿 + 新内容，输出更新后的完整草稿
+        3. 最终轮输出最终的完整文档
+
+        Args:
+            memories: 原始记忆列表
+            topic: 研究主题
+            batch_size: 每批处理多少条记忆（默认 3，可根据模型上下文调整）
+
+        Returns:
+            完整的结构化知识文档 dict，或 None（数据不足）
+        """
+        if not self.is_available() or not self._sdk_ready():
+            return None
+        if not memories:
+            return None
+
+        sorted_mems = sorted(memories, key=lambda m: m.get("reuse_count", 0), reverse=True)
+        batches = [sorted_mems[i:i + batch_size] for i in range(0, len(sorted_mems), batch_size)]
+        total_batches = len(batches)
+
+        accumulated: Optional[dict] = None
+        processed_count = 0
+
+        for batch_idx, batch in enumerate(batches):
+            if batch_idx == 0:
+                # 第一轮：构建初始结构
+                prompt = self._build_initial_prompt(topic, batch)
+                text = self._chat_completion(
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=8192, temperature=0.2,
+                )
             else:
-                kwargs["max_tokens"] = 65536  # reasoner 大输出
-            if self._provider == "anthropic":
-                response = client.messages.create(**kwargs)
-                text = response.content[0].text if response.content else ""
-            else:
-                response = client.chat.completions.create(**kwargs)
-                text = response.choices[0].message.content if response.choices else ""
+                # 后续轮次：融入新内容
+                messages = self._build_update_prompt(
+                    topic, batch, accumulated, batch_idx,
+                    total_batches, processed_count,
+                )
+                text = self._chat_completion(
+                    messages, max_tokens=8192, temperature=0.2,
+                )
 
+            if not text:
+                # LLM 调用失败，如果已有积累则返回当前结果，否则 None
+                return accumulated if accumulated else None
+
+            import re
             match = re.search(r'\{[\s\S]*\}', text)
-            if match:
-                return json.loads(match.group())
-        except Exception:
-            pass
-        return None
+            if not match:
+                return accumulated if accumulated else None
+
+            try:
+                import json
+                result = json.loads(match.group())
+            except json.JSONDecodeError:
+                return accumulated if accumulated else None
+
+            # 处理 skip 标记
+            if result.get("skip"):
+                # 第一轮就 skip → 数据不足
+                if batch_idx == 0:
+                    return None
+                # 后续 skip → 返回已有积累
+                return accumulated
+
+            # 更新 accumulated
+            if accumulated is None:
+                accumulated = result
+            else:
+                # 合并统计信息
+                if result.get("meta"):
+                    accumulated["meta"] = result["meta"]
+                # 替换为最新的完整版本（LLM 已整合全部内容）
+                for key in ["abstract", "concept_layer", "principle_layer",
+                            "methodology_layer", "practice_layer",
+                            "pitfalls_and_edge_cases", "knowledge_graph",
+                            "references", "reproducibility"]:
+                    if key in result:
+                        accumulated[key] = result[key]
+
+            processed_count += len(batch)
+
+        return accumulated
+
+    def distill_knowledge(self, memories: list[dict], topic: str) -> Optional[dict]:
+        """将多条相关实战记忆综合整合为学术级结构化知识文档（自动链式多轮）。
+
+        采用四层知识架构：概念 → 原理 → 方法 → 实践。
+        铁律：信息密度只增不减。
+        自动启用多轮链式处理以突破单次 token 限制。
+        """
+        if not self.is_available() or not self._sdk_ready():
+            return None
+        return self.chain_distill_knowledge(memories, topic, batch_size=3)
 
     def detect_conflicts(self, text_a: str, text_b: str) -> Optional[str]:
         """检测两段知识是否存在矛盾"""

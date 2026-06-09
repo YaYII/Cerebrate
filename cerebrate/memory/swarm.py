@@ -25,6 +25,17 @@ LIFE_STAGES = {"nutrient", "memory", "verified_skill",
                "doctrine", "quarantined", "archived"}
 
 
+def _safe_split(val, separator=","):
+    """安全地将可能是 str 或 list 的元数据值转为列表。"""
+    if not val:
+        return []
+    if isinstance(val, list):
+        return [s for s in val if s]
+    if isinstance(val, str):
+        return [s.strip() for s in val.split(separator) if s.strip()]
+    return [str(val)]
+
+
 class SwarmMemory:
     """虫群共享记忆：ChromaDB 向量索引 + DocumentStore 原始内容
 
@@ -592,7 +603,7 @@ class SwarmMemory:
             meta = item["metadata"]
             # tags 过滤
             if tags:
-                item_tags = set((meta.get("tags") or "").split(","))
+                item_tags = set(_safe_split(meta.get("tags")))
                 if not item_tags.intersection(tags):
                     continue
             if meta.get("life_stage") == "quarantined":
@@ -631,10 +642,10 @@ class SwarmMemory:
                 "nutrient_score": meta.get("nutrient_score", 1.0),
                 "confidence": meta.get("confidence", 1.0),
                 "evidence": meta.get("evidence", ""),
-                "supersedes": [s for s in (meta.get("supersedes") or "").split(",") if s],
-                "origin_ids": [s for s in (meta.get("origin_ids") or "").split(",") if s],
+                "supersedes": _safe_split(meta.get("supersedes")),
+                "origin_ids": _safe_split(meta.get("origin_ids")),
                 "category": meta.get("category", ""),
-                "tags": (meta.get("tags") or "").split(","),
+                "tags": _safe_split(meta.get("tags")),
                 "source_agent": meta.get("source_agent", "unknown"),
                 "physical_user": meta.get("physical_user", ""),
                 "project_id": meta.get("project_id", ""),
@@ -953,7 +964,7 @@ class SwarmMemory:
         metadatas = self._store.get_all_metadata(limit=1000)
         tagset = set()
         for meta in metadatas:
-            for t in (meta.get("tags") or "").split(","):
+            for t in _safe_split(meta.get("tags")):
                 if t.strip():
                     tagset.add(t.strip())
         return list(tagset)
@@ -1201,10 +1212,10 @@ class SwarmMemory:
             "nutrient_score": meta.get("nutrient_score", 1.0),
             "confidence": meta.get("confidence", 1.0),
             "evidence": meta.get("evidence", ""),
-            "supersedes": [s for s in (meta.get("supersedes") or "").split(",") if s],
-            "origin_ids": [s for s in (meta.get("origin_ids") or "").split(",") if s],
+            "supersedes": [s for s in ((meta.get("supersedes") or "") if isinstance(meta.get("supersedes"), str) else meta.get("supersedes") or []) if s],
+            "origin_ids": [s for s in ((meta.get("origin_ids") or "") if isinstance(meta.get("origin_ids"), str) else meta.get("origin_ids") or []) if s],
             "category": meta.get("category", ""),
-            "tags": (meta.get("tags") or "").split(","),
+            "tags": _safe_split(meta.get("tags")),
             "source_agent": meta.get("source_agent", ""),
             "physical_user": meta.get("physical_user", ""),
             "project_id": meta.get("project_id", ""),
