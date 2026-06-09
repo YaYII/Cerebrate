@@ -6,6 +6,7 @@
 3. 自动分类归档、打标签、关联建议
 4. 检测知识库冲突
 5. 链式多轮知识整合（突破单次 token 限制）
+6. 思考模式推理（deepseek-v4-pro + thinking enabled）
 """
 
 import json
@@ -115,6 +116,28 @@ class CerebrateLLM:
         if not self._sdk_ready():
             return None
         return self._client
+
+    @property
+    def _is_thinking_model(self) -> bool:
+        """当前模型是否支持/需要思考（推理）模式。
+
+        DeepSeek: v4-pro 和 reasoner 都支持思考模式
+        """
+        if self._provider != "deepseek":
+            return False
+        return "v4-pro" in self._model or "reasoner" in self._model
+
+    def _deepseek_thinking_kwargs(self) -> dict:
+        """返回 DeepSeek 思考模式专属参数。
+
+        - temperature: 思考模式下不支持
+        - reasoning_effort: high 表示最大推理深度
+        - extra_body: {"thinking": {"type": "enabled"}} 启用思考
+        """
+        return {
+            "extra_body": {"thinking": {"type": "enabled"}},
+            "reasoning_effort": "high",
+        }
 
     # ==================== 免疫系统 ====================
 
@@ -376,16 +399,18 @@ class CerebrateLLM:
 只返回 JSON，不要其他文字。确保 content 完整、详尽、可直接指导实践。"""
 
         try:
-            is_reasoner = self._provider == "deepseek" and "reasoner" in self._model
+            is_thinking = self._is_thinking_model
             kwargs: dict = {
                 "model": self._model,
                 "messages": [{"role": "user", "content": prompt}],
             }
-            if not is_reasoner:
+            if not is_thinking:
                 kwargs["max_tokens"] = 4096
                 kwargs["temperature"] = 0.3
             else:
                 kwargs["max_tokens"] = 65536
+                if self._provider == "deepseek" and "v4-pro" in self._model:
+                    kwargs.update(self._deepseek_thinking_kwargs())
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
                 text = response.content[0].text if response.content else ""
@@ -455,20 +480,25 @@ class CerebrateLLM:
 
     def _chat_completion(self, messages: list[dict], max_tokens: int = 8192,
                          temperature: float = 0.2) -> Optional[str]:
-        """统一的 LLM 对话补全调用，兼容 anthropic / openai / deepseek。"""
+        """统一的 LLM 对话补全调用，兼容 anthropic / openai / deepseek。
+
+        思考模式模型（如 deepseek-v4-pro）自动启用 thinking 参数。
+        """
         client = self._get_client()
         if not client:
             return None
-        is_reasoner = self._provider == "deepseek" and "reasoner" in self._model
+        is_thinking = self._is_thinking_model
         kwargs: dict = {
             "model": self._model,
             "messages": messages,
         }
-        if not is_reasoner:
+        if not is_thinking:
             kwargs["max_tokens"] = max_tokens
             kwargs["temperature"] = temperature
         else:
             kwargs["max_tokens"] = 65536
+            if self._provider == "deepseek" and "v4-pro" in self._model:
+                kwargs.update(self._deepseek_thinking_kwargs())
         try:
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
