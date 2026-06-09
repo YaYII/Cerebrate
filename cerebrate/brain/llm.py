@@ -615,15 +615,14 @@ class CerebrateLLM:
 只返回 JSON，不要其他文字。如果数据不足以形成知识文档，返回 {{"skip": true, "reason": "原因"}}。"""
 
     def _build_update_prompt(self, topic: str, new_batch: list[dict],
-                              previous_draft: dict, batch_index: int,
-                              total_batches: int, total_so_far: int) -> list[dict]:
+                              previous_draft: dict, round_num: int,
+                              total_so_far: int) -> list[dict]:
         """后续轮次 prompt：将新批次的记忆融入已有知识结构。"""
         new_block = self._format_memory_block(new_batch, offset=total_so_far)
         import json as _json
         draft_json = _json.dumps(previous_draft, ensure_ascii=False, indent=2)
-        is_final = batch_index >= total_batches - 1
 
-        instruction = f"""你正在**链式整合知识文档第 {batch_index+1}/{total_batches} 轮**。以下是当前已有的知识文档草稿和一批新的原始记忆。
+        instruction = f"""你正在**链式整合知识文档第 {round_num} 轮**。以下是当前已有的知识文档草稿和一批新的原始记忆。
 
 ## 研究主题
 {topic}
@@ -633,12 +632,12 @@ class CerebrateLLM:
 {draft_json}
 ```
 
-## 需要整合的新记忆（第 {batch_index+1} 批）
+## 需要整合的新记忆（第 {round_num} 批）
 {new_block}
 
 ## 任务
 
-{'这是最终轮：请整合所有新内容，输出一份完整、最终的知识文档。确保所有 refs 正确指向最终的记忆源序号。' if is_final else '请将新记忆的内容整合到知识文档中：补充/更新概念、根因、模式、操作指南、陷阱。不删除已有内容，只扩展。'}
+请将新记忆的内容整合到知识文档中：补充/更新概念、根因、模式、操作指南、陷阱。不删除已有内容，只扩展。
 
 ## 输出要求
 
@@ -652,7 +651,7 @@ class CerebrateLLM:
         ]
 
     def chain_distill_knowledge(self, memories: list[dict], topic: str,
-                                 batch_size: int = 3) -> Optional[dict]:
+                                 batch_size: Optional[int] = None) -> Optional[dict]:
         """链式多轮知识整合：分批消化记忆，逐轮累加构建完整的结构化知识文档。
 
         每轮：
@@ -663,7 +662,10 @@ class CerebrateLLM:
         Args:
             memories: 原始记忆列表
             topic: 研究主题
-            batch_size: 每批处理多少条记忆（默认 3，可根据模型上下文调整）
+            batch_size: （可选）每批处理多少条记忆。
+                       不传则根据模型上下文窗口动态计算，
+                       目标是用尽可能少的轮次处理完所有记忆，
+                       同时每轮记忆数量控制在模型可接收范围内。
 
         Returns:
             完整的结构化知识文档 dict，或 None（数据不足）
@@ -674,32 +676,75 @@ class CerebrateLLM:
             return None
 
         sorted_mems = sorted(memories, key=lambda m: m.get("reuse_count", 0), reverse=True)
-        batches = [sorted_mems[i:i + batch_size] for i in range(0, len(sorted_mems), batch_size)]
-        total_batches = len(batches)
+        total = len(sorted_mems)
 
+        from cerebrate.core.chunking import estimate_tokens
+
+        # ── 动态计算 batch_size ──
+        # 目标：每个 LLM 请求的总 token 不超过上下文窗口的 80%
+        # deepseek-v4-pro 上下文窗口 128K token，保留 20% 给输出
+        # 非思考模型保守设 8K，思考模型大输出设 128K
+        if self._is_thinking_model:
+            context_limit = 98304  # 128K * 0.75，留 25% 给 reasoning + output
+        else:
+            context_limit = 64000
+
+        # 测量一条典型记忆的 token 成本
+        _sample_block = self._format_memory_block(sorted_mems[:1])
+        sample_tokens = estimate_tokens(_sample_block)
+
+        # 测量初始模板的 token 成本（不含记忆）
+        _template = self._build_initial_prompt(topic, sorted_mems[:1])
+        template_tokens = estimate_tokens(_template)
+        overhead_tokens = template_tokens - sample_tokens  # 模板固定开销
+
+        def _calc_batch_size(remaining: int, draft: Optional[dict] = None) -> int:
+            """动态计算当前轮次可以安全处理的记忆数量。"""
+            current_overhead = overhead_tokens
+
+            # 如果有草稿（后续轮次），它的体积会占用上下文
+            if draft is not None:
+                import json as _json
+                draft_str = _json.dumps(draft, ensure_ascii=False)
+                draft_tokens = estimate_tokens(draft_str)
+                current_overhead += draft_tokens + 200  # 200 用于更新指令的 token 数
+
+            available = context_limit - current_overhead
+            if available <= 0:
+                return 1  # 最少也得处理 1 条
+
+            # 每条记忆需要 sample_tokens，但取最大安全值
+            per_mem_tokens = max(sample_tokens, 200)
+            n = max(1, available // per_mem_tokens)
+            return min(n, remaining)
+
+        # ── 自适应分轮 ──
         accumulated: Optional[dict] = None
         processed_count = 0
+        round_num = 0
 
-        for batch_idx, batch in enumerate(batches):
-            if batch_idx == 0:
-                # 第一轮：构建初始结构
+        while processed_count < total:
+            remaining = total - processed_count
+            current_batch_size = _calc_batch_size(remaining, accumulated)
+            batch = sorted_mems[processed_count:processed_count + current_batch_size]
+
+            is_first = (processed_count == 0)
+
+            if is_first:
                 prompt = self._build_initial_prompt(topic, batch)
                 text = self._chat_completion(
                     [{"role": "user", "content": prompt}],
-                    max_tokens=8192, temperature=0.2,
+                    max_tokens=context_limit, temperature=0.2,
                 )
             else:
-                # 后续轮次：融入新内容
                 messages = self._build_update_prompt(
-                    topic, batch, accumulated, batch_idx,
-                    total_batches, processed_count,
+                    topic, batch, accumulated, round_num, processed_count,
                 )
                 text = self._chat_completion(
-                    messages, max_tokens=8192, temperature=0.2,
+                    messages, max_tokens=context_limit, temperature=0.2,
                 )
 
             if not text:
-                # LLM 调用失败，如果已有积累则返回当前结果，否则 None
                 return accumulated if accumulated else None
 
             import re
@@ -713,22 +758,14 @@ class CerebrateLLM:
             except json.JSONDecodeError:
                 return accumulated if accumulated else None
 
-            # 处理 skip 标记
             if result.get("skip"):
-                # 第一轮就 skip → 数据不足
-                if batch_idx == 0:
-                    return None
-                # 后续 skip → 返回已有积累
-                return accumulated
+                return None if is_first else accumulated
 
-            # 更新 accumulated
             if accumulated is None:
                 accumulated = result
             else:
-                # 合并统计信息
                 if result.get("meta"):
                     accumulated["meta"] = result["meta"]
-                # 替换为最新的完整版本（LLM 已整合全部内容）
                 for key in ["abstract", "concept_layer", "principle_layer",
                             "methodology_layer", "practice_layer",
                             "pitfalls_and_edge_cases", "knowledge_graph",
@@ -737,6 +774,12 @@ class CerebrateLLM:
                         accumulated[key] = result[key]
 
             processed_count += len(batch)
+            round_num += 1
+            import logging
+            logger = logging.getLogger("cerebrate.llm")
+            logger.info("链式蒸馏: 处理 %d/%d 条 (batch=%d, 剩余%d轮)",
+                         processed_count, total, len(batch),
+                         (remaining - len(batch) + current_batch_size - 1) // current_batch_size)
 
         return accumulated
 
@@ -745,11 +788,11 @@ class CerebrateLLM:
 
         采用四层知识架构：概念 → 原理 → 方法 → 实践。
         铁律：信息密度只增不减。
-        自动启用多轮链式处理以突破单次 token 限制。
+        batch_size 根据模型上下文窗口和记忆内容量动态计算。
         """
         if not self.is_available() or not self._sdk_ready():
             return None
-        return self.chain_distill_knowledge(memories, topic, batch_size=3)
+        return self.chain_distill_knowledge(memories, topic)
 
     def detect_conflicts(self, text_a: str, text_b: str) -> Optional[str]:
         """检测两段知识是否存在矛盾"""
