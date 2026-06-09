@@ -7,7 +7,9 @@ Cerebrate 分六个模块层：
 - **服务端** `server/`：脑虫中央处理器。负责记忆写入、事件日志、免疫隔离、复用反馈、共识投票、进化和 doctrine 输出。
 - **大脑** `brain/`：决策与元认知层，包含事件、LLM、元认知评估、共识裁决。
 - **记忆内核** `memory/`：服务端内部器官，包含 swarm、personal、knowledge、evolution、agents。
-- **基础设施** `core/`：ChromaDB 向量存储、embedding 引擎、衰减算法。
+- **基础设施** `core/`：ChromaDB 向量存储、embedding 引擎、衰减算法、分块器、重排序。
+- **文档存储** `memory/docstore.py`：文件系统文档存储，`{doc_id}.md`（纯 Markdown）+ `{doc_id}.json`（元数据）。
+- **元数据层** `memory/metastore.py`：可选 PostgreSQL 元数据存储，无 PG 时自动降级。
 - **客户端** `client/`：给 AI 作战单位访问服务端。只能提交请求、候选经验、复用反馈和投票。不能直接写群体记忆，不能直接晋升 doctrine。
 
 `cerebrate.py` 是统一入口：`serve/migrate` 分发到服务端 CLI，其余命令分发到客户端 CLI。

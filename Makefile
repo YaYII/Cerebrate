@@ -1,21 +1,31 @@
 # Cerebrate v5 — 脑虫 Brain Server
 # ==============================
 # 用法:
-#   make build    # 构建 Docker 镜像
-#   make up       # 启动服务 (前台)
-#   make up-d     # 启动服务 (后台)
-#   make down     # 停止服务
-#   make restart  # 重启服务
-#   make logs     # 查看日志
-#   make ps       # 查看状态
-#   make shell    # 进入容器 shell
-#   make test     # 运行测试套件
-#   make clean    # 停止并清理
+#   make build      # 构建 Docker 镜像
+#   make up         # 启动服务 (生产，后台)
+#   make up-dev     # 启动服务 (开发，后台 + 代码挂载)
+#   make up-pro     # 启动服务 (生产强化，后台)
+#   make down       # 停止服务
+#   make restart    # 重启服务 (生产)
+#   make restart-dev # 重启服务 (开发，无需 rebuild)
+#   make logs       # 查看日志
+#   make ps         # 查看状态
+#   make shell      # 进入容器 shell
+#   make test       # 运行测试套件
+#   make clean      # 停止并清理
 
 include .env
 export
 
-.PHONY: build up up-d down restart logs ps shell test clean
+# ── Compose 文件组合 ──
+COMPOSE_BASE     = -f docker-compose.yml
+COMPOSE_DEV      = $(COMPOSE_BASE) -f docker-compose.dev.yml
+COMPOSE_PRO      = $(COMPOSE_BASE) -f docker-compose.pro.yml
+
+.PHONY: build build-fast up up-dev up-pro down restart restart-dev \
+        logs ps shell test smoke clean
+
+# ── 构建 ──
 
 build:
 	docker compose build --no-cache
@@ -23,16 +33,30 @@ build:
 build-fast:
 	docker compose build
 
-up:
-	docker compose up
+# ── 启动 ──
 
-up-d:
+up:
 	docker compose up -d
+
+up-dev:
+	docker compose $(COMPOSE_DEV) up -d --build
+
+up-pro:
+	docker compose $(COMPOSE_PRO) up -d
+
+# ── 停止 ──
 
 down:
 	docker compose down
 
-restart: down up-d
+# ── 重启 ──
+
+restart: down up
+
+restart-dev:
+	docker compose $(COMPOSE_DEV) restart cerebrate
+
+# ── 运维 ──
 
 logs:
 	docker compose logs -f

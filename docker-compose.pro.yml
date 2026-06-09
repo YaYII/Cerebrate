@@ -1,0 +1,35 @@
+# Cerebrate v5 — 生产环境覆盖
+# ==============================
+# 用法: docker compose -f docker-compose.yml -f docker-compose.pro.yml up -d
+#
+# 与基准配置差异:
+#   ✅ 无代码挂载（纯镜像运行，适合 CI/CD 构建发布）
+#   ✅ 资源限制防止内存泄漏影响宿主机
+#   ✅ 日志轮转防止磁盘写满
+#   ✅ 重启策略更严格
+#   ✅ Healthcheck 缩短启动等待
+# ==============================
+services:
+  cerebrate:
+    # 生产模式：无代码挂载，使用已构建的镜像
+    # CI/CD 流程: docker compose -f docker-compose.yml build
+    #             docker compose -f docker-compose.yml -f docker-compose.pro.yml up -d
+    restart: always
+    # 资源限制 — 根据实际机器配置调整
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      # 生产环境：缩短首次启动等待，更频繁探测
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5

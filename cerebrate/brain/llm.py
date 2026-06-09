@@ -288,52 +288,120 @@ class CerebrateLLM:
 
         return {"issues": [], "quality": 1.0}
 
-    # ==================== 智能增强 ====================
+    # ==================== 自动经验提取（人人为我） ====================
 
-    def summarize_memory(self, content: str, max_length: int = 200) -> Optional[str]:
-        """将冗长的记忆内容压缩为关键要点"""
-        if not self.is_available() or not self._sdk_ready():
-            return self._rule_summarize(content, max_length)
-        return self._llm_summarize(content, max_length)
+    def extract_lesson_from_usage(self, problem: str, original_memory: Optional[dict],
+                                   outcome: str, feedback: str, agent_id: str) -> Optional[dict]:
+        """从记忆复用场景中自动提取完整经验教训，用于自动同步到虫群。
 
-    def _rule_summarize(self, content: str, max_length: int) -> str:
-        if len(content) <= max_length:
-            return content
-        return content[:max_length - 3] + "..."
+        铁律：输出信息密度不降低——提取的是完整经验，不是压缩摘要。
+        """
+        if self.is_available() and self._sdk_ready():
+            return self._llm_extract_lesson(problem, original_memory, outcome, feedback, agent_id)
+        return self._rule_extract_lesson(problem, original_memory, outcome, feedback)
 
-    def _llm_summarize(self, content: str, max_length: int) -> Optional[str]:
+    def _rule_extract_lesson(self, problem: str, original_memory: Optional[dict],
+                              outcome: str, feedback: str) -> dict:
+        """规则回退：用模板构建经验文档，确保信息完整性。"""
+        content_parts = [f"## 问题场景\n{problem}"]
+        if original_memory:
+            content_parts.append(f"## 参考记忆\n标题: {original_memory.get('title', '')}")
+            orig_content = original_memory.get('content', '')
+            if orig_content:
+                content_parts.append(f"内容: {orig_content[:2000]}")
+        content_parts.append(f"## 结果\n{'✅ 成功' if outcome == 'success' else '⚠️ 部分成功' if outcome == 'partial' else '❌ 失败'}")
+        if feedback:
+            content_parts.append(f"## 经验反馈\n{feedback}")
+        content = "\n\n".join(content_parts)
+        return {
+            "title": f"[自动经验] {problem[:60]}",
+            "content": content,
+            "tags": ["auto-extracted", outcome],
+            "category": "coding",
+        }
+
+    def _llm_extract_lesson(self, problem: str, original_memory: Optional[dict],
+                             outcome: str, feedback: str, agent_id: str) -> Optional[dict]:
+        """LLM驱动的自动经验提取——从使用上下文中提取完整、可复用的经验教训。"""
         client = self._get_client()
         if not client:
-            return self._rule_summarize(content, max_length)
+            return self._rule_extract_lesson(problem, original_memory, outcome, feedback)
 
-        prompt = f"""请将以下编程记忆总结为 {max_length} 字以内的关键要点:
+        mem_ctx = ""
+        if original_memory:
+            mem_ctx = (
+                f"### 被复用的原始记忆\n"
+                f"- 标题: {original_memory.get('title', '')}\n"
+                f"- 内容: {original_memory.get('content', '')[:2000]}\n"
+                f"- 方案: {original_memory.get('solution', '')}\n"
+                f"- 标签: {original_memory.get('tags', '')}\n"
+            )
 
-{content[:4000]}
+        prompt = f"""你是一个从实战中自动提取经验的智能体——"人人为我"机制的神经突触。
 
-总结要点:
-1. 核心技术/问题
-2. 采用的解决方案
-3. 关键注意事项
+你的任务：从一次"记忆复用"的完整上下文中，提取一份**完整、详细、可直接复用的经验教训**。
+这不是压缩，是**提取精华**——输出要比输入的任何单条信息都更完整。
 
-直接输出总结，不要JSON格式。"""
+## 上下文
+
+### 执行智能体
+{agent_id}
+
+### 遇到的问题/场景
+{problem}
+
+{mem_ctx}
+
+### 执行结果
+{'✅ 成功' if outcome == 'success' else '⚠️ 部分成功' if outcome == 'partial' else '❌ 失败'}
+
+### 智能体反馈
+{feedback or '（无额外反馈）'}
+
+## 输出要求
+
+请返回 JSON，包含以下字段：
+
+```json
+{{
+  "title": "经验标题（一句话概括问题领域和解决方法，如: 'Docker Compose 多阶段构建时.env 变量传递失败及修复'）",
+  "content": "完整经验文档（Markdown格式）：\\n## 问题描述\\n...\\n## 根因分析\\n...\\n## 解决方案\\n...\\n## 关键命令/代码\\n...\\n## 注意事项\\n...\\n要求：每个技术细节都必须保留，不能因为"常见"就省略；包含可复现的命令或代码片段；包含边界条件和陷阱",
+  "tags": ["至少3个标签，小写英文，第一个是技术栈，第二个是问题类型，第三个是领域"],
+  "category": "最合适的分类（coding|debugging|architecture|devops|performance|security|testing|config）",
+  "problem_solved": "简明版问题描述（用于快速检索）",
+  "solution": "简明版解决方案（50-200字，供其他智能体快速参考）"
+}}
+```
+
+只返回 JSON，不要其他文字。确保 content 完整、详尽、可直接指导实践。"""
 
         try:
-            kwargs = {
+            is_reasoner = self._provider == "deepseek" and "reasoner" in self._model
+            kwargs: dict = {
                 "model": self._model,
-                "max_tokens": max_length,
-                "temperature": 0.3,
                 "messages": [{"role": "user", "content": prompt}],
             }
+            if not is_reasoner:
+                kwargs["max_tokens"] = 4096
+                kwargs["temperature"] = 0.3
+            else:
+                kwargs["max_tokens"] = 65536
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
-                content = response.content[0].text if response.content else ""
-                return content.strip()
+                text = response.content[0].text if response.content else ""
             else:
                 response = client.chat.completions.create(**kwargs)
-                content = response.choices[0].message.content if response.choices else ""
-                return content.strip()
+                text = response.choices[0].message.content if response.choices else ""
+
+            match = re.search(r'\{[\s\S]*\}', text)
+            if match:
+                result = json.loads(match.group())
+                # 确保必要字段
+                if result.get("content") and len(result["content"]) > 50:
+                    return result
         except Exception:
-            return self._rule_summarize(content, max_length)
+            pass
+        return self._rule_extract_lesson(problem, original_memory, outcome, feedback)
 
     def suggest_tags(self, content: str) -> list[str]:
         """自动生成标签"""
@@ -386,10 +454,10 @@ class CerebrateLLM:
     # ==================== 知识蒸馏 ====================
 
     def distill_knowledge(self, memories: list[dict], topic: str) -> Optional[dict]:
-        """将多条相关实战记忆提炼为学术级结构化知识文档。
+        """将多条相关实战记忆综合整合为学术级结构化知识文档。
 
         采用四层知识架构：概念 → 原理 → 方法 → 实践。
-        每条论断标注证据等级和原始记忆引用。
+        铁律：信息密度只增不减——输出必须完整保留所有源记忆的全部技术内容。
         """
         if not self.is_available() or not self._sdk_ready():
             return None
@@ -409,12 +477,18 @@ class CerebrateLLM:
                 f"- 标题: {m.get('title','')}\n"
                 f"- 场景: {m.get('problem_solved','')}\n"
                 f"- 方案: {m.get('solution','')}\n"
-                f"- 详情: {m.get('content','')[:600]}\n"
+                f"- 详情: {m.get('content','')}\n"
                 f"- 标签: {tags}\n"
                 f"- 来源: {m.get('source_agent','')} | {m.get('physical_user','')}\n"
             )
 
-        prompt = f"""你是一位计算机科学领域的高级研究员（清华大学博士水平）。请将以下多条工程实战记忆，提炼为一份符合学术规范的结构化知识文档。
+        prompt = f"""你是一位计算机科学领域的高级研究员（清华大学博士水平）。请将以下多条工程实战记忆**综合整合**为一份符合学术规范的结构化知识文档。
+
+⚠️ 核心哲学：**综合整合 ≠ 压缩提炼。** 你是在做信息综合（synthesis），不是信息压缩（compression）。
+- 整合后的文档必须比任何一条源记忆都更完整、更详尽
+- 每条源记忆中的**每一个技术细节、代码示例、命令、配置参数、报错信息、边界情况**都必须保留
+- 输出长度只增不减——所有源记忆的技术信息密度不能降低
+- **多解法并存**：同一个问题可能有多种有效解法，每种对应不同场景——全部保留，用 scenario 标注各自的适用条件
 
 ## 研究主题
 {topic}
@@ -424,7 +498,7 @@ class CerebrateLLM:
 
 ## ⚠️ 质量红线
 
-**如果原始数据不足以形成一篇合格的知识文档（信息碎片化、内容空泛、缺少具体细节），请返回 skip 标记而非强行生成低质量内容：**
+**如果原始数据不足以形成一份合格的知识文档（信息碎片化、内容空泛、缺少具体细节），请返回 skip 标记而非强行生成低质量内容：**
 
 ```json
 {{"skip": true, "reason": "具体原因（如：缺少根因分析数据、无具体命令示例、方案步骤不完整等）"}}
@@ -434,7 +508,7 @@ class CerebrateLLM:
 1. 每个核心概念必须有至少一条记忆提供准确定义
 2. 每个解决方案必须有可执行的具体步骤或命令
 3. 陷阱/边界情况必须有实际发生的案例支撑
-4. abstract 不少于 150 字，全文有效内容不少于 2000 字
+4. **所有源记忆的每一条技术细节都必须保留在最终文档中，不压缩、不丢弃**
 5. 每个 section 不能出现"可能"、"也许"等无实质内容的占位表述
 
 ## 知识文档结构规范
@@ -444,7 +518,7 @@ class CerebrateLLM:
 ```json
 {{
   "meta": {{
-    "title": "知识标题（精准描述，≤50字，必须有具体技术名词）",
+    "title": "知识标题（精准描述，必须体现具体技术名词和所属领域）",
     "topic": "学科/技术领域",
     "version": "1.0.0",
     "distilled_at": "生成时间ISO格式",
@@ -452,13 +526,13 @@ class CerebrateLLM:
     "total_reuse": "总复用次数",
     "confidence": 0.0-1.0
   }},
-  "abstract": "学术摘要（≥150字）：问题域、核心发现、方法论要点、适用范围。必须包含具体的技术名词和数据",
+  "abstract": "学术摘要：问题域、核心发现、方法论要点、适用范围。必须包含每条源记忆提炼出的综合洞察",
   "concept_layer": {{
     "description": "概念层：定义核心概念和术语体系",
     "concepts": [
       {{
         "term": "术语名（必须具体，不能是通用词）",
-        "definition": "精确定义（≥30字，包含技术细节）",
+        "definition": "精确定义（包含技术细节）",
         "evidence_level": "A/B/C",
         "refs": [1, 3]
       }}
@@ -468,7 +542,7 @@ class CerebrateLLM:
     "description": "原理层：问题产生的根本原因和触发机制",
     "root_causes": [
       {{
-        "cause": "根因描述（≥20字，包含因果逻辑链）",
+        "cause": "根因描述（包含因果逻辑链）",
         "mechanism": "触发机制（说明在什么条件下触发）",
         "evidence_level": "A/B/C",
         "refs": [1]
@@ -480,6 +554,7 @@ class CerebrateLLM:
     "patterns": [
       {{
         "name": "模式名称（具体，非"解决方案"这种通用名）",
+        "scenario": "该解法适用的具体场景（什么条件下选这条路）",
         "steps": ["步骤1: 包含具体命令/参数/配置的完整描述", "步骤2: ..."],
         "preconditions": "前置条件（环境、权限、依赖等）",
         "expected_outcome": "预期结果（可验证的具体指标）",
@@ -489,10 +564,10 @@ class CerebrateLLM:
     ]
   }},
   "practice_layer": {{
-    "description": "实践层：可直接复制执行的操作指南",
+    "description": "实践层：不同场景下的可复制操作指南",
     "guides": [
       {{
-        "scenario": "操作场景（具体描述）",
+        "scenario": "操作场景（具体描述，什么情况下使用本方案）",
         "commands": ["完整的、可直接复制执行的命令"],
         "verification": "验证方法（如何确认操作成功）",
         "rollback": "回滚方案（操作失败时如何恢复）",
@@ -503,7 +578,7 @@ class CerebrateLLM:
   }},
   "pitfalls_and_edge_cases": [
     {{
-      "description": "陷阱/边界情况描述（≥30字）",
+      "description": "陷阱/边界情况描述（包含具体技术细节）",
       "consequence": "后果（具体影响）",
       "mitigation": "缓解措施（具体步骤）",
       "refs": [1]
@@ -536,14 +611,15 @@ class CerebrateLLM:
 - **C 级**：单次经验或推论，标注为"[待验证]"
 
 ## 铁律
-1. 无具体数据 → 不写。每个字段必须是具体的技术内容，不能是空泛的套话
+1. 完整保留：每条源记忆中的**全部内容**都必须体现在最终文档中，不压缩、不丢弃
 2. 来源可追溯：每个论断标注 refs，无来源不写入
 3. 区分事实与观点：事实用陈述句，推论标注"[推断]"或"[待验证]"
 4. 保留分歧：矛盾方案不强行统一，记录在 conflicts 中
 5. 可复现：操作步骤包含验证方法 + 回滚方案
 6. 术语一致：同一概念全文统一术语，技术名词保留英文原名
 7. 禁止编造：不确定的内容标注"[待验证]"，严禁编造填补空白
-8. 去重合并：同一问题的多条描述合并，保留最完整版本
+8. 多解法并存：同一问题有多种有效解法时全部保留，用 scenario 字段区分适用条件，不合并、不筛选
+9. 横向全量：呈现 N 种方法对比，帮读者根据自身场景选择
 
 只返回 JSON，不要其他文字。"""
 
@@ -555,7 +631,7 @@ class CerebrateLLM:
             }
             # deepseek-reasoner 不支持 temperature/max_tokens
             if not is_reasoner:
-                kwargs["max_tokens"] = 4096
+                kwargs["max_tokens"] = 8192
                 kwargs["temperature"] = 0.2
             else:
                 kwargs["max_tokens"] = 65536  # reasoner 大输出
@@ -614,3 +690,92 @@ B: {text_b[:1500]}
         except Exception:
             pass
         return None
+
+    def filter_relevant(self, query: str, title: str, content: str) -> dict:
+        """判断一段内容是否与查询相关
+
+        用于检索后过滤，移除不相关的结果块。
+
+        Args:
+            query: 用户查询
+            title: 内容标题
+            content: 正文内容（最多 3000 字）
+
+        Returns:
+            {"relevant": bool, "relevance_score": float, "reason": str}
+        """
+        if not self.is_available() or not self._sdk_ready():
+            return self._rule_filter_relevant(query, title, content)
+
+        client = self._get_client()
+        if not client:
+            return self._rule_filter_relevant(query, title, content)
+
+        prompt = f"""你是一个检索评估专家。判断以下内容是否与用户查询相关。
+
+用户查询: {query}
+
+文档标题: {title}
+文档内容:
+{content[:2500]}
+
+请返回 JSON:
+{{
+  "relevant": true/false,
+  "relevance_score": 0.0-1.0,
+  "reason": "一句话说明判断理由"
+}}
+
+相关=该内容直接回答了查询问题或提供了关键背景信息
+不相关=内容主题完全不同或仅有边缘关联
+只返回 JSON。"""
+        try:
+            kwargs = {
+                "model": self._model,
+                "max_tokens": 200,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if self._provider == "anthropic":
+                response = client.messages.create(**kwargs)
+                text = response.content[0].text if response.content else ""
+            else:
+                response = client.chat.completions.create(**kwargs)
+                text = response.choices[0].message.content if response.choices else ""
+
+            match = re.search(r'\{[\s\S]*\}', text)
+            if match:
+                result = json.loads(match.group())
+                return {
+                    "relevant": bool(result.get("relevant", False)),
+                    "relevance_score": float(result.get("relevance_score", 0)),
+                    "reason": result.get("reason", ""),
+                }
+        except Exception:
+            pass
+        return self._rule_filter_relevant(query, title, content)
+
+    def _rule_filter_relevant(self, query: str, title: str,
+                               content: str) -> dict:
+        """规则降级：关键词匹配判断相关性"""
+        query_lower = query.lower()
+        content_lower = content.lower()
+        title_lower = title.lower()
+
+        query_words = set(query_lower.split())
+        title_words = set(title_lower.split())
+        common = query_words & title_words
+
+        if common:
+            score = min(0.5 + len(common) * 0.1, 0.9)
+            return {"relevant": True, "relevance_score": score,
+                    "reason": f"标题匹配关键词: {', '.join(common)}"}
+
+        content_matches = sum(1 for w in query_words if w in content_lower)
+        if content_matches >= max(1, len(query_words) // 2):
+            score = min(0.4 + content_matches * 0.1, 0.8)
+            return {"relevant": True, "relevance_score": score,
+                    "reason": f"内容匹配 {content_matches}/{len(query_words)} 个关键词"}
+
+        return {"relevant": False, "relevance_score": 0.0,
+                "reason": "关键词匹配不足"}

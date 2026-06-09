@@ -1,0 +1,20 @@
+# Cerebrate v5 — 开发环境覆盖
+# ==============================
+# 用法: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# 与基准配置差异:
+#   ✅ 宿主机代码挂载到容器，修改 .py 文件后只需 restart 无需 rebuild
+#   ✅ 构建时利用缓存加速
+#   ✅ 开放更多调试信息
+# ==============================
+services:
+  cerebrate:
+    # 开发模式：挂载本地代码，改完 restart 即可
+    volumes:
+      # 代码热挂载 — 修改 Python 源码后只需 docker compose restart cerebrate
+      - ./cerebrate:/app/cerebrate
+      - ./cerebrate.py:/app/cerebrate.py
+    # 开发时无需每次 --no-cache，利用 docker 层缓存加速
+    build:
+      context: .
+      # 如需强制重建: docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache

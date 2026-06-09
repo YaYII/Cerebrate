@@ -28,6 +28,8 @@ class BrainAPI:
                  events: Optional[EventLog] = None):
         self.mm = manager or get_manager()
         self.events = events or EventLog(config.events_path)
+        # 人人为我：已自动提取经验的 usage_id 集合，避免重复提取
+        self._auto_extracted_usages: set[str] = set()
 
     def sense(self) -> dict:
         mind = CerebrateMind(self.mm)
@@ -437,6 +439,16 @@ class BrainAPI:
         if not title or not content:
             raise ValueError("title and content are required")
 
+        # ── 记忆质量：内容必须 ≥500 token ──
+        from cerebrate.core.chunking import estimate_tokens
+        token_count = estimate_tokens(content)
+        if token_count < config.memory_min_tokens:
+            raise ValueError(
+                f"记忆内容不足 {config.memory_min_tokens} token "
+                f"（当前 {token_count} token），"
+                f"请提供更详细的记忆总结（建议至少 {config.memory_min_tokens} token）"
+            )
+
         tags = payload.get("tags") or []
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -535,7 +547,182 @@ class BrainAPI:
             usage_id, outcome, payload.get("feedback", ""))
         self.events.append("usage.finished", record.get("agent_id", "unknown"),
                            record, record.get("project_id", ""))
+
+        # ── 人人为我：自动从使用经验中提取教训并同步到虫群 ──
+        try:
+            lesson = self._auto_extract_and_propose(record)
+            if lesson:
+                record["auto_lesson_memory_id"] = lesson["memory_id"]
+                record["auto_lesson_title"] = lesson["title"]
+        except Exception as e:
+            # 自动提取失败不应影响主流程
+            import logging
+            logging.getLogger("cerebrate.api").warning(
+                "自动经验提取异常 (usage=%s): %s", usage_id, e)
+
         return record
+
+    def _auto_extract_and_propose(self, usage_record: dict) -> Optional[dict]:
+        """人人为我核心：从一次记忆复用中自动提取经验教训并同步到虫群。
+
+        热路径——在 finish_usage 完成后立即执行。
+        - 获取原始记忆和 usage 上下文
+        - 用 LLM 提取完整经验
+        - 自动 propose 到虫群
+        - 返回新 memory_id
+        """
+        memory_id = usage_record.get("memory_id", "")
+        agent_id = usage_record.get("agent_id", "")
+        problem = usage_record.get("problem", "")
+        outcome = usage_record.get("outcome", "partial")
+        feedback = usage_record.get("feedback", "")
+        usage_id = usage_record.get("usage_id", "")
+
+        # 避免重复提取
+        if usage_id in self._auto_extracted_usages:
+            return None
+
+        # 没有 problem 说明用法记录不完整，无法提取
+        if not problem:
+            return None
+
+        # 记录为已处理
+        if usage_id:
+            self._auto_extracted_usages.add(usage_id)
+
+        # 获取被复用的原始记忆
+        original_memory = None
+        try:
+            original_memory = self.mm.get_swarm_memory(memory_id)
+        except Exception:
+            pass  # 记忆可能已被删除
+
+        # LLM 提取经验
+        from cerebrate.brain.llm import CerebrateLLM
+        lesson = CerebrateLLM().extract_lesson_from_usage(
+            problem, original_memory, outcome, feedback, agent_id
+        )
+        if not lesson or not lesson.get("content"):
+            return None
+        # 自动 propose：用系统账户提交，但 credit 归原 agent
+        physical_user = ""
+        try:
+            physical_user = self.mm.agents.get_physical_user(agent_id) or "cerebrate-system"
+        except Exception:
+            physical_user = "cerebrate-system"
+
+        # 检查是否至少有基本内容
+        from cerebrate.core.chunking import estimate_tokens
+        content = lesson["content"]
+        # 如果 LLM 产出内容不足 500 token，用规则模板补全
+        if estimate_tokens(content) < config.memory_min_tokens:
+            content = self._augment_lesson_content(content, usage_record, original_memory)
+
+        propose_payload = {
+            "title": lesson.get("title", f"[自动经验] {problem[:60]}"),
+            "content": content,
+            "category": lesson.get("category", usage_record.get("category", "coding")),
+            "tags": lesson.get("tags", ["auto-extracted", outcome]),
+            "agent": "cerebrate-system",
+            "problem_solved": lesson.get("problem_solved", problem),
+            "solution": lesson.get("solution", ""),
+            "outcome": outcome,
+            "project_id": usage_record.get("project_id", ""),
+            "life_stage": "memory",
+            "validate": True,
+            "physical_user": physical_user,
+            # 血缘：credit 归原始智能体
+            "origin_ids": [memory_id] if memory_id else [],
+        }
+        try:
+            result = self.propose_memory(propose_payload)
+            result["from_agent"] = agent_id
+            return result
+        except ValueError as e:
+            # 内容质量不足，记录但不阻塞流程
+            import logging
+            logging.getLogger("cerebrate.api").info(
+                "自动经验提取被质量门控拒绝 (usage=%s): %s",
+                usage_record.get("usage_id", ""), e)
+            return None
+
+    @staticmethod
+    def _augment_lesson_content(content: str, usage_record: dict,
+                                 original_memory: Optional[dict]) -> str:
+        """当 LLM 产出内容不足质量门槛时，用原始数据补全以确保信息完整性。"""
+        parts = [content]
+        parts.append("\n\n## 补充上下文\n")
+        problem = usage_record.get("problem", "")
+        if problem:
+            parts.append(f"### 原始问题\n{problem}\n")
+        feedback = usage_record.get("feedback", "")
+        if feedback:
+            parts.append(f"### 反馈\n{feedback}\n")
+        if original_memory:
+            parts.append("### 被复用的记忆源\n")
+            o_title = original_memory.get("title", "")
+            o_content = original_memory.get("content", "")
+            if o_title:
+                parts.append(f"标题: {o_title}\n")
+            if o_content:
+                parts.append(o_content)
+        return "\n".join(parts)
+
+    def process_pending_usages(self, limit: int = 20) -> dict:
+        """冷路径：扫描已完成的 usage 记录，对未自动提取经验的进行兜底处理。
+
+        scheduler 每 10 分钟调用一次，作为热路径的补充。
+        通过检查 usage 是否已有 auto_lesson_memory_id 来避免重复处理。
+        """
+        processed = 0
+        skipped = 0
+        errors = 0
+
+        try:
+            store = self.mm._usage_store()
+            # 获取所有 usage 记录（含 ids 和 metadatas）
+            all_ids = store.get_all_ids()
+            all_metas = store.get_all_metadata()
+        except Exception:
+            return {"processed": 0, "skipped": 0, "errors": 0, "note": "usage store unavailable"}
+
+        for idx, meta in enumerate(all_metas):
+            if processed >= limit:
+                break
+            doc_id = all_ids[idx] if idx < len(all_ids) else ""
+            # 只处理已完成的记录
+            if meta.get("status") != "finished":
+                skipped += 1
+                continue
+            usage_id = meta.get("usage_id", "").replace("usage:", "")
+            if not usage_id:
+                usage_id = doc_id.replace("usage:", "")
+            # 跳过已在热路径中处理过的
+            if usage_id in self._auto_extracted_usages:
+                skipped += 1
+                continue
+            problem = meta.get("problem", "")
+            if not problem:
+                skipped += 1
+                continue
+
+            record = {k: v for k, v in meta.items()}
+            record["usage_id"] = usage_id
+
+            try:
+                result = self._auto_extract_and_propose(record)
+                if result:
+                    processed += 1
+                else:
+                    skipped += 1
+            except Exception:
+                errors += 1
+
+        return {
+            "processed": processed,
+            "skipped": skipped,
+            "errors": errors,
+        }
 
     def consensus_vote(self, payload: dict) -> dict:
         memory_id = payload.get("memory_id")
@@ -794,6 +981,122 @@ class BrainAPI:
         result = EvolutionEngine(config.evolution_path, self.mm).evolve(force=force)
         self.events.append("brain.evolved", "brain-server", result)
         return result
+
+    def answer(self, payload: dict) -> dict:
+        """生成带引用标注的回答
+
+        流程:
+          1. 完整检索管线（重写→搜索→扩展→过滤→重排序）
+          2. LLM 基于检索结果生成带 [doc:xxx] 引用的回答
+          3. 返回回答 + 引用来源列表
+
+        Payload:
+          {
+            "query": "问题",
+            "agent_id": "...",
+            "user": "...",
+            "project_id": "...",
+          }
+        """
+        query = payload.get("query", "")
+        if not query:
+            raise ValueError("query is required")
+
+        agent_id = payload.get("agent_id", "")
+        user_id = payload.get("user") or agent_id or "default"
+        project_id = payload.get("project") or payload.get("project_id")
+
+        # ── 1. 检索 ──
+        decision = DecisionRouter(self.mm).decide(
+            user_id, query, context={"project_id": project_id})
+        swarm = decision.get("swarm_knowledge", {})
+        best = swarm.get("best_match")
+        related = swarm.get("related", [])
+
+        # ── 2. 构建上下文 ──
+        contexts = []
+        sources = {}
+        if best:
+            content = best.get("_expanded_context") or best.get("content", "")
+            if content:
+                doc_id = best.get("memory_id", "") or best.get("doc_group_id", "")
+                src = best.get("_source_range", {})
+                ref = f"[doc:{src.get('document', doc_id)[:8]}]" if src else f"[doc:{doc_id[:8]}]"
+                contexts.append(f"{ref}\n{content}")
+                sources[ref] = {
+                    "document_id": doc_id,
+                    "title": best.get("title", ""),
+                    "score": best.get("score", 0),
+                    "relevance_score": best.get("_relevance", best.get("score", 0)),
+                }
+
+        for i, r in enumerate(related):
+            if len(contexts) >= 5:
+                break
+            content = r.get("_expanded_context") or r.get("content", "")
+            if content and content not in [c.split("\n", 1)[-1] for c in contexts]:
+                doc_id = r.get("memory_id", "")
+                src = r.get("_source_range", {})
+                ref = f"[doc:{src.get('document', doc_id)[:8]}]" if src else f"[doc:{doc_id[:8]}]"
+                contexts.append(f"{ref}\n{content}")
+                sources[ref] = {
+                    "document_id": doc_id,
+                    "title": r.get("title", ""),
+                    "score": r.get("score", 0),
+                    "relevance_score": r.get("_relevance", r.get("score", 0)),
+                }
+
+        # ── 3. LLM 生成回答 —─
+        from cerebrate.brain.llm import CerebrateLLM
+        llm = CerebrateLLM()
+        answer = ""
+        if llm.is_available() and llm._sdk_ready():
+            context_block = "\n\n---\n\n".join(contexts)
+            prompt = f"""你是一名技术助手。请基于以下检索到的文档内容回答用户问题。
+
+用户问题: {query}
+
+检索到的相关文档:
+{context_block}
+
+要求:
+1. 仅基于上述文档内容回答，不要编造信息
+2. 每个事实后标注来源引用，如 [doc:abc12345]
+3. 如果文档中没有相关信息，明确说"文档中未找到相关信息"
+4. 回答结束后，列出所有引用的来源文档
+
+回答:"""
+            client = llm._get_client()
+            if client:
+                try:
+                    kwargs = {
+                        "model": llm._model,
+                        "max_tokens": 2000,
+                        "temperature": 0.3,
+                        "messages": [{"role": "user", "content": prompt}],
+                    }
+                    if llm._provider == "anthropic":
+                        response = client.messages.create(**kwargs)
+                        answer = response.content[0].text if response.content else ""
+                    else:
+                        response = client.chat.completions.create(**kwargs)
+                        answer = response.choices[0].message.content if response.choices else ""
+                except Exception as e:
+                    logger.warning(f"回答生成失败: {e}")
+                    answer = ""
+
+        if not answer:
+            # 降级：无 LLM 时返回检索结果摘要
+            answer = f"找到 {len(contexts)} 条相关文档。请使用 GET /v1/query 查看详情。"
+
+        self.events.append("memory.answered", agent_id or user_id,
+                           {"query": query, "sources": len(sources)})
+        return {
+            "query": query,
+            "answer": answer,
+            "sources": list(sources.values()),
+            "total_sources": len(sources),
+        }
 
     # ── 权威知识库 ──────────────────────────────────────
 

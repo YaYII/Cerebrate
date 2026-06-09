@@ -118,6 +118,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/evolve":
             force = (params.get("force") or ["false"])[0].lower() == "true"
             return self.api.evolve(force=force)
+        if method == "POST" and path == "/v1/answer":
+            return self.api.answer(payload)
         if method == "POST" and path == "/v1/origins/cleanup":
             days_raw = (params.get("days") or ["365"])[0]
             try:

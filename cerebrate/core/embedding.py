@@ -33,17 +33,19 @@ def get_embedding_engine(model_name: str = "BAAI/bge-small-zh-v1.5",
 class EmbeddingEngine:
     """文本向量化引擎
 
-    优先使用 sentence-transformers + BGE 模型，
+    优先使用 sentence-transformers + BGE 模型（推荐 BAAI/bge-m3，8192 tokens），
     不可用时回退到确定性本地 hash 向量。
     """
 
-    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5",
+    def __init__(self, model_name: str = "BAAI/bge-m3",
                  device: str = "cpu"):
         self.model_name = model_name
         self.device = device
         self._model = None
         self._mode = None  # "bge" | "hash"
         self._dimension = config.embedding_hash_dim
+        self._max_length: int = config.embedding_max_length
+        self._model_max_length: int = 512  # 从模型读取的实际限制
         self._init_model()
 
     def _init_model(self):
@@ -56,9 +58,13 @@ class EmbeddingEngine:
             self._model = SentenceTransformer(self.model_name, **kwargs)
             self._mode = "bge"
             dim = getattr(self._model, 'get_embedding_dimension',
-                          getattr(self._model, 'get_sentence_embedding_dimension', lambda: 384))()
+                          getattr(self._model, 'get_sentence_embedding_dimension', lambda: 1024))()
             self._dimension = dim
-            logger.info(f"嵌入引擎: BGE ({self.model_name}, {dim}维)")
+            # 读取模型自身的 max_seq_length
+            model_max = getattr(self._model, 'max_seq_length', None)
+            if model_max:
+                self._model_max_length = model_max
+            logger.info(f"嵌入引擎: BGE ({self.model_name}, {dim}维, 最大序列长度={self._model_max_length})")
         except Exception as e:
             logger.warning(f"BGE 模型加载失败 ({e})，回退到 hash")
             self._init_hash()
@@ -80,12 +86,22 @@ class EmbeddingEngine:
                            getattr(self._model, 'get_sentence_embedding_dimension', lambda: self._dimension))()
         return self._dimension
 
-    def encode(self, texts: list[str]) -> list[list[float]]:
+    def encode(self, texts: list[str], max_length: Optional[int] = None) -> list[list[float]]:
         """将文本列表编码为向量列表（线程安全）"""
         if not texts:
             return []
+        effective_max = max_length or self._max_length
         with _encode_lock:
             if self._mode == "bge" and self._model:
+                # 检查并警告截断（max_length 仅用于日志，实际截断由模型 tokenizer 自动处理）
+                for i, t in enumerate(texts):
+                    token_count = len(self._model.tokenizer.encode(t)) if hasattr(self._model, 'tokenizer') else len(t)
+                    if token_count > effective_max:
+                        logger.warning(
+                            f"文本 #{i} 超过模型最大长度 "
+                            f"({token_count} > {effective_max} tokens)，"
+                            f"将截断前 {effective_max} tokens"
+                        )
                 embeddings = self._model.encode(
                     texts,
                     normalize_embeddings=True,
@@ -94,23 +110,31 @@ class EmbeddingEngine:
                 return embeddings.tolist()
             return [self._hash_encode(text) for text in texts]
 
-    def encode_query(self, query: str) -> list[float]:
+    def encode_query(self, query: str, max_length: Optional[int] = None) -> list[float]:
         """编码查询文本（BGE 需要加前缀，线程安全）"""
         with _encode_lock:
             if self._mode == "bge" and self._model:
-                # BGE 模型查询时需要加 instruction 前缀
+                prefixed = f"为这个句子生成表示以用于检索相关文章：{query}"
                 emb = self._model.encode(
-                    f"为这个句子生成表示以用于检索相关文章：{query}",
+                    prefixed,
                     normalize_embeddings=True,
                     show_progress_bar=False,
                 )
                 return emb.tolist()
             return self._hash_encode(query)
 
-    def encode_document(self, text: str) -> list[float]:
+    def encode_document(self, text: str, max_length: Optional[int] = None) -> list[float]:
         """编码文档文本（线程安全）"""
         with _encode_lock:
             if self._mode == "bge" and self._model:
+                effective_max = max_length or self._max_length
+                # 检查截断
+                token_count = len(self._model.tokenizer.encode(text)) if hasattr(self._model, 'tokenizer') else len(text)
+                if token_count > effective_max:
+                    logger.warning(
+                        f"文档文本超过模型最大长度 "
+                        f"({token_count} > {effective_max} tokens)，将截断"
+                    )
                 emb = self._model.encode(
                     text,
                     normalize_embeddings=True,

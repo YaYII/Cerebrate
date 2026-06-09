@@ -23,6 +23,7 @@ def configure_temp_memory(tmp_name):
     config.embedding_model = "not-a-real-local-model"
     config.embedding_allow_download = False
     embedding._engine = None
+    config.memory_min_tokens = 0  # 测试环境不做长度限制
 
 
 class OriginLogTests(unittest.TestCase):

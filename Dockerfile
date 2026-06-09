@@ -28,8 +28,11 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-# 构建阶段预下载 BGE 模型，固化进镜像层，运行时离线读取
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh-v1.5')"
+# 构建阶段预下载 BGE-M3 模型（8192 tokens, 1024维），固化进镜像层，运行时离线读取
+# 同时下载 ReRanker 交叉编码器用于精排
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-v2-m3')" \
+    || echo 'ReRanker 下载失败（可选，服务端降级为不重排）'
 
 # ── 创建非 root 用户 ──
 RUN groupadd --gid 1000 cerebrate \
@@ -47,7 +50,10 @@ RUN chmod +x /docker-entrypoint.sh
 ENV CEREBRATE_SERVER_HOST=0.0.0.0 \
     CEREBRATE_SERVER_PORT=8765 \
     CEREBRATE_MEMORY_ROOT=/data \
-    CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD=false
+    CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD=false \
+    CEREBRATE_EMBEDDING_MODEL=BAAI/bge-m3 \
+    CEREBRATE_EMBEDDING_MAX_LENGTH=8192 \
+    CEREBRATE_EMBEDDING_HASH_DIM=1024
 
 EXPOSE 8765
 VOLUME ["/data"]

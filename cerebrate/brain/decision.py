@@ -1,11 +1,17 @@
 """决策路由器 - AI 三层决策逻辑
 
 决策流程:
+0. 查询重写 → 多角度检索
 1. 先查虫群共享记忆 → 看前人怎么干
 2. 若涉及政策细节 → 查知识库核对
 3. 用个人记忆套上用户熟悉的语气
 """
+import logging
 from typing import Optional
+
+from cerebrate.config import config
+
+logger = logging.getLogger(__name__)
 
 
 class DecisionRouter:
@@ -27,9 +33,28 @@ class DecisionRouter:
             "final_response": "",
         }
 
-        # 步骤 1: 先查虫群共享记忆
+        # 步骤 0: 查询重写（多角度检索）
+        rewritten = [query]
+        if config.query_rewrite_enabled:
+            try:
+                from cerebrate.brain.rewriter import rewrite_query
+                rewritten = rewrite_query(
+                    query,
+                    max_variations=config.query_rewrite_max_variations,
+                    enabled=True,
+                )
+                if len(rewritten) > 1:
+                    result["rewritten_queries"] = rewritten
+                    self.mm.log_query(user_id, query, "rewritten",
+                                      len(rewritten))
+            except Exception as e:
+                logger.warning(f"查询重写失败: {e}")
+                rewritten = [query]
+
+        # 步骤 1: 先查虫群共享记忆（多角度）
         swarm_results = self.mm.query_swarm(
             query_text=query,
+            query_texts=rewritten,
             category=context.get("category"),
             tags=context.get("tags"),
             limit=5,

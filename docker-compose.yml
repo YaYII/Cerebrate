@@ -1,36 +1,39 @@
 # Cerebrate v5 脑虫 Brain Server 编排
-# 用法: cp .env.example .env  (填 CEREBRATE_SERVER_TOKEN、可选 ANTHROPIC_API_KEY)
-#       docker compose up -d --build
+# ======================================
+# 基准配置（生产默认）—— 无代码挂载，使用镜像运行。
+#
+# 环境覆盖文件:
+#   开发环境: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#   生产环境: docker compose -f docker-compose.yml -f docker-compose.pro.yml up -d
+#   默认:     docker compose up -d                  (同生产)
+#
+# 准备: cp .env.example .env  (填 CEREBRATE_SERVER_TOKEN、可选 ANTHROPIC_API_KEY)
+# ======================================
 services:
   cerebrate:
     build: .
     image: cerebrate:v5
     container_name: cerebrate
-    # 默认仅暴露到宿主机本地回环；局域网访问改为 "8765:8765" 或绑定内网 IP，如 "192.168.1.10:8765:8765"
     ports:
       - "127.0.0.1:8765:8765"
-    # 注入 CEREBRATE_SERVER_TOKEN、ANTHROPIC_API_KEY 等用户密钥
     env_file:
       - .env
-    # 显式钉死容器内部必需值，优先级高于 env_file，避免 .env 里的 SERVER_HOST=127.0.0.1 等
-    # 把容器监听限制在回环导致端口映射失效
     environment:
       CEREBRATE_SERVER_HOST: 0.0.0.0
       CEREBRATE_SERVER_PORT: "8765"
       CEREBRATE_MEMORY_ROOT: /data
       CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD: "false"
+      CEREBRATE_EMBEDDING_MODEL: "${CEREBRATE_EMBEDDING_MODEL:-BAAI/bge-m3}"
+      CEREBRATE_EMBEDDING_MAX_LENGTH: "8192"
+      CEREBRATE_HASH_EMBEDDING_DIM: "1024"
+      CEREBRATE_CHUNK_ENABLED: "true"
+      CEREBRATE_CHUNK_MAX_CHARS: "${CEREBRATE_CHUNK_MAX_CHARS:-8000}"
+      CEREBRATE_RERANKER_ENABLED: "${CEREBRATE_RERANKER_ENABLED:-true}"
       CEREBRATE_UID: "${CEREBRATE_UID:-1000}"
       CEREBRATE_GID: "${CEREBRATE_GID:-1000}"
       HF_HOME: /models
     # 记忆数据持久化（chroma_data / personal / swarm 等全部落在 /data 下）
-    # bind mount 到宿主机真实目录，数据与程序分离：升级镜像、重装 Docker 都不丢，
-    # 换电脑只需拷走该目录再挂载即可。默认项目内 ./data；
-    # 生产建议在 .env 设 CEREBRATE_DATA_DIR 为独立绝对路径，如 /home/<user>/cerebrate-data。
-    #
-    # 代码卷挂载（开发模式）：Python 代码实时同步，改完只需 docker compose restart 无需 --build
-    # 生产环境或正式部署请移除或注释掉此挂载
+    # 数据与程序分离：升级镜像、重装 Docker 都不丢。
     volumes:
       - ${CEREBRATE_DATA_DIR:-./data}:/data
-      - ./cerebrate:/app/cerebrate
-      - ./cerebrate.py:/app/cerebrate.py
     restart: unless-stopped

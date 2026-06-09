@@ -245,5 +245,35 @@ class ChromaStore:
                 return [m for m in metadatas if m is not None]
         return _retry_busy(_get)
 
+    def get_items_by_where(self, where: dict, limit: int = 100) -> list[dict]:
+        """按元数据条件搜索完整条目（含文档文本），不进行向量搜索
+
+        Args:
+            where: ChromaDB 元数据过滤条件，如 {"doc_group_id": "abc123"}
+            limit: 最大返回数
+
+        Returns:
+            [{"id": ..., "metadata": ..., "document": ..., "embedding": ...}, ...]
+        """
+        def _get():
+            with ChromaStore._db_semaphore:
+                results = self._collection.get(
+                    where=where,
+                    include=["metadatas", "documents", "embeddings"],
+                    limit=limit,
+                )
+                ids = results.get("ids") or []
+                metas = results.get("metadatas") or []
+                docs = results.get("documents") or []
+                embs = results.get("embeddings")
+                items = []
+                for i, mid in enumerate(ids):
+                    meta = metas[i] if i < len(metas) and metas[i] else {}
+                    doc = docs[i] if i < len(docs) and docs[i] else ""
+                    emb = embs[i] if embs is not None and i < len(embs) else None
+                    items.append({"id": mid, "metadata": meta, "document": doc, "embedding": emb})
+                return items
+        return _retry_busy(_get)
+
     def get_collection(self):
         return self._collection

@@ -48,6 +48,7 @@ class CerebrateConfig:
     evolution_path: Path = field(init=False)
     agents_path: Path = field(init=False)
     events_path: Path = field(init=False)
+    docstore_path: Path = field(init=False)
 
     # 项目上下文
     current_project_id: str = field(
@@ -83,13 +84,90 @@ class CerebrateConfig:
         default_factory=lambda: os.environ.get("CEREBRATE_EMBEDDING_DEVICE", "cpu")
     )
     embedding_hash_dim: int = field(
-        default_factory=lambda: int(os.environ.get("CEREBRATE_HASH_EMBEDDING_DIM", "384"))
+        default_factory=lambda: int(os.environ.get("CEREBRATE_HASH_EMBEDDING_DIM", "1024"))
     )
     embedding_allow_download: bool = field(
         default_factory=lambda: os.environ.get("CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD", "false").lower() == "true"
     )
+    embedding_max_length: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EMBEDDING_MAX_LENGTH", "8192"))
+    )
+    embedding_summary_chars: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EMBEDDING_SUMMARY_CHARS", "1000"))
+    )
     use_chroma: bool = field(
         default_factory=lambda: os.environ.get("CEREBRATE_USE_CHROMA", "true").lower() == "true"
+    )
+
+    # 分块配置
+    chunk_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_CHUNK_ENABLED", "true").lower() == "true"
+    )
+    chunk_max_chars: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_CHUNK_MAX_CHARS", "8000"))
+    )
+    chunk_overlap_chars: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_CHUNK_OVERLAP_CHARS", "100"))
+    )
+    chunk_min_chars: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_CHUNK_MIN_CHARS", "200"))
+    )
+
+    # ReRanker 配置
+    reranker_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_RERANKER_ENABLED", "true").lower() == "true"
+    )
+    reranker_model: str = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+    )
+    reranker_top_k: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_RERANKER_TOP_K", "10"))
+    )
+
+    # 查询重写配置
+    query_rewrite_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_QUERY_REWRITE_ENABLED", "true").lower() == "true"
+    )
+    query_rewrite_max_variations: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_QUERY_REWRITE_MAX_VARIATIONS", "3"))
+    )
+
+    # 上下文扩展配置
+    context_expand_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_CONTEXT_EXPAND_ENABLED", "true").lower() == "true"
+    )
+    context_expand_chars: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_CONTEXT_EXPAND_CHARS", "1500"))
+    )
+
+    # 相关性过滤配置
+    relevance_filter_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_RELEVANCE_FILTER_ENABLED", "true").lower() == "true"
+    )
+
+    # 记忆最小长度（token 数）
+    memory_min_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_MEMORY_MIN_TOKENS", "500"))
+    )
+
+    # PostgreSQL 元数据层配置
+    database_url: str = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_DATABASE_URL", "")
+    )
+    pg_host: str = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_PG_HOST", "127.0.0.1")
+    )
+    pg_port: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_PG_PORT", "5432"))
+    )
+    pg_db: str = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_PG_DB", "cerebrate")
+    )
+    pg_user: str = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_PG_USER", "cerebrate")
+    )
+    pg_password: str = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_PG_PASSWORD", "")
     )
 
     # HTTP Brain Server
@@ -106,6 +184,7 @@ class CerebrateConfig:
         self.agents_path = self.memory_root / "agents"
         self.events_path = self.memory_root / "events"
         self.chroma_path = self.memory_root / "chroma_data"
+        self.docstore_path = self.memory_root / "docstore"
 
 
 config = CerebrateConfig()

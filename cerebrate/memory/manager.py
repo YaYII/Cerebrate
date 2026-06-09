@@ -10,6 +10,8 @@ from cerebrate.memory.personal import PersonalMemory
 from cerebrate.memory.swarm import SwarmMemory
 from cerebrate.memory.knowledge import KnowledgeBase
 from cerebrate.memory.origin import OriginLog
+from cerebrate.memory.docstore import DocumentStore
+from cerebrate.memory.metastore import get_metastore
 from cerebrate.config import config
 
 
@@ -95,9 +97,11 @@ class MemoryManager:
     def query_swarm(self, query_text: str, category: Optional[str] = None,
                     tags: Optional[list[str]] = None, limit: int = 10,
                     project_id: Optional[str] = None,
-                    source_agent: Optional[str] = None) -> list[dict]:
+                    source_agent: Optional[str] = None,
+                    query_texts: Optional[list[str]] = None) -> list[dict]:
         return self.swarm.query(query_text, category, tags, limit,
-                                project_id, source_agent)
+                                project_id, source_agent,
+                                query_texts=query_texts)
 
     def mark_swarm_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
         self.swarm.mark_reused(memory_id, success, feedback)
