@@ -700,6 +700,8 @@ class CerebrateLLM:
 
         def _calc_batch_size(remaining: int, draft: Optional[dict] = None) -> int:
             """动态计算当前轮次可以安全处理的记忆数量。"""
+            if remaining <= 0:
+                return 0
             current_overhead = overhead_tokens
 
             # 如果有草稿（后续轮次），它的体积会占用上下文
@@ -725,6 +727,8 @@ class CerebrateLLM:
 
         while processed_count < total:
             remaining = total - processed_count
+            if remaining <= 0:
+                break
             current_batch_size = _calc_batch_size(remaining, accumulated)
             batch = sorted_mems[processed_count:processed_count + current_batch_size]
 
