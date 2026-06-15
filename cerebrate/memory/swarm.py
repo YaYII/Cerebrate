@@ -165,6 +165,12 @@ class SwarmMemory:
         life_stage = life_stage if life_stage in LIFE_STAGES else "memory"
         from cerebrate.memory.docstore import doc_type_for
         doc_type = doc_type_for(life_stage)
+
+        # ── 是否需要分块？ ──
+        should_chunk = (
+            config.chunk_enabled
+            and len(content) > config.chunk_max_chars
+        )
         is_short_memory = (life_stage == "memory" and not should_chunk)
 
         # ── 生成主 memory_id（文档级 ID）──
@@ -172,12 +178,6 @@ class SwarmMemory:
             memory_id = hashlib.sha256(
                 f"{title}{category}{now}".encode()
             ).hexdigest()[:16]
-
-        # ── 是否需要分块？ ──
-        should_chunk = (
-            config.chunk_enabled
-            and len(content) > config.chunk_max_chars
-        )
 
         if not should_chunk:
             # ── 不分块：按类型路由 → DocumentStore，运营元数据→ChromaDB ──
