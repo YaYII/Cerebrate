@@ -4,6 +4,7 @@ Clients submit observations and requests. The server alone writes group
 memory, appends durable events, and controls memory promotion.
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,6 +14,8 @@ from cerebrate.brain.llm import CerebrateLLM
 from cerebrate.brain.events import EventLog
 from cerebrate.config import config
 from cerebrate.memory import EvolutionEngine, MemoryManager
+
+logger = logging.getLogger(__name__)
 
 
 def get_manager() -> MemoryManager:
@@ -75,8 +78,15 @@ class BrainAPI:
         project_id = payload.get("project") or payload.get("project_id")
         scope = payload.get("scope")
         agent_id = payload.get("agent_id", user_id)
+        # 渐进式披露：detail 默认 True（向后兼容，返回完整内容 + 决策）；
+        # detail=false 时进入索引模式（只返回紧凑索引，token 更省）。
+        # 索引层主入口是 POST /v1/search；query 保留"决策 + 全文"的既有契约。
+        detail = bool(payload.get("detail", True))
+        index_only = not detail
         decision = DecisionRouter(self.mm).decide(
-            user_id, query, context={"project_id": project_id, "scope": scope})
+            user_id, query,
+            context={"project_id": project_id, "scope": scope,
+                     "index_only": index_only})
         swarm = decision.get("swarm_knowledge", {})
         best = swarm.get("best_match")
         related = swarm.get("related", [])
@@ -93,13 +103,17 @@ class BrainAPI:
             if score > 0.5:
                 recommendation = "reuse"
                 task = self._build_task(
-                    "reuse_memory", memory_id, agent_id, query, all_matches)
+                    "reuse_memory", memory_id, agent_id, query, all_matches,
+                    index_only=index_only)
             elif score > 0.2:
                 recommendation = "verify"
                 task = self._build_task(
-                    "verify_reference", memory_id, agent_id, query, all_matches)
+                    "verify_reference", memory_id, agent_id, query, all_matches,
+                    index_only=index_only)
         if task is None:
-            task = self._build_task("solve_fresh", "", agent_id, query, all_matches)
+            task = self._build_task(
+                "solve_fresh", "", agent_id, query, all_matches,
+                index_only=index_only)
         if decision.get("policy_result"):
             recommendation = "cite_policy"
             task = {
@@ -118,6 +132,18 @@ class BrainAPI:
             "swarm_result": best,
             "swarm_results": all_matches,
             "total_matches": len(all_matches),
+            "retrieval": {
+                "mode": "detail" if detail else "index",
+                "layer": 3 if detail else 1,
+                "description": (
+                    "完整详情模式（默认）：已包含全文内容 + 决策建议。"
+                    "若想省 token，请改用 POST /v1/search（索引层）→ "
+                    "POST /v1/timeline（上下文层）→ GET /v1/memories/{id}（详情层）。"
+                    if detail else
+                    "索引模式（detail=false）：只返回紧凑索引，"
+                    "完整内容请调用 GET /v1/memories/{memory_id}。"
+                ),
+            },
             "policy_result": decision.get("policy_result"),
             "personal": decision.get("personal_tone", {}),
             "recommendation": recommendation,
@@ -128,6 +154,208 @@ class BrainAPI:
                             "matches": len(all_matches)},
                            project_id or "")
         return data
+
+    def search(self, payload: dict) -> dict:
+        """渐进式披露第 1 层：紧凑索引（不加载全文）。
+
+        对齐 claude-mem search 工具：只返回 memory_id/标题/类型/时间/评分/token成本，
+        让 agent 先扫描"存在什么 + 取它要花多少 token"，再决定取哪几条详情。
+
+        mode 参数（Phase 3 混合检索）:
+          - hybrid（默认）: FTS5 精确关键词命中优先 + 向量语义召回
+          - fts: 仅 FTS5 全文检索（精确关键词，如错误码/命令/函数名）
+          - vector: 仅向量语义检索（ChromaDB）
+        """
+        query = payload.get("query", "")
+        if not query:
+            raise ValueError("query is required")
+        project_id = payload.get("project") or payload.get("project_id")
+        scope = payload.get("scope")
+        category = payload.get("category")
+        tags = payload.get("tags")
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+        try:
+            limit = min(int(payload.get("limit", 20)), 100)
+        except (TypeError, ValueError):
+            limit = 20
+        agent_id = payload.get("agent_id") or payload.get("user") or "default"
+        mode = payload.get("mode", "hybrid")
+        if mode not in ("hybrid", "fts", "vector"):
+            mode = "hybrid"
+
+        fts_results: list = []
+        vec_results: list = []
+        if mode in ("hybrid", "fts"):
+            fts_results = self.mm.fulltext_query_swarm(
+                query_text=query, limit=limit,
+                project_id=project_id, scope=scope, category=category)
+        if mode in ("hybrid", "vector"):
+            vec_results = self.mm.query_swarm(
+                query_text=query, category=category, tags=tags, limit=limit,
+                project_id=project_id, scope=scope, index_only=True)
+
+        if mode == "hybrid":
+            index: list = []
+            seen: set[str] = set()
+            for r in fts_results:
+                mid = r.get("memory_id", "")
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    r["source"] = "fulltext"
+                    index.append(r)
+            for r in vec_results:
+                mid = r.get("memory_id", "")
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    r["source"] = "vector"
+                    index.append(r)
+            if not index:
+                index = vec_results
+        elif mode == "fts":
+            index = fts_results
+        else:
+            index = vec_results
+
+        self.events.append("memory.searched", agent_id,
+                           {"query": query, "matches": len(index)},
+                           project_id or "")
+        return {
+            "query": query,
+            "count": len(index),
+            "index": index,
+            "retrieval": {
+                "mode": "index",
+                "layer": 1,
+                "search_mode": mode,
+                "sources": {
+                    "fulltext": len(fts_results),
+                    "vector": len(vec_results),
+                },
+                "next": (
+                    "POST /v1/timeline (layer 2, 时序上下文) 或 "
+                    "GET /v1/memories/{memory_id} (layer 3, 完整详情)"
+                ),
+            },
+        }
+
+    def rebuild_fulltext(self) -> dict:
+        """全量重建 FTS5 全文索引（从 DocStore + ChromaDB）。"""
+        result = self.mm.rebuild_fulltext()
+        return {
+            "status": result.get("status", "ok"),
+            "indexed": result.get("indexed", 0),
+            "failed": result.get("failed", 0),
+            "total": result.get("total", 0),
+            "note": "重建后新写入的记忆会自动双写 FTS5；旧记忆通过本命令补齐。",
+        }
+
+    def timeline(self, payload: dict) -> dict:
+        """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文。
+
+        基于 EventLog 事件流构建"这个方案的前因后果"，
+        对齐 claude-mem timeline 工具（anchor + depth_before/depth_after）。
+        """
+        anchor = payload.get("anchor") or payload.get("memory_id") or ""
+        query = payload.get("query", "")
+        try:
+            depth_before = max(0, min(int(payload.get("depth_before", 3)), 50))
+        except (TypeError, ValueError):
+            depth_before = 3
+        try:
+            depth_after = max(0, min(int(payload.get("depth_after", 3)), 50))
+        except (TypeError, ValueError):
+            depth_after = 3
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        scope = payload.get("scope", "")
+
+        # 1. 解析 anchor 元信息
+        anchor_meta = None
+        if anchor:
+            anchor_meta = self.mm.get_swarm_memory(anchor)
+        elif query:
+            idx = self.mm.query_swarm(
+                query_text=query, limit=1,
+                project_id=project_id or None, scope=scope or None,
+                index_only=True)
+            if idx:
+                anchor = idx[0]["memory_id"]
+                anchor_meta = self.mm.get_swarm_memory(anchor)
+        if not anchor_meta:
+            return {
+                "anchor": anchor, "query": query, "found": False,
+                "events": [],
+                "note": "anchor 记忆不存在，无法构建时间线",
+            }
+
+        anchor_created = anchor_meta.get("created", "")
+        anchor_project = anchor_meta.get("project_id", "") or project_id
+        anchor_scope = anchor_meta.get("scope", "general")
+        anchor_title = anchor_meta.get("title", "")
+
+        # 2. 读取最近事件流
+        recent = self.events.list_recent(limit=5000)
+
+        # 3. scope 隔离：通用 timeline 只看通用事件；项目 timeline 看同项目 + 通用事件
+        relevant = []
+        for ev in recent:
+            ev_pid = ev.get("project_id", "")
+            if anchor_scope == "general":
+                if ev_pid not in ("", anchor_project):
+                    continue
+            else:
+                if ev_pid not in ("", anchor_project):
+                    continue
+            relevant.append(ev)
+
+        # 4. 构建时间线条目
+        timeline_events = []
+        anchor_pos = -1
+        for ev in relevant:
+            p = ev["payload"] or {}
+            mid = p.get("memory_id") or p.get("id") or ""
+            entry = {
+                "event_id": ev["event_id"],
+                "timestamp": ev["timestamp"],
+                "event_type": ev["event_type"],
+                "source_agent": ev["source_agent"],
+                "project_id": ev["project_id"],
+            }
+            if mid:
+                entry["memory_id"] = mid
+            if p.get("title"):
+                entry["title"] = p["title"]
+            if p.get("query"):
+                entry["query"] = p["query"]
+            if p.get("recommendation"):
+                entry["recommendation"] = p["recommendation"]
+            if mid == anchor:
+                anchor_pos = len(timeline_events)
+            timeline_events.append(entry)
+
+        # 5. 以 anchor 为中心切片窗口
+        if anchor_pos < 0:
+            start, end = 0, min(len(timeline_events),
+                                depth_before + depth_after + 1)
+        else:
+            start = max(0, anchor_pos - depth_before)
+            end = min(len(timeline_events), anchor_pos + depth_after + 1)
+        window = timeline_events[start:end]
+
+        return {
+            "anchor": anchor,
+            "anchor_title": anchor_title,
+            "anchor_created": anchor_created,
+            "found": True,
+            "depth_before": depth_before,
+            "depth_after": depth_after,
+            "events": window,
+            "retrieval": {
+                "mode": "timeline",
+                "layer": 2,
+                "next": "GET /v1/memories/{memory_id} 或 POST /v1/memories/detail 获取完整详情",
+            },
+        }
 
     def _link_to_knowledge(self, memory_id: str, title: str, content: str,
                            category: str, tags: list, source_agent: str,
@@ -177,7 +405,8 @@ class BrainAPI:
         ).hexdigest()[:16]
 
     @staticmethod
-    def _build_task(action: str, memory_id: str, agent_id: str, problem: str, all_matches: list = None) -> dict:
+    def _build_task(action: str, memory_id: str, agent_id: str, problem: str,
+                    all_matches: list = None, index_only: bool = False) -> dict:
         # ── 多结果警告：当虫群返回多条匹配时，在 instructions 开头列出其余匹配 ──
         other_matches_hint = ""
         if all_matches and len(all_matches) > 1:
@@ -192,13 +421,20 @@ class BrainAPI:
                 other_matches_hint = "\n".join(lines)
 
         if action == "reuse_memory":
-            inst = ["1. 读取记忆内容作为解决方案"]
+            if index_only:
+                inst = [
+                    f"1. 调用 GET /v1/memories/{memory_id} 获取完整记忆内容"
+                    "（当前为渐进式披露索引层，只返回了标题/评分/token成本）",
+                    "2. 读取完整内容作为解决方案",
+                ]
+            else:
+                inst = ["1. 读取记忆内容作为解决方案"]
             if other_matches_hint:
                 inst.insert(0, "0. 【多结果警告】" + other_matches_hint)
             inst.extend([
-                "2. 执行解决方案中的步骤",
-                f"3. 完成后调用 POST /v1/usages/start 记录复用 (memory_id={memory_id}, agent={agent_id})",
-                "4. 完成后调用 POST /v1/usages/finish 报告结果"
+                "3. 执行解决方案中的步骤",
+                f"4. 完成后调用 POST /v1/usages/start 记录复用 (memory_id={memory_id}, agent={agent_id})",
+                "5. 完成后调用 POST /v1/usages/finish 报告结果"
             ])
             return {
                 "action": "reuse_memory",
@@ -214,16 +450,24 @@ class BrainAPI:
                 ]
             }
         elif action == "verify_reference":
-            inst = [
-                "1. 读取记忆内容作为参考",
-                "2. 独立验证方案的可行性",
-            ]
+            if index_only:
+                inst = [
+                    f"1. 调用 GET /v1/memories/{memory_id} 获取完整记忆内容"
+                    "（当前为渐进式披露索引层）",
+                    "2. 读取完整内容作为参考",
+                    "3. 独立验证方案的可行性",
+                ]
+            else:
+                inst = [
+                    "1. 读取记忆内容作为参考",
+                    "2. 独立验证方案的可行性",
+                ]
             if other_matches_hint:
                 inst.insert(0, "0. 【多结果警告】" + other_matches_hint)
             inst.extend([
-                "3. 根据验证结果调整并执行",
-                f"4. 完成后调用 POST /v1/memories/propose 提交新记忆",
-                f"5. 可选: 调用 POST /v1/usages/start 记录参考 (memory_id={memory_id}, agent={agent_id})"
+                "4. 根据验证结果调整并执行",
+                f"5. 完成后调用 POST /v1/memories/propose 提交新记忆",
+                f"6. 可选: 调用 POST /v1/usages/start 记录参考 (memory_id={memory_id}, agent={agent_id})"
             ])
             return {
                 "action": "verify_reference",
@@ -503,6 +747,34 @@ class BrainAPI:
                 evidence = (evidence + "\n" if evidence else "") + \
                     f"server immune quarantine: {reason}"
 
+        # ── 结构化字段增强（Phase 4，可选 LLM） ──
+        # 规则提取（observation_type/concepts/facts）在 swarm.share 内始终生效；
+        # 以下 LLM 增强默认关闭（写路径零额外延迟），开启后压缩标题/提取结构化字段
+        observation_type = payload.get("observation_type", "")
+        facts = payload.get("facts")
+        concepts = payload.get("concepts")
+        if isinstance(facts, str):
+            facts = [f.strip() for f in facts.split(",") if f.strip()]
+        if isinstance(concepts, str):
+            concepts = [c.strip() for c in concepts.split(",") if c.strip()]
+        if config.title_compress_enabled or config.structured_enrich_enabled:
+            try:
+                llm = CerebrateLLM()
+                if config.title_compress_enabled:
+                    title = llm.compress_title(title, content)
+                if config.structured_enrich_enabled:
+                    enriched = llm.extract_facts_concepts(
+                        content,
+                        solution=payload.get("solution", ""),
+                        problem_solved=payload.get("problem", ""),
+                        tags=tags, category=payload.get("category", "general"))
+                    if not facts and enriched.get("facts"):
+                        facts = enriched["facts"]
+                    if not concepts and enriched.get("concepts"):
+                        concepts = enriched["concepts"]
+            except Exception as e:
+                logger.warning(f"结构化字段增强失败（{e}），使用规则提取")
+
         # ── 预生成 memory_id，先写不可变原始记忆日志 ──
         pre_memory_id = self._generate_memory_id(title, payload.get("category", "general"))
         origin_id = self.mm.origin.add(pre_memory_id, payload)
@@ -528,6 +800,9 @@ class BrainAPI:
             origin_ids=origin_ids,
             physical_user=physical_user,
             memory_id=pre_memory_id,
+            observation_type=observation_type,
+            facts=facts,
+            concepts=concepts,
         )
         data = {
             "memory_id": memory_id,
@@ -949,6 +1224,34 @@ class BrainAPI:
         if not memory:
             raise KeyError(f"memory not found: {memory_id}")
         return memory
+
+    def memory_detail(self, payload: dict) -> dict:
+        """渐进式披露第 3 层：按 ids 批量取完整详情。
+
+        对齐 claude-mem get_observations（POST /api/observations/batch）。
+        """
+        ids_raw = payload.get("ids", [])
+        if isinstance(ids_raw, str):
+            ids_raw = [i.strip() for i in ids_raw.split(",") if i.strip()]
+        if not ids_raw:
+            raise ValueError("ids is required")
+        memories: list = []
+        missing: list = []
+        for mid in ids_raw:
+            try:
+                memories.append(self.get_memory(mid))
+            except KeyError:
+                missing.append(mid)
+        return {
+            "ids": ids_raw,
+            "memories": memories,
+            "missing": missing,
+            "retrieval": {
+                "mode": "detail",
+                "layer": 3,
+                "description": "完整详情（含 content/facts/concepts/evidence）。",
+            },
+        }
 
     def doctrines(self) -> dict:
         doctrines = []

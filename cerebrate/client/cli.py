@@ -51,6 +51,37 @@ def cmd_query(args):
         "user": args.user,
         "project_id": args.project,
         "scope": args.scope or None,
+        "detail": bool(getattr(args, "detail", False)),
+    }))
+
+
+def cmd_search(args):
+    """渐进式披露第 1 层：紧凑索引（不含全文，含 token 成本）"""
+    output(client_request(args.url, "POST", "/v1/search", {
+        "query": args.query,
+        "agent_id": args.agent_id or args.id or "cli",
+        "project_id": args.project,
+        "scope": args.scope or None,
+        "category": args.category or None,
+        "limit": args.limit,
+        "mode": getattr(args, "mode", "hybrid"),
+    }))
+
+
+def cmd_fulltext_rebuild(args):
+    """全量重建 FTS5 全文索引"""
+    output(client_request(args.url, "POST", "/v1/fulltext/rebuild", {}))
+
+
+def cmd_timeline(args):
+    """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文"""
+    output(client_request(args.url, "POST", "/v1/timeline", {
+        "anchor": args.anchor or None,
+        "query": args.query or None,
+        "project_id": args.project,
+        "scope": args.scope or None,
+        "depth_before": args.before,
+        "depth_after": args.after,
     }))
 
 
@@ -194,11 +225,45 @@ def main(argv=None):
     p.add_argument("--agent-id", default="")
     p.add_argument("--user", default="")
     p.add_argument("--project", default="")
+    p.add_argument("--detail", action="store_true",
+                   help="返回完整内容（默认渐进式披露只返回索引）")
     p.add_argument("--scope", default="",
                    choices=["", "general", "project", "all"],
                    help="记忆分类: general=只查通用记忆; project=项目记忆+通用记忆; "
                         "all=跨项目全量（默认按 project_id 推断）")
     p.set_defaults(func=cmd_query)
+
+    p = sub.add_parser("search", help="搜索记忆索引（渐进式披露第1层，紧凑/低成本）")
+    p.add_argument("query", help="搜索查询")
+    p.add_argument("--id", default="cli", help="Agent ID")
+    p.add_argument("--agent-id", default="")
+    p.add_argument("--project", default="")
+    p.add_argument("--category", default="")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--mode", default="hybrid",
+                   choices=["hybrid", "fts", "vector"],
+                   help="检索模式: hybrid=FTS+向量混合(默认); fts=仅全文精确关键词; "
+                        "vector=仅向量语义")
+    p.add_argument("--scope", default="",
+                   choices=["", "general", "project", "all"],
+                   help="记忆分类: general=只查通用记忆; project=项目记忆+通用记忆")
+    p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("fulltext", help="FTS5 全文索引管理")
+    fts_sub = p.add_subparsers(dest="fulltext_command")
+    pr = fts_sub.add_parser("rebuild", help="从 DocStore 全量重建全文索引")
+    pr.set_defaults(func=cmd_fulltext_rebuild)
+
+    p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")
+    p.add_argument("--anchor", default="", help="anchor 记忆 ID（不传则用 query 找 top1）")
+    p.add_argument("--query", default="", help="查询词（anchor 缺省时用 top1）")
+    p.add_argument("--id", default="cli", help="Agent ID")
+    p.add_argument("--project", default="")
+    p.add_argument("--scope", default="",
+                   choices=["", "general", "project", "all"])
+    p.add_argument("--before", type=int, default=3, help="anchor 前取几条事件")
+    p.add_argument("--after", type=int, default=3, help="anchor 后取几条事件")
+    p.set_defaults(func=cmd_timeline)
 
     p = sub.add_parser("propose", help="提交新记忆")
     p.add_argument("--title", required=True)

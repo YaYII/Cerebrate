@@ -8,6 +8,7 @@ v5.1 改进:
 """
 import hashlib
 import logging
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,60 @@ LIFE_STAGES = {"nutrient", "memory", "verified_skill",
 
 SCOPES = {"general", "project"}
 
+# category → observation_type 映射（渐进式披露索引层的类型标签）
+# 对齐 claude-mem observation type 语义：
+#   decision/bugfix/feature/refactor/discovery/change + gotcha/how-it-works/problem-solution
+CATEGORY_OBSERVATION_TYPE = {
+    "debugging": "bugfix",
+    "bugfix": "bugfix",
+    "security": "gotcha",
+    "testing": "gotcha",
+    "architecture": "decision",
+    "refactor": "refactor",
+    "performance": "optimization",
+    "devops": "how-it-works",
+    "config": "how-it-works",
+    "coding": "problem-solution",
+    "skill": "discovery",
+    "doctrine": "decision",
+}
+
+
+def observation_type_for(category: str) -> str:
+    """从 category 推导 observation type（未知分类归为 discovery）。"""
+    return CATEGORY_OBSERVATION_TYPE.get(category or "", "discovery")
+
+
+def _extract_concepts(tags: list[str], category: str, title: str = "") -> list[str]:
+    """规则提取 concepts：标签 + 分类 + 标题关键词（去重、截断）。"""
+    concepts: list[str] = []
+    for t in tags:
+        t = str(t).strip()
+        if t and t not in concepts:
+            concepts.append(t)
+    if category and category not in concepts:
+        concepts.append(category)
+    # 标题关键词（简单分词：按空白/常见分隔符切分，取长度>=2 的词）
+    if title:
+        for w in re.split(r"[\s,，。；;:：/\\|()（）\-_]+", title):
+            w = w.strip()
+            if len(w) >= 2 and w not in concepts:
+                concepts.append(w)
+    return concepts[:12]
+
+
+def _extract_facts(solution: str = "", problem_solved: str = "") -> list[str]:
+    """规则提取 facts：从 solution/problem_solved 拆出短句（最多 5 条）。"""
+    facts: list[str] = []
+    for src in (solution, problem_solved):
+        if not src:
+            continue
+        for part in re.split(r"[。；;\n]+", src):
+            part = part.strip()
+            if len(part) >= 4 and part not in facts:
+                facts.append(part)
+    return facts[:5]
+
 
 def _safe_split(val, separator=","):
     """安全地将可能是 str 或 list 的元数据值转为列表。"""
@@ -36,6 +91,17 @@ def _safe_split(val, separator=","):
     if isinstance(val, str):
         return [s.strip() for s in val.split(separator) if s.strip()]
     return [str(val)]
+
+
+def estimate_tokens(text: str) -> int:
+    """粗略 token 估算：中英混合按 4 字符/token，最低 1。
+
+    用于渐进式披露索引层展示"取这条记忆要花多少 token"，
+    让 agent 在决定是否拉取详情前能做成本/收益判断。
+    """
+    if not text:
+        return 1
+    return max(1, int(len(text) // 4))
 
 
 class SwarmMemory:
@@ -150,14 +216,27 @@ class SwarmMemory:
               supersedes: Optional[list[str]] = None,
               origin_ids: Optional[list[str]] = None,
               physical_user: str = "",
-              memory_id: Optional[str] = None) -> str:
+              memory_id: Optional[str] = None,
+              observation_type: str = "",
+              facts: Optional[list[str]] = None,
+              concepts: Optional[list[str]] = None) -> str:
         """向虫群共享记忆
 
         架构:
           1. 完整内容（content/problem_solved/solution）写入 DocumentStore
           2. 仅运营元数据（title/category/tags/lifecycle）写入 ChromaDB 索引
           3. 长文档自动分块，每块独立向量化，共享 doc_group_id
+
+        结构化字段（v5.3 Phase 4，对齐 claude-mem observation）:
+          - observation_type: 类型标签（decision/bugfix/refactor/discovery/...）
+          - facts: 事实清单（从 solution/problem_solved 规则提取，或 LLM 提取后传入）
+          - concepts: 概念标签（tags + category + 标题关键词，或 LLM 提取后传入）
         """
+        # ── 结构化字段：缺省时规则推导 ──
+        observation_type = observation_type or observation_type_for(category)
+        concepts = concepts or _extract_concepts(tags, category, title)
+        facts = facts or _extract_facts(solution, problem_solved)
+
         # ── 记忆分类：通用记忆(scope=general) / 项目记忆(scope=project) ──
         # 规则:
         #   显式 scope="general" → 强制通用，project_id 置空
@@ -223,6 +302,10 @@ class SwarmMemory:
                 supersedes=supersedes, origin_ids=origin_ids,
                 created=now, updated=now,
                 chunk_index=0, total_chunks=1, full_content="",
+                token_estimate=estimate_tokens(content),
+                observation_type=observation_type,
+                facts=facts,
+                concepts=concepts,
             )
             # 短记忆标记位：让 enrich 知道内容已在 ChromaDB 中
             if is_short_memory:
@@ -232,6 +315,11 @@ class SwarmMemory:
             with self._stats_lock:
                 self._stats["total"] += 1
                 self._dirty = True
+            # 双写 FTS5 全文索引（精确关键词检索）
+            self._fts_upsert(memory_id, title=title, content=content,
+                             tags=",".join(tags), category=category,
+                             scope=scope, project_id=project_id,
+                             created=now, updated=now)
             # 同步元数据到 PostgreSQL
             self._sync_meta(memory_id, title=title, category=category,
                             tags=tags, source_agent=source_agent,
@@ -300,6 +388,10 @@ class SwarmMemory:
                 chunk_index=ci, total_chunks=total_chunks,
                 full_content="",
                 doc_group_id=doc_group_id,
+                token_estimate=estimate_tokens(chunk_text),
+                observation_type=observation_type,
+                facts=facts,
+                concepts=concepts,
             )
             self._store.add(chunk_mid, search_text, chunk_meta)
 
@@ -317,12 +409,22 @@ class SwarmMemory:
             full_content="",
             doc_group_id="",
             is_parent=True,
+            token_estimate=estimate_tokens(content),
+            observation_type=observation_type,
+            facts=facts,
+            concepts=concepts,
         )
+        parent_meta["_content_len"] = str(len(content))
         self._store.add(memory_id, title, parent_meta)
 
         with self._stats_lock:
             self._stats["total"] += 1
             self._dirty = True
+        # 双写 FTS5 全文索引（用父文档完整内容）
+        self._fts_upsert(memory_id, title=title, content=content,
+                         tags=",".join(tags), category=category,
+                         scope=scope, project_id=project_id,
+                         created=now, updated=now)
         # 同步元数据到 PostgreSQL
         self._sync_meta(memory_id, title=title, category=category,
                         tags=tags, source_agent=source_agent,
@@ -533,13 +635,18 @@ class SwarmMemory:
                         supersedes, origin_ids,
                         created, updated,
                         chunk_index=0, total_chunks=1, full_content="",
-                        doc_group_id="", is_parent=False) -> dict:
+                        doc_group_id="", is_parent=False,
+                        token_estimate=0,
+                        observation_type="", facts=None, concepts=None) -> dict:
         """构建统一的元数据字典"""
         return {
             "title": title,
             "content": content,
             "category": category,
             "tags": ",".join(tags),
+            "observation_type": observation_type or observation_type_for(category),
+            "facts": ",".join(facts or []),
+            "concepts": ",".join(concepts or []),
             "source_agent": source_agent,
             "physical_user": physical_user or "",
             "problem_solved": problem_solved,
@@ -565,6 +672,85 @@ class SwarmMemory:
             "full_content": full_content,
             "doc_group_id": doc_group_id or "",
             "is_parent": is_parent,
+            # 渐进式披露：取详情预估 token 成本（写入时计算）
+            "token_estimate": max(1, int(token_estimate or 1)),
+        }
+
+    # ==================== FTS5 全文索引（Phase 3） ====================
+
+    def _get_fulltext(self):
+        """懒加载 FTS5 全文索引（线程安全）。"""
+        if not config.fulltext_enabled:
+            return None
+        if not hasattr(self, "_fulltext_cache"):
+            from cerebrate.core.fulltext import FullTextIndex
+            # 动态从 memory_root 派生路径：跟随测试/多实例的 memory_root 覆盖
+            self._fulltext_cache = FullTextIndex(
+                Path(config.memory_root) / "fulltext.sqlite3")
+        return self._fulltext_cache
+
+    def _fts_upsert(self, memory_id: str, *, title: str, content: str,
+                    tags: str, category: str, scope: str, project_id: str,
+                    created: str, updated: str) -> bool:
+        """双写 FTS5（失败静默降级，不影响主写入路径）。"""
+        fts = self._get_fulltext()
+        if not fts or not fts.available:
+            return False
+        return fts.upsert(
+            memory_id, title=title, content=content, tags=tags,
+            category=category, scope=scope, project_id=project_id,
+            created=created, updated=updated)
+
+    def fulltext_query(self, query_text: str, limit: int = 20,
+                       project_id: Optional[str] = None,
+                       scope: Optional[str] = None,
+                       category: Optional[str] = None) -> list[dict]:
+        """FTS5 全文检索：精确关键词（错误码/命令/函数名）优先。
+
+        返回渐进式披露索引层格式（source=fulltext + snippet）。
+        """
+        fts = self._get_fulltext()
+        if not fts or not fts.available:
+            return []
+        return fts.search(query_text, limit=limit, scope=scope,
+                          project_id=project_id, category=category)
+
+    def rebuild_fulltext(self, batch_size: int = 200) -> dict:
+        """从 DocStore + ChromaDB 全量重建 FTS5 索引。"""
+        fts = self._get_fulltext()
+        if not fts:
+            return {"status": "skipped", "reason": "fulltext disabled"}
+        if not fts.available:
+            return {"status": "error", "reason": "fulltext unavailable"}
+        fts.clear()
+        ids = self._store.get_all_ids()
+        indexed = 0
+        failed = 0
+        for eid in ids:
+            if eid == "_seq" or "_c" in eid:
+                continue
+            try:
+                mem = self.get_memory(eid)
+                if not mem:
+                    continue
+                meta = mem
+                self._fts_upsert(
+                    eid, title=meta.get("title", ""),
+                    content=meta.get("content", ""),
+                    tags=",".join(meta.get("tags", []) or []),
+                    category=meta.get("category", ""),
+                    scope=meta.get("scope", "general"),
+                    project_id=meta.get("project_id", ""),
+                    created=meta.get("created", ""),
+                    updated=meta.get("updated", ""))
+                indexed += 1
+            except Exception:
+                failed += 1
+        return {
+            "status": "ok",
+            "indexed": indexed,
+            "failed": failed,
+            "total": fts.count(),
         }
 
     # ==================== 查询 ====================
@@ -573,8 +759,14 @@ class SwarmMemory:
               tags: Optional[list[str]] = None, limit: int = 10,
               project_id: Optional[str] = None, scope: Optional[str] = None,
               source_agent: Optional[str] = None,
-              query_texts: Optional[list[str]] = None) -> list[dict]:
+              query_texts: Optional[list[str]] = None,
+              index_only: bool = False) -> list[dict]:
         """向量语义查询，支持多角度查询 + 分块聚合 + 可选 ReRanker 精排
+
+        index_only=True 时进入"渐进式披露索引层"模式：
+          跳过 DocumentStore 全文加载、上下文扩展、LLM 相关性过滤、ReRanker，
+          每条结果只返回紧凑索引字段（memory_id/title/category/scope/score/token_estimate），
+          供 agent 先扫描再决定取哪几条详情（对齐 claude-mem 3 层工作流）。
 
         查询流程:
           0. 多查询重写（可选）：从多个角度检索
@@ -697,6 +889,9 @@ class SwarmMemory:
                 "supersedes": _safe_split(meta.get("supersedes")),
                 "origin_ids": _safe_split(meta.get("origin_ids")),
                 "category": meta.get("category", ""),
+                "observation_type": meta.get("observation_type", ""),
+                "concepts": _safe_split(meta.get("concepts")),
+                "facts": _safe_split(meta.get("facts")),
                 "tags": _safe_split(meta.get("tags")),
                 "source_agent": meta.get("source_agent", "unknown"),
                 "physical_user": meta.get("physical_user", ""),
@@ -709,17 +904,19 @@ class SwarmMemory:
                 "full_content": "",
                 "doc_group_id": meta.get("doc_group_id", ""),
                 "cluster_id": meta.get("cluster_id", ""),
+                "token_estimate": int(meta.get("token_estimate", 0) or 0),
             })
 
         if not scored:
             return []
 
         # ── 第二步：从 DocumentStore 加载内容 ──
-        for s in scored:
-            self._enrich_from_docstore(s)
+        if not index_only:
+            for s in scored:
+                self._enrich_from_docstore(s)
 
         # ── 第三步：上下文扩展（分块 → 加载前后文段落） ──
-        if config.context_expand_enabled:
+        if not index_only and config.context_expand_enabled:
             scored = self.expand_all_contexts(
                 scored,
                 before_chars=config.context_expand_chars,
@@ -727,17 +924,17 @@ class SwarmMemory:
             )
 
         # ── 第四步：相关性过滤（可选 LLM 过滤） ──
-        if config.relevance_filter_enabled and len(scored) > 1:
+        if not index_only and config.relevance_filter_enabled and len(scored) > 1:
             try:
                 scored = self.filter_relevant(query_text, scored)
             except Exception as e:
                 logger.warning(f"相关性过滤异常 ({e})，跳过过滤")
 
         # ── 第五步：按 doc_group_id 聚合 ──
-        aggregated = self._aggregate_chunks(scored)
+        aggregated = self._aggregate_chunks(scored, load_content=not index_only)
 
         # ── 第六步：ReRanker 精排（可选） ──
-        if config.reranker_enabled and len(aggregated) > 1:
+        if not index_only and config.reranker_enabled and len(aggregated) > 1:
             try:
                 from cerebrate.core.reranker import get_reranker
                 reranker = get_reranker(
@@ -758,8 +955,43 @@ class SwarmMemory:
         if top and top[0].get("score", 0) > 0.1:
             with self._stats_lock:
                 self._stats["total_successes"] += 1
+        if index_only:
+            return [self._to_index_entry(e) for e in top]
         return top
 
+    @staticmethod
+    def _to_index_entry(e: dict) -> dict:
+        """渐进式披露索引层：把完整结果压缩为紧凑索引行。
+
+        对齐 claude-mem 索引格式（ID/标题/类型/时间/成本），
+        让 agent 在扫描阶段即可判断相关性，无需读取全文。
+        """
+        token_estimate = int(e.get("token_estimate", 0) or 0)
+        if token_estimate <= 0:
+            content_len = int(e.get("_content_len", 0) or 0)
+            token_estimate = estimate_tokens(
+                content_len) if content_len else estimate_tokens(e.get("title", ""))
+        return {
+            "memory_id": e.get("memory_id", ""),
+            "title": e.get("title", ""),
+            "category": e.get("category", ""),
+            "observation_type": e.get("observation_type", ""),
+            "scope": e.get("scope", ""),
+            "life_stage": e.get("life_stage", ""),
+            "created": e.get("created", ""),
+            "updated": e.get("updated", ""),
+            "score": round(float(e.get("final_score", e.get("score", 0))), 4),
+            "token_estimate": token_estimate,
+            "tags": e.get("tags", []),
+            "concepts": e.get("concepts", [])[:8],
+            "project_id": e.get("project_id", ""),
+            "source_agent": e.get("source_agent", ""),
+            "reuse_count": e.get("reuse_count", 0),
+            "success_count": e.get("success_count", 0),
+            "outcome": e.get("outcome", ""),
+            "confidence": e.get("confidence", 1.0),
+            "total_chunks": e.get("total_chunks", 1),
+        }
     @staticmethod
     def _diversity_rerank(results: list[dict], limit: int) -> list[dict]:
         """多样性重排序：在保持分数优先的前提下，确保结果覆盖不同的语义簇。
@@ -832,8 +1064,13 @@ class SwarmMemory:
 
         return diverse[:limit]
 
-    def _aggregate_chunks(self, scored: list[dict]) -> list[dict]:
-        """将分块结果聚合为按文档归并，保留最佳块得分"""
+    def _aggregate_chunks(self, scored: list[dict],
+                          load_content: bool = True) -> list[dict]:
+        """将分块结果聚合为按文档归并，保留最佳块得分
+
+        load_content=False（索引层模式）时跳过 DocumentStore 全文加载，
+        直接聚合各块的元数据，避免查询索引时产生大量磁盘 IO。
+        """
         groups: dict[str, dict] = {}
 
         for item in scored:
@@ -880,21 +1117,22 @@ class SwarmMemory:
                             key=lambda x: x.get("chunk_index", 0))
             max_score = group.pop("_max_score", 0)
 
-            # ── 从 DocumentStore 加载完整内容 ──
+            # ── 从 DocumentStore 加载完整内容（索引层模式跳过） ──
             full = ""
-            # 尝试从 docstore 加载父文档
-            parent_doc = self._docstore_get(group_key)
-            if parent_doc:
-                full = parent_doc.get("content", "")
-            if not full:
-                # 降级：拼接各块内容
-                parts = [ch.get("content", "") for ch in chunks]
-                full = "\n\n".join(parts) if len(parts) > 1 else (parts[0] if parts else "")
-            # 再次降级：尝试从第一个块加载
-            if not full and chunks:
-                chunk_doc = self._docstore_get(chunks[0].get("memory_id", ""))
-                if chunk_doc:
-                    full = chunk_doc.get("content", "")
+            if load_content:
+                # 尝试从 docstore 加载父文档
+                parent_doc = self._docstore_get(group_key)
+                if parent_doc:
+                    full = parent_doc.get("content", "")
+                if not full:
+                    # 降级：拼接各块内容
+                    parts = [ch.get("content", "") for ch in chunks]
+                    full = "\n\n".join(parts) if len(parts) > 1 else (parts[0] if parts else "")
+                # 再次降级：尝试从第一个块加载
+                if not full and chunks:
+                    chunk_doc = self._docstore_get(chunks[0].get("memory_id", ""))
+                    if chunk_doc:
+                        full = chunk_doc.get("content", "")
 
             # 构建最终结果
             entry = {
@@ -916,6 +1154,9 @@ class SwarmMemory:
                 "supersedes": group.get("supersedes", []),
                 "origin_ids": group.get("origin_ids", []),
                 "category": group.get("category", ""),
+                "observation_type": group.get("observation_type", ""),
+                "facts": group.get("facts", []),
+                "concepts": group.get("concepts", []),
                 "tags": group.get("tags", []),
                 "source_agent": group.get("source_agent", "unknown"),
                 "physical_user": group.get("physical_user", ""),
@@ -924,6 +1165,9 @@ class SwarmMemory:
                 "language": group.get("language", ""),
                 "total_chunks": len(chunks),
                 "final_score": max_score,  # ReRanker 可能覆盖
+                # 渐进式披露索引层字段（聚合时透传）
+                "token_estimate": int(group.get("token_estimate", 0) or 0),
+                "_content_len": group.get("_content_len", 0),
                 # 携带最佳块的扩展上下文和来源范围
                 "_expanded_context": group.get("_expanded_context", full),
                 "_context_range": group.get("_context_range", {}),
@@ -1291,6 +1535,9 @@ class SwarmMemory:
             "supersedes": [s for s in ((meta.get("supersedes") or "") if isinstance(meta.get("supersedes"), str) else meta.get("supersedes") or []) if s],
             "origin_ids": [s for s in ((meta.get("origin_ids") or "") if isinstance(meta.get("origin_ids"), str) else meta.get("origin_ids") or []) if s],
             "category": meta.get("category", ""),
+            "observation_type": meta.get("observation_type", ""),
+            "facts": _safe_split(meta.get("facts")),
+            "concepts": _safe_split(meta.get("concepts")),
             "tags": _safe_split(meta.get("tags")),
             "source_agent": meta.get("source_agent", ""),
             "physical_user": meta.get("physical_user", ""),

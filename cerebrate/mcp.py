@@ -56,7 +56,7 @@ def _request(method: str, path: str, body: dict = None) -> dict:
 TOOLS = [
     {
         "name": "cerebrate_sense",
-        "description": "【会话开始必须调用】感知虫群脑状态，返回健康状态、记忆总数、代理数、warnings。",
+        "description": "【会话开始必须调用】感知虫群脑状态，返回健康状态、记忆总数、代理数、warnings。\n\n3-LAYER WORKFLOW（记忆检索，ALWAYS FOLLOW）:\n  1. cerebrate_search(query) → 紧凑索引（ID/标题/类型/评分/token成本，~50-100 tokens/条）\n  2. cerebrate_timeline(anchor=ID) → 时序上下文（前因后果）\n  3. cerebrate_detail(ids=[...]) → 只取筛选后的完整详情（~500-1000 tokens/条）\nNEVER 直接拉全文：先索引筛选，再按需取详情（省 50-75% token）。\n有问题先 cerebrate_search，再决定取哪些 detail。",
         "inputSchema": {"type": "object", "properties": {}}
     },
     {
@@ -76,7 +76,7 @@ TOOLS = [
     },
     {
         "name": "cerebrate_query",
-        "description": "【遇到技术问题必须调用】搜索虫群记忆。返回 task 字段含 instructions 和 next_commands。\n决策矩阵:\n  recommendation=reuse (score>0.5) → 按 task.instructions 直接复用\n  recommendation=verify (score>0.2) → 参考后独立验证\n  recommendation=new_experience → 从零解决",
+        "description": "【决策查询】返回完整内容 + 推荐动作（reuse/verify/new_experience）与 task 指令。\n【deprecated】读侧首选 cerebrate_search（索引层，省 token）；本工具保留给需要全文+决策的场景。\n决策矩阵:\n  recommendation=reuse (score>0.5) → 按 task.instructions 直接复用\n  recommendation=verify (score>0.2) → 参考后独立验证\n  recommendation=new_experience → 从零解决",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -90,6 +90,48 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_search",
+        "description": "【遇到问题第一步调用】渐进式披露第 1 层：紧凑索引（不含全文）。返回 memory_id/标题/类型/评分/token成本，让 agent 先扫描再决定取哪些详情。\nmode: hybrid=FTS精确+向量语义(默认); fts=仅精确关键词(错误码/命令/函数名); vector=仅向量语义",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "问题描述/关键词"},
+                "agent_id": {"type": "string", "description": "代理标识", "default": "codex"},
+                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
+                "scope": {"type": "string", "description": "记忆分类: general=只查通用记忆; project=项目记忆+通用记忆; all=跨项目全量", "default": "", "enum": ["", "general", "project", "all"]},
+                "category": {"type": "string", "description": "分类过滤（可选）", "default": ""},
+                "mode": {"type": "string", "description": "检索模式: hybrid=混合(默认); fts=仅全文精确; vector=仅向量语义", "default": "hybrid", "enum": ["hybrid", "fts", "vector"]},
+                "limit": {"type": "number", "description": "返回条数", "default": 20}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "cerebrate_timeline",
+        "description": "【了解前因后果时调用】渐进式披露第 2 层：围绕 anchor 记忆的时序上下文。基于事件日志，返回该记忆前后的相关事件（提出/查询/复用/投票）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "anchor": {"type": "string", "description": "anchor 记忆 ID（不传则用 query 找 top1）", "default": ""},
+                "query": {"type": "string", "description": "查询词（anchor 缺省时自动找 top1）", "default": ""},
+                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
+                "scope": {"type": "string", "description": "记忆分类", "default": "", "enum": ["", "general", "project", "all"]},
+                "depth_before": {"type": "number", "description": "anchor 前取几条事件", "default": 3},
+                "depth_after": {"type": "number", "description": "anchor 后取几条事件", "default": 3}
+            }
+        }
+    },
+    {
+        "name": "cerebrate_detail",
+        "description": "【筛选后按需调用】渐进式披露第 3 层：按 ids 批量取完整详情（含 content/facts/concepts/evidence）。\n只对 search 筛选后确认相关的记忆调用，不要批量拉取所有结果。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ids": {"type": "array", "items": {"type": "string"}, "description": "要取详情的记忆 ID 数组"}
+            },
+            "required": ["ids"]
+        }
+    },    {
         "name": "cerebrate_propose",
         "description": "【解决问题后调用】提交新记忆到虫群。替代 v3 的 share。\nlife_stage 说明:\n  memory: 直接存入虫群(默认)\n  nutrient: 存入营养池，需共识投票升级为 memory",
         "inputSchema": {
@@ -107,14 +149,17 @@ TOOLS = [
                 "validate": {"type": "boolean", "description": "是否触发免疫验证", "default": True},
                 "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
                 "scope": {"type": "string", "description": "记忆分类: general=通用记忆; project=项目记忆（默认按 project_id 推断）", "default": "", "enum": ["", "general", "project"]},
-                "supersedes": {"type": "string", "description": "血缘关系：逗号分隔的被取代记忆ID列表，声明当前记忆基于哪些旧记忆"}
+                "supersedes": {"type": "string", "description": "血缘关系：逗号分隔的被取代记忆ID列表，声明当前记忆基于哪些旧记忆"},
+                "observation_type": {"type": "string", "description": "观察类型（可选，缺省按 category 自动推导）: bugfix/decision/refactor/discovery/optimization/how-it-works/gotcha/problem-solution", "default": ""},
+                "facts": {"type": "string", "description": "逗号分隔的事实清单（可选，缺省从 solution/problem 规则提取）", "default": ""},
+                "concepts": {"type": "string", "description": "逗号分隔的概念标签（可选，缺省从 tags/category/标题 规则提取）", "default": ""}
             },
             "required": ["title", "content", "tags", "problem", "solution"]
         }
     },
     {
         "name": "cerebrate_propose_skill",
-        "description": "【解决问题后调用】将可复用解决模式存为技能（category=skill, life_stage=memory）。",
+        "description": "【deprecated → 用 cerebrate_propose（category=skill）】将可复用解决模式存为技能。保留兼容。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -131,7 +176,7 @@ TOOLS = [
     },
     {
         "name": "cerebrate_propose_lesson",
-        "description": "【犯错并修正后调用】将错误教训存为记忆（category=skill, tags=skill_lesson）。",
+        "description": "【deprecated → 用 cerebrate_propose（category=skill, tags=skill_lesson）】将错误教训存为记忆。保留兼容。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -226,7 +271,7 @@ TOOLS = [
     },
     {
         "name": "cerebrate_knowledge_search",
-        "description": "搜索权威知识库，查找策略、文档类知识。",
+        "description": "【deprecated → 用 cerebrate_search】搜索权威知识库，查找策略、文档类知识。保留兼容。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -295,6 +340,32 @@ def _handle_call(name: str, args: dict) -> dict:
         elif name == "cerebrate_assess":
             return _request("GET", "/v1/brain/assess")
 
+        elif name == "cerebrate_search":
+            return _request("POST", "/v1/search", {
+                "query": args["query"],
+                "agent_id": args.get("agent_id", "codex"),
+                "project_id": args.get("project_id", ""),
+                "scope": args.get("scope", ""),
+                "category": args.get("category", ""),
+                "mode": args.get("mode", "hybrid"),
+                "limit": int(args.get("limit", 20)),
+            })
+
+        elif name == "cerebrate_timeline":
+            return _request("POST", "/v1/timeline", {
+                "anchor": args.get("anchor", ""),
+                "query": args.get("query", ""),
+                "project_id": args.get("project_id", ""),
+                "scope": args.get("scope", ""),
+                "depth_before": int(args.get("depth_before", 3)),
+                "depth_after": int(args.get("depth_after", 3)),
+            })
+
+        elif name == "cerebrate_detail":
+            return _request("POST", "/v1/memories/detail", {
+                "ids": args.get("ids", [])
+            })
+
         elif name == "cerebrate_query":
             return _request("POST", "/v1/query", {
                 "query": args["query"],
@@ -302,6 +373,7 @@ def _handle_call(name: str, args: dict) -> dict:
                 "agent_id": args.get("agent_id", "codex"),
                 "project_id": args.get("project_id", ""),
                 "scope": args.get("scope", ""),
+                "detail": bool(args.get("detail", True)),
             })
 
         elif name == "cerebrate_propose":
@@ -319,6 +391,9 @@ def _handle_call(name: str, args: dict) -> dict:
                 "project_id": args.get("project_id", ""),
                 "scope": args.get("scope", ""),
                 "supersedes": args.get("supersedes", ""),
+                "observation_type": args.get("observation_type", ""),
+                "facts": args.get("facts", ""),
+                "concepts": args.get("concepts", ""),
                 "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
 

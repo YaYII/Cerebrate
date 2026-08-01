@@ -476,6 +476,117 @@ class CerebrateLLM:
             pass
         return None
 
+    # ==================== 结构化字段增强（Phase 4） ====================
+
+    def compress_title(self, title: str, content: str = "") -> str:
+        """语义压缩标题：让索引层"只看标题即可判断相关性"。
+
+        对齐 claude-mem 的语义压缩原则：
+          好标题 = 具体、可检索、自包含（🔴 Hook timeout: 60s too short for npm install）
+        LLM 可用时调用压缩；不可用时规则保底（截断 + 保留关键词）。
+        """
+        title = (title or "").strip()
+        # 规则保底 1：空标题从内容推导
+        if not title and content:
+            title = content.strip().splitlines()[0][:40]
+        # 规则保底 2：过长标题截断
+        if len(title) > 60:
+            title = title[:60].rstrip() + "…"
+        if not self.is_available() or not self._sdk_ready():
+            return title
+        compressed = self._llm_compress_title(title, content)
+        return compressed or title
+
+    def _llm_compress_title(self, title: str, content: str = "") -> Optional[str]:
+        client = self._get_client()
+        if not client:
+            return None
+        prompt = f"""你是编程记忆库的编辑（Memory Editor）。
+把下面的记忆标题压缩成 ≤12 个英文/中文词，要求：
+- 具体、可检索、自包含（只看标题就能判断是否相关）
+- 保留关键信息：技术栈、问题类型、方案要点
+- 不要模糊词汇（如"关于""一些""问题"）
+
+原标题: {title}
+"""
+        if content:
+            prompt += f"\n内容摘要: {content[:300]}"
+        prompt += "\n\n只返回压缩后的标题，不要其他文字。"
+        try:
+            kwargs = {
+                "model": self._model,
+                "max_tokens": 60,
+                "temperature": 0.1,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if self._provider == "anthropic":
+                response = client.messages.create(**kwargs)
+                text = response.content[0].text if response.content else ""
+            else:
+                response = client.chat.completions.create(**kwargs)
+                text = response.choices[0].message.content
+            text = (text or "").strip().strip('"').strip("'")
+            return text[:60] if text else None
+        except Exception:
+            return None
+
+    def extract_facts_concepts(self, content: str, solution: str = "",
+                               problem_solved: str = "",
+                               tags: Optional[list[str]] = None,
+                               category: str = "") -> dict:
+        """提取结构化 facts/concepts（LLM 可用时增强，否则返回空由规则层兜底）。
+
+        返回: {"facts": [...], "concepts": [...]}
+        """
+        result = {"facts": [], "concepts": []}
+        if not self.is_available() or not self._sdk_ready():
+            return result
+        client = self._get_client()
+        if not client:
+            return result
+        prompt = f"""你是编程记忆库的结构化提取器（Structured Extractor）。
+从下面的记忆内容中提取结构化字段，返回 JSON：
+
+内容: {content[:1500]}
+"""
+        if solution:
+            prompt += f"\n方案: {solution[:200]}"
+        if problem_solved:
+            prompt += f"\n解决的问题: {problem_solved[:200]}"
+        if tags:
+            prompt += f"\n已有标签: {', '.join(tags)}"
+        if category:
+            prompt += f"\n分类: {category}"
+        prompt += """
+
+返回 JSON:
+{
+  "facts": ["事实1", "事实2", ...],   # ≤5 条，每条 ≤20 字，可验证的具体事实
+  "concepts": ["概念1", "概念2", ...]  # ≤8 个，技术概念/关键词
+}
+不要其他文字。"""
+        try:
+            kwargs = {
+                "model": self._model,
+                "max_tokens": 200,
+                "temperature": 0.1,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if self._provider == "anthropic":
+                response = client.messages.create(**kwargs)
+                text = response.content[0].text if response.content else ""
+            else:
+                response = client.chat.completions.create(**kwargs)
+                text = response.choices[0].message.content
+            match = re.search(r'\{[\s\S]*\}', text or "")
+            if match:
+                data = json.loads(match.group())
+                result["facts"] = [str(f) for f in (data.get("facts") or [])][:5]
+                result["concepts"] = [str(c) for c in (data.get("concepts") or [])][:8]
+            return result
+        except Exception:
+            return {"facts": [], "concepts": []}
+
     # ==================== 知识蒸馏(链式多轮) ====================
 
     def _chat_completion(self, messages: list[dict], max_tokens: int = 8192,

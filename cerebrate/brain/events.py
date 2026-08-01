@@ -102,6 +102,49 @@ class EventLog:
         events.sort(key=lambda x: x["event_id"])
         return events[:limit]
 
+    def list_recent(self, limit: int = 5000) -> list[dict]:
+        """返回最近的 limit 条事件（按 event_id 升序）。
+
+        渐进式披露 timeline 层使用：扫描最近事件，围绕 anchor 记忆构建时序上下文。
+        只读取最近 limit 条（按 event_id 取尾部），避免全量扫描。
+        """
+        all_ids = self._store.get_all_ids()
+        seqs = []
+        for eid in all_ids:
+            if eid == "_seq":
+                continue
+            try:
+                seq = int(eid.split(":", 1)[1]) if eid.startswith(
+                    "event:") else int(eid)
+            except (ValueError, IndexError):
+                continue
+            seqs.append((seq, eid))
+        seqs.sort(key=lambda x: x[0])
+        tail = seqs[-max(0, limit):]
+
+        events = []
+        for seq, eid in tail:
+            item = self._store.get(eid)
+            if not item:
+                continue
+            meta = item["metadata"]
+            payload_str = meta.get("payload", "{}")
+            try:
+                payload = json.loads(payload_str)
+            except json.JSONDecodeError:
+                payload = {}
+            events.append({
+                "event_id": int(meta.get("event_id", seq)),
+                "event_uid": meta.get("event_uid", ""),
+                "event_type": meta.get("event_type", ""),
+                "timestamp": meta.get("timestamp", ""),
+                "source_agent": meta.get("source_agent", ""),
+                "project_id": meta.get("project_id", ""),
+                "payload": payload,
+            })
+        events.sort(key=lambda x: x["event_id"])
+        return events
+
     def latest_id(self) -> int:
         seq_item = self._store.get("_seq")
         if seq_item:

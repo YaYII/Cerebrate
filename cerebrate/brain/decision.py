@@ -21,7 +21,12 @@ class DecisionRouter:
         self.mm = memory_manager
 
     def decide(self, user_id: str, query: str, context: Optional[dict] = None) -> dict:
-        """执行完整的三层决策流程"""
+        """执行完整的三层决策流程
+
+        context 可选键:
+          - project_id / scope / category / tags: 记忆检索过滤
+          - index_only: 是否只返回渐进式披露索引层（不加载全文）
+        """
         context = context or {}
         result = {
             "user_id": user_id,
@@ -60,6 +65,7 @@ class DecisionRouter:
             limit=5,
             project_id=context.get("project_id"),
             scope=context.get("scope"),
+            index_only=bool(context.get("index_only", False)),
         )
         if swarm_results:
             result["route"].append("swarm")

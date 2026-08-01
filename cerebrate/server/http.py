@@ -114,8 +114,16 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.register_agent(payload)
         if method == "POST" and path == "/v1/query":
             return self.api.query(payload)
+        if method == "POST" and path == "/v1/search":
+            return self.api.search(payload)
+        if method == "POST" and path == "/v1/timeline":
+            return self.api.timeline(payload)
+        if method == "POST" and path == "/v1/fulltext/rebuild":
+            return self.api.rebuild_fulltext()
         if method == "POST" and path == "/v1/memories/propose":
             return self.api.propose_memory(payload)
+        if method == "POST" and path == "/v1/memories/detail":
+            return self.api.memory_detail(payload)
         if method == "POST" and path == "/v1/usages/start":
             return self.api.start_usage(payload)
         if method == "POST" and path == "/v1/usages/finish":

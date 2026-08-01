@@ -81,7 +81,10 @@ class MemoryManager:
                         evidence: str = "", supersedes: Optional[list[str]] = None,
                         origin_ids: Optional[list[str]] = None,
                         physical_user: str = "",
-                        memory_id: Optional[str] = None) -> str:
+                        memory_id: Optional[str] = None,
+                        observation_type: str = "",
+                        facts: Optional[list[str]] = None,
+                        concepts: Optional[list[str]] = None) -> str:
         memory_id = self.swarm.share(title, content, category, tags,
                                      source_agent, problem_solved, solution, outcome,
                                      project_id, scope=scope, life_stage=life_stage,
@@ -90,7 +93,10 @@ class MemoryManager:
                                      supersedes=supersedes,
                                      origin_ids=origin_ids,
                                      physical_user=physical_user,
-                                     memory_id=memory_id)
+                                     memory_id=memory_id,
+                                     observation_type=observation_type,
+                                     facts=facts,
+                                     concepts=concepts)
         self.agents.record_action(source_agent, "memory_shared", project_id, outcome,
                                   {"memory_id": memory_id, "life_stage": life_stage})
         return memory_id
@@ -100,10 +106,23 @@ class MemoryManager:
                     project_id: Optional[str] = None,
                     scope: Optional[str] = None,
                     source_agent: Optional[str] = None,
-                    query_texts: Optional[list[str]] = None) -> list[dict]:
+                    query_texts: Optional[list[str]] = None,
+                    index_only: bool = False) -> list[dict]:
         return self.swarm.query(query_text, category, tags, limit,
                                 project_id, scope, source_agent,
-                                query_texts=query_texts)
+                                query_texts=query_texts,
+                                index_only=index_only)
+
+    def fulltext_query_swarm(self, query_text: str, limit: int = 20,
+                             project_id: Optional[str] = None,
+                             scope: Optional[str] = None,
+                             category: Optional[str] = None) -> list[dict]:
+        return self.swarm.fulltext_query(
+            query_text, limit=limit, project_id=project_id,
+            scope=scope, category=category)
+
+    def rebuild_fulltext(self, batch_size: int = 200) -> dict:
+        return self.swarm.rebuild_fulltext(batch_size=batch_size)
 
     def mark_swarm_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
         self.swarm.mark_reused(memory_id, success, feedback)

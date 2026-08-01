@@ -50,6 +50,7 @@ class CerebrateConfig:
     events_path: Path = field(init=False)
     logs_path: Path = field(init=False)
     docstore_path: Path = field(init=False)
+    fulltext_path: Path = field(init=False)
 
     # 项目上下文
     current_project_id: str = field(
@@ -146,9 +147,25 @@ class CerebrateConfig:
         default_factory=lambda: os.environ.get("CEREBRATE_RELEVANCE_FILTER_ENABLED", "true").lower() == "true"
     )
 
+    # 结构化字段增强（Phase 4）：
+    # title_compress_enabled: LLM 语义压缩标题（写路径增加一次 LLM 调用，默认关闭）
+    # structured_enrich_enabled: LLM 提取 facts/concepts（写路径增加一次 LLM 调用，默认关闭）
+    # 规则提取（observation_type/concepts/facts/token_estimate）始终生效，不受此开关影响
+    title_compress_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_TITLE_COMPRESS_ENABLED", "false").lower() == "true"
+    )
+    structured_enrich_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_STRUCTURED_ENRICH_ENABLED", "false").lower() == "true"
+    )
+
     # 记忆最小长度（token 数）
     memory_min_tokens: int = field(
         default_factory=lambda: int(os.environ.get("CEREBRATE_MEMORY_MIN_TOKENS", "500"))
+    )
+
+    # FTS5 全文索引（Phase 3）：默认开启；SQLite 失败时自动降级为向量检索
+    fulltext_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_FULLTEXT_ENABLED", "true").lower() == "true"
     )
 
     # PostgreSQL 元数据层配置
@@ -187,6 +204,7 @@ class CerebrateConfig:
         self.logs_path = self.memory_root / "logs"
         self.chroma_path = self.memory_root / "chroma_data"
         self.docstore_path = self.memory_root / "docstore"
+        self.fulltext_path = self.memory_root / "fulltext.sqlite3"
 
 
 config = CerebrateConfig()

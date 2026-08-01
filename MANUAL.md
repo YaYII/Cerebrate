@@ -67,6 +67,9 @@ POST /v1/agents/register    首次 — 注册智能体（需 physical_user）
 GET  /v1/personal           会话开始 — 读取用户偏好
 POST /v1/personal           任何时候 — 写入偏好
 POST /v1/query              遇到问题时 — 搜索记忆
+POST /v1/search             遇到问题时 — 渐进式披露第1层（紧凑索引，省 token）
+POST /v1/timeline           需要上下文时 — 渐进式披露第2层（时序上下文）
+POST /v1/memories/detail    筛选后 — 渐进式披露第3层（批量取完整详情）
 POST /v1/memories/propose   解决后 — 提交经验（返回 origin_id）
 POST /v1/usages/start       复用记忆时 — 开始追踪
 POST /v1/usages/finish      复用完成时 — 报告结果
@@ -89,6 +92,7 @@ POST /v1/origins/cleanup?days=365       手动清理过期原始记忆（先备�
 ```
 GET  /v1/help               API 发现文档
 GET  /v1/memories/{id}      单条记忆详情（含 origin_ids）
+POST /v1/fulltext/rebuild   全量重建 FTS5 全文索引
 GET  /v1/consensus/{id}     共识投票快照
 GET  /v1/events?cursor=0    事件日志（恢复连接用）
 GET  /v1/events/stream?cursor=0  SSE 事件流（长连接）
@@ -99,6 +103,38 @@ GET  /v1/llm/status         免疫系统状态
 ---
 
 ## 6. 核心流程：以 query 为中心
+
+### 渐进式披露 3 层检索（v5.3，对齐 claude-mem）
+
+记忆检索采用 3 层工作流，先索引后详情，省 50-75% token：
+
+```
+第 1 层  POST /v1/search       紧凑索引（ID/标题/类型/评分/token成本，~50-100 tokens/条）
+   ↓     先扫描"存在什么 + 取它要花多少 token"，判断哪些相关
+第 2 层  POST /v1/timeline     时序上下文（围绕某记忆的前因后果，基于事件日志）
+   ↓     需要完整理解时调用
+第 3 层  GET /v1/memories/{id} / POST /v1/memories/detail
+        完整详情（~500-1000 tokens/条），只取筛选后的记忆
+```
+
+`search` 的 `mode` 参数（混合检索）：
+
+```
+hybrid（默认）  FTS5 精确关键词命中优先 + 向量语义召回
+fts             仅 FTS5 全文检索（错误码/命令/函数名等精确匹配，sub-10ms）
+vector          仅向量语义检索（ChromaDB）
+```
+
+`/v1/query` 保留"完整内容 + 决策推荐"的既有契约（默认 `detail=true`）；
+传 `detail=false` 可切换为索引模式。读侧首选 `/v1/search` 省 token。
+
+`token_estimate`：每条索引显示取详情预估 token 成本（写入时按 4 字符/token 估算），
+让 agent 做 ROI 决策。
+
+`observation_type`：记忆类型标签（bugfix/decision/refactor/discovery/optimization/
+how-it-works/gotcha/problem-solution），写入时由 category 自动推导。
+
+### 记忆分类（scope）：通用记忆 vs 项目记忆
 
 POST `/v1/query` 是智能体的主入口。返回的 `task` 字段告诉智能体下一步该做什么。
 
@@ -260,6 +296,9 @@ curl -X POST http://127.0.0.1:8765/v1/personal \
 python3 cerebrate.py --url http://127.0.0.1:8765 sense
 python3 cerebrate.py --url http://127.0.0.1:8765 register --id my-agent
 python3 cerebrate.py --url http://127.0.0.1:8765 query "如何部署" --id my-agent
+python3 cerebrate.py --url http://127.0.0.1:8765 search "NPM_CONFIG_TIMEOUT" --mode fts --id my-agent
+python3 cerebrate.py --url http://127.0.0.1:8765 timeline --anchor <memory-id> --id my-agent
+python3 cerebrate.py --url http://127.0.0.1:8765 fulltext rebuild
 python3 cerebrate.py --url http://127.0.0.1:8765 propose --title "..." --content "..." --category coding --id my-agent --problem "..." --solution "..."
 python3 cerebrate.py --url http://127.0.0.1:8765 recall
 python3 cerebrate.py --url http://127.0.0.1:8765 remember --user yangying --key pref_tone --value "专业简洁"
@@ -335,11 +374,14 @@ await brain.propose({
 Cerebrate 内置 MCP Server（`cerebrate/mcp.py`）。配置后以下工具立即可用：
 
 ```
-cerebrate_sense           感知虫群
-cerebrate_query           搜索记忆
-cerebrate_propose         提交记忆
-cerebrate_propose_skill   存为技能
-cerebrate_propose_lesson  存为教训
+cerebrate_sense           感知虫群（含 3-LAYER WORKFLOW 引导）
+cerebrate_search          渐进式披露第1层 — 紧凑索引（推荐首选）
+cerebrate_timeline        渐进式披露第2层 — 时序上下文
+cerebrate_detail          渐进式披露第3层 — 批量完整详情
+cerebrate_query           决策查询（完整内容+推荐；读侧已弃用，优先 search）
+cerebrate_propose         提交记忆（支持 observation_type/facts/concepts）
+cerebrate_propose_skill   存为技能（已弃用 → propose+category=skill）
+cerebrate_propose_lesson  存为教训（已弃用 → propose+tags=skill_lesson）
 cerebrate_help            API 发现
 cerebrate_doctrines       权威教条
 cerebrate_use_start       开始追踪复用
@@ -350,8 +392,15 @@ cerebrate_register        注册代理
 cerebrate_recall          读取偏好
 cerebrate_remember        写入偏好
 cerebrate_assess          元认知评估
+cerebrate_knowledge_search 知识库搜索（已弃用 → search）
 cerebrate_batch_process   批量处理
+cerebrate_ingest          目录吸入
+cerebrate_knowledge_store 知识库写入
 ```
+
+> **记忆检索工作流（MCP）：** 遇到问题先 `cerebrate_search`（索引层）→
+> 需要前因后果时 `cerebrate_timeline` → 只对筛选后确认相关的记忆
+> 调用 `cerebrate_detail` 取完整内容。NEVER 直接拉全文。
 
 > **安全限制：** 进化(`evolve`)和原始记忆清理(`cleanup`)不在 MCP 中暴露，仅 HTTP API 可用。
 

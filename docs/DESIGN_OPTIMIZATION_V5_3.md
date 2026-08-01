@@ -2,7 +2,8 @@
 
 > 完成日期：2026-08-01
 > 作者：Cerebrate 项目设计师（AI）
-> 基线：v5.2（记忆分类 scope 升级已完成，见 `docs/MEMORY_SCOPE_UPGRADE.md`）
+> 状态：v5.2 已发布；v5.3 设计方案已按 Phase 1-4 实施并验证（见文末「实施记录」）
+> 基线：v5.2（记忆分类 scope 升级，见 `docs/MEMORY_SCOPE_UPGRADE.md`）
 > 参考：claude-mem（https://github.com/thedotmack/claude-mem）
 >      官方文档：search-architecture / progressive-disclosure / architecture-evolution / folder-context
 
@@ -285,3 +286,40 @@ type: decision | bugfix | feature | refactor | discovery | change
 
 待用户选择实施范围后，按 Phase 顺序执行；每个 Phase 完成时跑全量测试
 （基线 132 passed / 13 failed，13 个为既有环境问题）确认无新回归。
+
+---
+
+## 9. 实施记录（2026-08-01，v5.3）
+
+### 已实施
+
+| 阶段 | 内容 | 验证 |
+|---|---|---|
+| Phase 1 | 渐进式披露 3 层检索：`/v1/search`（索引层）、`/v1/timeline`（上下文层）、`/v1/memories/detail`（详情层批量）；`swarm.query(index_only)`；`token_estimate` 写入 | 9 测试通过 + E2E |
+| Phase 4 | `observation_type`（category→type 规则映射）、`facts`/`concepts` 规则提取；LLM 语义压缩标题 + 结构化增强（`CEREBRATE_TITLE_COMPRESS_ENABLED` / `CEREBRATE_STRUCTURED_ENRICH_ENABLED` 开关，默认关） | 8 测试通过 |
+| Phase 3 | FTS5 全文索引（`cerebrate/core/fulltext.py`，SQLite trigram，零新依赖）；share 双写；`/v1/search` hybrid/fts/vector 三模式；`fulltext rebuild` 命令 | 7 测试通过 + E2E |
+| Phase 2 | MCP 新增 `cerebrate_search/timeline/detail`；sense 描述含 3-LAYER WORKFLOW 引导；4 个重叠工具标记 deprecated；propose 透传结构化字段 | 5 测试通过 |
+
+### 设计调整（基于实施证据）
+
+1. **`/v1/query` 默认行为未改变**（默认 `detail=true` 返回全文 + 决策）。
+   设计稿原计划默认索引模式，但回归测试 `test_propose_long_document_through_api`
+   证明该变更破坏既有契约。按"向后兼容优先"原则改为：索引层由新端点 `/v1/search`
+   承担，`detail=false` 作为显式轻量模式保留。渐进式披露在工作流/工具层生效，
+   而非静默改变旧接口语义。
+2. **FTS5 用 trigram tokenizer**（SQLite 3.34+）：中文子串匹配优于 unicode61；
+   2 字以下中文词自动走 LIKE 回退（trigram 需 3 字元）。
+3. **FTS5 路径动态派生自 `memory_root`**：避免测试/多实例覆盖 memory_root 时
+   写入项目真实库。
+
+### 测试规模
+
+全量：**161 passed / 13 failed**（13 个失败与 v5.2 基线完全一致，0 新回归）。
+新增测试文件：`test_progressive_disclosure.py`(9)、`test_structured_fields.py`(8)、
+`test_fulltext.py`(7)、`test_mcp_workflow.py`(5)。
+
+### 遗留
+
+- Phase 5（项目目录 CLAUDE.md 生成）未实施，需用户确认写入位置策略
+- knowledge.py 尚未接入 FTS5（swarm 已接入），可后续对齐
+- MCP 旧工具名（propose_skill/propose_lesson/knowledge_search/query）保留为 deprecated 别名
