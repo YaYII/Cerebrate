@@ -94,7 +94,9 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             q = (params.get("q") or [""])[0]
             topic = (params.get("topic") or [""])[0]
             pid = (params.get("project_id") or [""])[0]
-            return {"results": self.api.search_knowledge(q, topic=topic, project_id=pid)}
+            scope = (params.get("scope") or [""])[0]
+            return {"results": self.api.search_knowledge(
+                q, topic=topic, project_id=pid, scope=scope)}
         if method == "GET" and path == "/v1/personal":
             return self.api.get_personal()
         if method == "POST" and path == "/v1/personal":

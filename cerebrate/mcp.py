@@ -83,7 +83,8 @@ TOOLS = [
                 "query": {"type": "string", "description": "问题描述"},
                 "user": {"type": "string", "description": "用户ID", "default": "yangying"},
                 "agent_id": {"type": "string", "description": "代理标识", "default": "codex"},
-                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""}
+                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
+                "scope": {"type": "string", "description": "记忆分类: general=只查通用记忆; project=项目记忆+通用记忆; all=跨项目全量（默认按 project_id 推断）", "default": "", "enum": ["", "general", "project", "all"]}
             },
             "required": ["query"]
         }
@@ -105,6 +106,7 @@ TOOLS = [
                 "confidence": {"type": "number", "description": "信心分数 0-1", "default": 1.0},
                 "validate": {"type": "boolean", "description": "是否触发免疫验证", "default": True},
                 "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
+                "scope": {"type": "string", "description": "记忆分类: general=通用记忆; project=项目记忆（默认按 project_id 推断）", "default": "", "enum": ["", "general", "project"]},
                 "supersedes": {"type": "string", "description": "血缘关系：逗号分隔的被取代记忆ID列表，声明当前记忆基于哪些旧记忆"}
             },
             "required": ["title", "content", "tags", "problem", "solution"]
@@ -230,7 +232,8 @@ TOOLS = [
             "properties": {
                 "query": {"type": "string", "description": "搜索关键词"},
                 "topic": {"type": "string", "description": "按主题过滤（可选）"},
-                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""}
+                "project_id": {"type": "string", "description": "项目ID（可选）", "default": ""},
+                "scope": {"type": "string", "description": "记忆分类: general=只查通用; project=项目+通用; all=全量（默认按 project_id 推断）", "default": "", "enum": ["", "general", "project", "all"]}
             },
             "required": ["query"]
         }
@@ -297,7 +300,8 @@ def _handle_call(name: str, args: dict) -> dict:
                 "query": args["query"],
                 "user": args.get("user", "yangying"),
                 "agent_id": args.get("agent_id", "codex"),
-                "project_id": args.get("project_id", "")
+                "project_id": args.get("project_id", ""),
+                "scope": args.get("scope", ""),
             })
 
         elif name == "cerebrate_propose":
@@ -313,6 +317,7 @@ def _handle_call(name: str, args: dict) -> dict:
                 "confidence": args.get("confidence", 1.0),
                 "validate": args.get("validate", True),
                 "project_id": args.get("project_id", ""),
+                "scope": args.get("scope", ""),
                 "supersedes": args.get("supersedes", ""),
                 "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
@@ -412,6 +417,8 @@ def _handle_call(name: str, args: dict) -> dict:
                 qparams["topic"] = args["topic"]
             if args.get("project_id"):
                 qparams["project_id"] = args["project_id"]
+            if args.get("scope"):
+                qparams["scope"] = args["scope"]
             return _request("GET", f"/v1/knowledge?{urlencode(qparams)}")
 
         elif name == "cerebrate_batch_process":

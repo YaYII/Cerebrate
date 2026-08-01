@@ -50,6 +50,7 @@ def cmd_query(args):
         "agent_id": args.agent_id or args.id or "cli",
         "user": args.user,
         "project_id": args.project,
+        "scope": args.scope or None,
     }))
 
 
@@ -63,6 +64,7 @@ def cmd_propose(args):
         "problem": args.problem or "",
         "solution": args.solution or "",
         "project_id": args.project or "",
+        "scope": args.scope or "",
         "validate": args.validate,
         "confidence": args.confidence,
     }
@@ -192,6 +194,10 @@ def main(argv=None):
     p.add_argument("--agent-id", default="")
     p.add_argument("--user", default="")
     p.add_argument("--project", default="")
+    p.add_argument("--scope", default="",
+                   choices=["", "general", "project", "all"],
+                   help="记忆分类: general=只查通用记忆; project=项目记忆+通用记忆; "
+                        "all=跨项目全量（默认按 project_id 推断）")
     p.set_defaults(func=cmd_query)
 
     p = sub.add_parser("propose", help="提交新记忆")
@@ -204,6 +210,9 @@ def main(argv=None):
     p.add_argument("--problem", default="")
     p.add_argument("--solution", default="")
     p.add_argument("--project", default="")
+    p.add_argument("--scope", default="",
+                   choices=["", "general", "project"],
+                   help="记忆分类: general=通用记忆; project=项目记忆（默认按 project_id 推断）")
     p.add_argument("--validate", action="store_true", default=False)
     p.add_argument("--confidence", type=float, default=1.0)
     p.set_defaults(func=cmd_propose)

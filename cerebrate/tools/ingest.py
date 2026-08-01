@@ -399,6 +399,7 @@ def ingest_directory(root: Path, project_id: str = "", dry_run: bool = False,
                 "version": "1.0",
                 "author": _PHYSICAL_USER,
                 "project_id": project_id,
+                "scope": args.scope if hasattr(args, "scope") else "",
                 "agent_id": "ingest-tool",
             }
 
@@ -482,6 +483,9 @@ def main(argv=None):
                         help="要扫描的文档目录路径")
     parser.add_argument("--project", "-p", default="",
                         help="项目隔离 ID，相同项目的知识可集中检索")
+    parser.add_argument("--scope", default="",
+                        choices=["", "general", "project"],
+                        help="记忆分类: general=通用知识; project=项目知识（默认按 project_id 推断）")
     parser.add_argument("--dry-run", action="store_true",
                         help="预览模式：扫描+分块但不写入知识库")
     parser.add_argument("--verbose", "-v", action="store_true",

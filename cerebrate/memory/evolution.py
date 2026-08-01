@@ -262,7 +262,7 @@ class EvolutionEngine:
 
             existing = swarm.query(
                 f"distilled skill {topic}",
-                category="distilled_skill", project_id=None, limit=1,
+                category="distilled_skill", project_id=None, scope="all", limit=1,
             )
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
@@ -370,7 +370,8 @@ class EvolutionEngine:
             doctrine_confidence_penalty = min(1.0, total_reuse / 10.0)
 
             existing = swarm.query(
-                f"doctrine {cat}", category="doctrine", project_id=None, limit=1)
+                f"doctrine {cat}", category="doctrine", project_id=None,
+                scope="all", limit=1)
             if existing and existing[0].get("score", 0) > 0.5:
                 continue
 

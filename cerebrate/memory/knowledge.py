@@ -41,8 +41,16 @@ class KnowledgeBase:
     def store(self, title: str, content: str, source: str, topics: list[str],
               is_policy: bool = False, policy_name: str = "",
               version: str = "1.0", author: str = "",
-              project_id: str = "") -> str:
-        project_id = project_id or config.current_project_id
+              project_id: str = "", scope: str = "") -> str:
+        if scope == "general":
+            project_id = ""
+        elif scope == "project":
+            project_id = project_id or config.current_project_id
+            if not project_id:
+                scope = "general"
+        else:
+            project_id = project_id or config.current_project_id
+            scope = "project" if project_id else "general"
         doc_hash = hashlib.sha256(content.encode()).hexdigest()
 
         # O(1) 哈希索引去重
@@ -65,6 +73,7 @@ class KnowledgeBase:
             "is_policy": str(is_policy),
             "policy_name": policy_name,
             "project_id": project_id,
+            "scope": scope,
             "hash": doc_hash,
             "created": now,
             "updated": now,
@@ -80,12 +89,22 @@ class KnowledgeBase:
     # ==================== 查询 ====================
 
     def lookup(self, query: str, topic: Optional[str] = None,
-               exact_policy: bool = False, project_id: Optional[str] = None) -> list[dict]:
+               exact_policy: bool = False, project_id: Optional[str] = None,
+               scope: Optional[str] = None) -> list[dict]:
         """向量语义查询知识库"""
         conditions = []
-        if project_id is not None:
+        if scope == "all":
+            pass
+        elif scope == "general":
+            conditions.append({"project_id": ""})
+        elif scope == "project":
             pid = project_id if project_id else config.current_project_id
             conditions.append({"project_id": {"$in": [pid, ""]}})
+        elif project_id is not None:
+            pid = project_id if project_id else config.current_project_id
+            conditions.append({"project_id": {"$in": [pid, ""]}})
+        else:
+            conditions.append({"project_id": ""})
         if topic:
             conditions.append({"topics": {"$contains": topic}})
         if exact_policy:
@@ -126,6 +145,7 @@ class KnowledgeBase:
                 "policy_name": meta.get("policy_name", ""),
                 "topics": (meta.get("topics") or "").split(","),
                 "project_id": meta.get("project_id", ""),
+                "scope": meta.get("scope", "project" if meta.get("project_id") else "general"),
                 "verified": meta.get("verified") == "True",
                 "deprecated": meta.get("deprecated") == "True",
                 "score": round(min(1.0, sem_score + bonus), 4),
@@ -148,6 +168,7 @@ class KnowledgeBase:
                     "version": meta.get("version", ""),
                     "policy_name": meta.get("policy_name", ""),
                     "project_id": meta.get("project_id", ""),
+                    "scope": meta.get("scope", "project" if meta.get("project_id") else "general"),
                     "verified": meta.get("verified") == "True",
                     "deprecated": meta.get("deprecated") == "True",
                 }

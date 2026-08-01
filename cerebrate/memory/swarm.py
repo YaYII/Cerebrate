@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 LIFE_STAGES = {"nutrient", "memory", "verified_skill",
                "doctrine", "quarantined", "archived"}
 
+SCOPES = {"general", "project"}
+
 
 def _safe_split(val, separator=","):
     """安全地将可能是 str 或 list 的元数据值转为列表。"""
@@ -142,7 +144,7 @@ class SwarmMemory:
     def share(self, title: str, content: str, category: str, tags: list[str],
               source_agent: str = "unknown", problem_solved: str = "",
               solution: str = "", outcome: str = "success",
-              project_id: str = "", language: str = "",
+              project_id: str = "", scope: str = "", language: str = "",
               life_stage: str = "memory", nutrient_score: float = 1.0,
               confidence: float = 1.0, evidence: str = "",
               supersedes: Optional[list[str]] = None,
@@ -156,7 +158,22 @@ class SwarmMemory:
           2. 仅运营元数据（title/category/tags/lifecycle）写入 ChromaDB 索引
           3. 长文档自动分块，每块独立向量化，共享 doc_group_id
         """
-        project_id = project_id or config.current_project_id
+        # ── 记忆分类：通用记忆(scope=general) / 项目记忆(scope=project) ──
+        # 规则:
+        #   显式 scope="general" → 强制通用，project_id 置空
+        #   显式 scope="project" → 项目记忆，project_id 缺失时用当前项目
+        #   scope 未指定 → 按 project_id 自动推导（非空=项目，空=通用）
+        if scope in SCOPES:
+            if scope == "general":
+                project_id = ""
+            else:
+                project_id = project_id or config.current_project_id
+                if not project_id:
+                    # 显式 project 但无可用项目 ID → 降级为通用，避免状态不一致
+                    scope = "general"
+        else:
+            project_id = project_id or config.current_project_id
+            scope = "project" if project_id else "general"
         language = language or config.default_language
         now = datetime.now(timezone.utc).isoformat()
         supersedes = supersedes or []
@@ -200,7 +217,7 @@ class SwarmMemory:
                 title=title, content="", category=category, tags=tags,
                 source_agent=source_agent, physical_user=physical_user,
                 problem_solved="", solution="",
-                outcome=outcome, project_id=project_id, language=language,
+                outcome=outcome, project_id=project_id, scope=scope, language=language,
                 life_stage=life_stage, nutrient_score=nutrient_score,
                 confidence=confidence, evidence=evidence,
                 supersedes=supersedes, origin_ids=origin_ids,
@@ -221,7 +238,8 @@ class SwarmMemory:
                             physical_user=physical_user or "",
                             project_id=project_id, language=language,
                             life_stage=life_stage, outcome=outcome,
-                            confidence=confidence, total_chunks=1)
+                            confidence=confidence, total_chunks=1,
+                            metadata={"scope": scope})
             return memory_id
 
         # ── 分块存储 ──
@@ -274,7 +292,7 @@ class SwarmMemory:
                 title=title, content="", category=category, tags=tags,
                 source_agent=source_agent, physical_user=physical_user,
                 problem_solved="", solution="",
-                outcome=outcome, project_id=project_id, language=language,
+                outcome=outcome, project_id=project_id, scope=scope, language=language,
                 life_stage=life_stage, nutrient_score=nutrient_score,
                 confidence=confidence, evidence=evidence,
                 supersedes=supersedes, origin_ids=chunk_origin_ids,
@@ -290,7 +308,7 @@ class SwarmMemory:
             title=title, content="", category=category, tags=tags,
             source_agent=source_agent, physical_user=physical_user,
             problem_solved="", solution="",
-            outcome=outcome, project_id=project_id, language=language,
+            outcome=outcome, project_id=project_id, scope=scope, language=language,
             life_stage=life_stage, nutrient_score=nutrient_score,
             confidence=confidence, evidence=evidence,
             supersedes=supersedes, origin_ids=origin_ids,
@@ -311,7 +329,8 @@ class SwarmMemory:
                         physical_user=physical_user or "",
                         project_id=project_id, language=language,
                         life_stage=life_stage, outcome=outcome,
-                        confidence=confidence, total_chunks=total_chunks)
+                        confidence=confidence, total_chunks=total_chunks,
+                        metadata={"scope": scope})
         return memory_id
 
     def _docstore_put(self, doc_id: str, data: dict, doc_type: str = "memory"):
@@ -509,7 +528,7 @@ class SwarmMemory:
 
     def _build_metadata(self, *, title, content, category, tags,
                         source_agent, physical_user, problem_solved,
-                        solution, outcome, project_id, language,
+                        solution, outcome, project_id, scope, language,
                         life_stage, nutrient_score, confidence, evidence,
                         supersedes, origin_ids,
                         created, updated,
@@ -527,6 +546,7 @@ class SwarmMemory:
             "solution": solution,
             "outcome": outcome,
             "project_id": project_id,
+            "scope": scope,
             "language": language,
             "score": 1.0,
             "reuse_count": 0,
@@ -551,7 +571,7 @@ class SwarmMemory:
 
     def query(self, query_text: str = "", category: Optional[str] = None,
               tags: Optional[list[str]] = None, limit: int = 10,
-              project_id: Optional[str] = None,
+              project_id: Optional[str] = None, scope: Optional[str] = None,
               source_agent: Optional[str] = None,
               query_texts: Optional[list[str]] = None) -> list[dict]:
         """向量语义查询，支持多角度查询 + 分块聚合 + 可选 ReRanker 精排
@@ -563,16 +583,32 @@ class SwarmMemory:
           3. 按 doc_group_id 聚合分块（同一文档的多块合并）
           4. （可选）ReRanker 交叉编码器精排
           5. 返回按 final_score 降序的结果
+
+        记忆分类 scope（通用记忆 / 项目记忆隔离）:
+          - "general"  : 只返回通用记忆（project_id=""），不含任何项目记忆
+          - "project"  : 返回指定项目记忆 + 通用记忆（project_id=pid 或 ""）
+          - "all"      : 跨项目全量（进化/管理用），不做 scope 隔离
+          - None       : 兼容旧行为；传了 project_id 按项目查，否则按通用查
         """
         with self._stats_lock:
             self._stats["total_queries"] += 1
             self._dirty = True
 
-        # 构建 ChromaDB where 过滤条件
+        # 构建 ChromaDB where 过滤条件（scope 优先，兼容旧 project_id 语义）
         conditions = []
-        if project_id is not None:
+        if scope == "all":
+            pass  # 跨项目全量，不按项目隔离
+        elif scope == "general":
+            conditions.append({"project_id": ""})
+        elif scope == "project":
             pid = project_id if project_id else config.current_project_id
             conditions.append({"project_id": {"$in": [pid, ""]}})
+        elif project_id is not None:
+            pid = project_id if project_id else config.current_project_id
+            conditions.append({"project_id": {"$in": [pid, ""]}})
+        else:
+            # 默认（未指定 scope 且未传 project_id）→ 只查通用记忆
+            conditions.append({"project_id": ""})
         if category:
             conditions.append({"category": category})
         if source_agent:
@@ -665,6 +701,7 @@ class SwarmMemory:
                 "source_agent": meta.get("source_agent", "unknown"),
                 "physical_user": meta.get("physical_user", ""),
                 "project_id": meta.get("project_id", ""),
+                "scope": meta.get("scope", "project" if meta.get("project_id") else "general"),
                 "language": meta.get("language", ""),
                 # 分块元数据
                 "chunk_index": int(meta.get("chunk_index", 0)),
@@ -883,6 +920,7 @@ class SwarmMemory:
                 "source_agent": group.get("source_agent", "unknown"),
                 "physical_user": group.get("physical_user", ""),
                 "project_id": group.get("project_id", ""),
+                "scope": group.get("scope", "project" if group.get("project_id") else "general"),
                 "language": group.get("language", ""),
                 "total_chunks": len(chunks),
                 "final_score": max_score,  # ReRanker 可能覆盖
@@ -975,6 +1013,23 @@ class SwarmMemory:
             if pid:
                 projects.add(pid)
         return list(projects)
+
+    def scope_counts(self) -> dict:
+        """统计通用记忆 / 项目记忆数量（含各项目分布）"""
+        metadatas = self._store.get_all_metadata(limit=1000)
+        result = {"general": 0, "project": 0, "by_project": {}}
+        for meta in metadatas:
+            if meta.get("is_parent", False):
+                continue
+            scope = meta.get("scope") or (
+                "project" if meta.get("project_id") else "general")
+            if scope == "general":
+                result["general"] += 1
+            else:
+                result["project"] += 1
+                pid = meta.get("project_id", "") or "unknown"
+                result["by_project"][pid] = result["by_project"].get(pid, 0) + 1
+        return result
 
     def list_tags(self) -> list[str]:
         metadatas = self._store.get_all_metadata(limit=1000)
@@ -1240,6 +1295,7 @@ class SwarmMemory:
             "source_agent": meta.get("source_agent", ""),
             "physical_user": meta.get("physical_user", ""),
             "project_id": meta.get("project_id", ""),
+            "scope": meta.get("scope", "project" if meta.get("project_id") else "general"),
             "created": meta.get("created", ""),
             "total_chunks": meta.get("total_chunks", 1),
         }

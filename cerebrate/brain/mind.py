@@ -100,6 +100,11 @@ class CerebrateMind:
         return {
             "health": health,
             "total_memories": total_memories,
+            "memory_scope": {
+                "general": stats.get("scope", {}).get("general", 0),
+                "project": stats.get("scope", {}).get("project", 0),
+                "by_project": stats.get("scope", {}).get("by_project", {}),
+            },
             "quarantined_memories": lifecycle.get("quarantined", 0),
             "verified_skills": lifecycle.get("verified_skill", 0),
             "doctrines": lifecycle.get("doctrine", 0),
@@ -253,7 +258,12 @@ class Metacognition:
         for mid in swarm.get_all_memory_ids()[:500]:
             mem = swarm._load_memory(mid)
             if mem:
-                pid = mem.get("project_id", "") or "全局"
+                scope = mem.get("scope") or (
+                    "project" if mem.get("project_id") else "general")
+                if scope == "general":
+                    pid = "通用记忆"
+                else:
+                    pid = mem.get("project_id", "") or "全局"
                 proj_counts[pid] = proj_counts.get(pid, 0) + 1
         for proj, count in proj_counts.items():
             health[proj] = {"memories": count}

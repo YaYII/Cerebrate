@@ -75,7 +75,8 @@ class MemoryManager:
     def share_to_swarm(self, title: str, content: str, category: str, tags: list[str],
                         source_agent: str = "unknown", problem_solved: str = "",
                         solution: str = "", outcome: str = "success",
-                        project_id: str = "", life_stage: str = "memory",
+                        project_id: str = "", scope: str = "",
+                        life_stage: str = "memory",
                         nutrient_score: float = 1.0, confidence: float = 1.0,
                         evidence: str = "", supersedes: Optional[list[str]] = None,
                         origin_ids: Optional[list[str]] = None,
@@ -83,7 +84,7 @@ class MemoryManager:
                         memory_id: Optional[str] = None) -> str:
         memory_id = self.swarm.share(title, content, category, tags,
                                      source_agent, problem_solved, solution, outcome,
-                                     project_id, life_stage=life_stage,
+                                     project_id, scope=scope, life_stage=life_stage,
                                      nutrient_score=nutrient_score,
                                      confidence=confidence, evidence=evidence,
                                      supersedes=supersedes,
@@ -97,10 +98,11 @@ class MemoryManager:
     def query_swarm(self, query_text: str, category: Optional[str] = None,
                     tags: Optional[list[str]] = None, limit: int = 10,
                     project_id: Optional[str] = None,
+                    scope: Optional[str] = None,
                     source_agent: Optional[str] = None,
                     query_texts: Optional[list[str]] = None) -> list[dict]:
         return self.swarm.query(query_text, category, tags, limit,
-                                project_id, source_agent,
+                                project_id, scope, source_agent,
                                 query_texts=query_texts)
 
     def mark_swarm_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
@@ -194,14 +196,16 @@ class MemoryManager:
     def store_knowledge(self, title: str, content: str, source: str, topics: list[str],
                         is_policy: bool = False, policy_name: str = "",
                         version: str = "1.0", author: str = "",
-                        project_id: str = "") -> str:
+                        project_id: str = "", scope: str = "") -> str:
         return self.knowledge.store(title, content, source, topics,
-                                    is_policy, policy_name, version, author, project_id)
+                                    is_policy, policy_name, version, author,
+                                    project_id, scope)
 
     def lookup_knowledge(self, query: str, topic: Optional[str] = None,
                          exact_policy: bool = False,
-                         project_id: Optional[str] = None) -> list[dict]:
-        return self.knowledge.lookup(query, topic, exact_policy, project_id)
+                         project_id: Optional[str] = None,
+                         scope: Optional[str] = None) -> list[dict]:
+        return self.knowledge.lookup(query, topic, exact_policy, project_id, scope)
 
     def get_policy(self, policy_name: str) -> Optional[dict]:
         return self.knowledge.get_policy(policy_name)
@@ -242,6 +246,7 @@ class MemoryManager:
             "personal": {"user_count": len(self.personal.list_users())},
             "swarm": swarm_stats,
             "lifecycle": self.swarm.lifecycle_counts(),
+            "scope": self.swarm.scope_counts(),
             "knowledge": {
                 "document_count": kb_count,
                 "topic_count": len(self.knowledge.list_topics()),

@@ -73,9 +73,10 @@ class BrainAPI:
         user_id = payload.get("user") or payload.get(
             "user_id") or payload.get("agent_id") or "default"
         project_id = payload.get("project") or payload.get("project_id")
+        scope = payload.get("scope")
         agent_id = payload.get("agent_id", user_id)
         decision = DecisionRouter(self.mm).decide(
-            user_id, query, context={"project_id": project_id})
+            user_id, query, context={"project_id": project_id, "scope": scope})
         swarm = decision.get("swarm_knowledge", {})
         best = swarm.get("best_match")
         related = swarm.get("related", [])
@@ -330,7 +331,7 @@ class BrainAPI:
                     "path": "/v1/query",
                     "description": "搜索虫群记忆",
                     "params": {"query": "string (required)", "user": "string", "agent_id": "string",
-                               "project_id": "string"},
+                               "project_id": "string", "scope": "general|project|all（默认按 project_id 推断，未传只查通用记忆）"},
                     "returns": {"found": False, "swarm_result": None, "policy_result": None,
                                 "personal": {}, "recommendation": "new_experience|reuse|verify|cite_policy",
                                 "task": {"action": "...", "instructions": [], "next_commands": []}}
@@ -344,6 +345,7 @@ class BrainAPI:
                                "category": "coding|debugging|architecture|devops|performance|security|testing|config",
                                "tags": "comma,separated,tags", "agent_id": "string",
                                "problem": "string", "solution": "string", "project_id": "string",
+                               "scope": "general|project（默认按 project_id 推断）",
                                "life_stage": "nutrient|memory", "confidence": 1.0, "evidence": "", "validate": True},
                     "returns": {"memory_id": "string", "life_stage": "string", "agent": "string"}
                 },
@@ -483,6 +485,7 @@ class BrainAPI:
         if isinstance(supersedes_raw, str):
             supersedes_raw = [s.strip() for s in supersedes_raw.split(",") if s.strip()]
         project_id = payload.get("project") or payload.get("project_id", "")
+        scope = payload.get("scope", "")
         requested_stage = payload.get("life_stage", "memory")
         life_stage = requested_stage if requested_stage in self.CLIENT_LIFE_STAGES else "memory"
         confidence = float(payload.get("confidence", 1.0))
@@ -516,6 +519,7 @@ class BrainAPI:
             solution=payload.get("solution", ""),
             outcome=payload.get("outcome", "success"),
             project_id=project_id,
+            scope=scope,
             life_stage=life_stage,
             nutrient_score=float(payload.get("nutrient_score", 1.0)),
             confidence=confidence,
@@ -1121,11 +1125,12 @@ class BrainAPI:
     # ── 权威知识库 ──────────────────────────────────────
 
     def search_knowledge(self, query: str, topic: str = "",
-                         project_id: str = "") -> list[dict]:
+                         project_id: str = "", scope: str = "") -> list[dict]:
         """向量语义搜索权威知识库。"""
         t = topic.strip() if topic else None
         pid = project_id.strip() if project_id else None
-        return self.mm.lookup_knowledge(query, topic=t, project_id=pid)
+        s = scope.strip() if scope else None
+        return self.mm.lookup_knowledge(query, topic=t, project_id=pid, scope=s)
 
     def store_knowledge(self, payload: dict) -> dict:
         """手动写入权威知识库。"""
@@ -1146,6 +1151,7 @@ class BrainAPI:
             version=payload.get("version", "1.0"),
             author=payload.get("author", ""),
             project_id=payload.get("project_id", ""),
+            scope=payload.get("scope", ""),
         )
         self.events.append("knowledge.stored", payload.get("agent_id", "manual"),
                            {"doc_id": doc_id, "title": title})
@@ -1174,7 +1180,8 @@ class BrainAPI:
             raise ValueError("topic is required")
 
         # 搜索相关记忆
-        memories = self.mm.query_swarm(topic, limit=20)
+        # 蒸馏需要跨项目全量记忆（不受 scope 隔离影响）
+        memories = self.mm.query_swarm(topic, limit=20, scope="all")
         if len(memories) < 2:
             return {"distilled": False, "reason": f"相关记忆不足（当前{len(memories)}条，至少需要2条）。请先积累更多相关经验后再蒸馏。"}
 
@@ -1215,6 +1222,7 @@ class BrainAPI:
             version="1.0",
             author="cerebrate-evolution",
             project_id=payload.get("project_id", ""),
+            scope=payload.get("scope", ""),
         )
         self.events.append("knowledge.distilled", "on-demand",
                            {"doc_id": doc_id, "topic": topic, "source_count": len(full_memories)})

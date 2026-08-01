@@ -102,6 +102,49 @@ GET  /v1/llm/status         免疫系统状态
 
 POST `/v1/query` 是智能体的主入口。返回的 `task` 字段告诉智能体下一步该做什么。
 
+### 记忆分类（scope）：通用记忆 vs 项目记忆
+
+**核心原则：所有记忆和经验都有特定背景，不能依赖经验主义。**
+
+Cerebrate 将记忆分为两类：
+
+| scope       | 含义               | 查询可见范围                                    |
+| :---------- | :----------------- | :---------------------------------------------- |
+| `general`   | 通用记忆（跨项目） | 只返回通用记忆，**绝不混入项目记忆**            |
+| `project`   | 项目记忆           | 返回该项目记忆 + 通用记忆                       |
+| `all`       | 跨项目全量         | 进化/管理专用，不做 scope 隔离                  |
+
+写入规则（自动推导）：
+- 不传 `scope` 时，`project_id` 非空 → `scope=project`；`project_id` 为空 → `scope=general`
+- 显式传 `scope="general"` 会强制通用（即使传了 `project_id` 也会忽略）
+- 显式传 `scope="project"` 且未传 `project_id` 时使用 `CEREBRATE_PROJECT_ID`
+
+查询规则：
+- 不传 `project_id` 和 `scope` → 只查通用记忆（通用记忆只有通用记忆，不含项目记忆）
+- 传 `project_id` → 按项目查（项目记忆 + 通用记忆）
+- 传 `scope="general"` → 强制只查通用记忆
+- 传 `scope="project"` → 项目记忆 + 通用记忆
+- 传 `scope="all"` → 跨项目全量（进化/管理用）
+
+```bash
+# 只查通用记忆（不传 project_id 即默认通用）
+python3 cerebrate.py query --url http://127.0.0.1:8765 "登录鉴权最佳实践"
+
+# 查项目 A 的记忆（项目 A + 通用）
+python3 cerebrate.py query --url http://127.0.0.1:8765 "部署流水线" --project proj-a --scope project
+
+# 提交通用记忆（显式 scope=general）
+python3 cerebrate.py propose --url http://127.0.0.1:8765 --title "通用经验" \
+  --content "..." --category coding --scope general
+
+# 提交项目记忆
+python3 cerebrate.py propose --url http://127.0.0.1:8765 --title "项目经验" \
+  --content "..." --category coding --project proj-a
+```
+
+`GET /v1/sense` 返回 `memory_scope` 统计（通用/项目/按项目分布），
+`GET /v1/brain/assess` 的项目健康度会区分「通用记忆」与各项目。
+
 ### 请求
 
 ```bash
