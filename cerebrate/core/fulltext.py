@@ -73,13 +73,20 @@ class FullTextIndex:
                     doc_id TEXT PRIMARY KEY,
                     title TEXT, content TEXT, tags TEXT,
                     category TEXT, scope TEXT, project_id TEXT,
-                    created TEXT, updated TEXT
+                    created TEXT, updated TEXT,
+                    observation_type TEXT
                 )
                 """
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_meta_scope ON memories_meta(scope, project_id)"
             )
+            # 迁移：旧表无 observation_type 列时补充（CREATE IF NOT EXISTS 不会加列）
+            cols = [r[1] for r in conn.execute(
+                "PRAGMA table_info(memories_meta)").fetchall()]
+            if "observation_type" not in cols:
+                conn.execute(
+                    "ALTER TABLE memories_meta ADD COLUMN observation_type TEXT")
             conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -89,7 +96,8 @@ class FullTextIndex:
 
     def upsert(self, doc_id: str, *, title: str = "", content: str = "",
                tags: str = "", category: str = "", scope: str = "general",
-               project_id: str = "", created: str = "", updated: str = "") -> bool:
+               project_id: str = "", created: str = "", updated: str = "",
+               observation_type: str = "") -> bool:
         """写入/更新一条记忆的全文索引。"""
         if not self._ready or not doc_id:
             return False
@@ -104,16 +112,17 @@ class FullTextIndex:
                     (title, content, tags, category, scope, project_id, doc_id))
                 conn.execute(
                     """
-                    INSERT INTO memories_meta(doc_id, title, content, tags, category, scope, project_id, created, updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO memories_meta(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(doc_id) DO UPDATE SET
                         title=excluded.title, content=excluded.content,
                         tags=excluded.tags, category=excluded.category,
                         scope=excluded.scope, project_id=excluded.project_id,
-                        created=excluded.created, updated=excluded.updated
+                        created=excluded.created, updated=excluded.updated,
+                        observation_type=excluded.observation_type
                     """,
                     (doc_id, title, content, tags, category, scope,
-                     project_id, created, updated))
+                     project_id, created, updated, observation_type))
                 conn.commit()
             return True
         except Exception as e:
@@ -185,7 +194,7 @@ class FullTextIndex:
                 if fts_q != '""':
                     sql = (
                         "SELECT f.doc_id, m.title, m.category, m.scope, "
-                        "m.project_id, m.created, "
+                        "m.project_id, m.created, m.observation_type, "
                         "length(m.content) AS content_len, "
                         "snippet(memories_fts, 1, '[', ']', '…', 12) AS snippet "
                         "FROM memories_fts f "
@@ -201,6 +210,7 @@ class FullTextIndex:
                 if len(rows) < limit:
                     sql = (
                         "SELECT doc_id, title, category, scope, project_id, created, "
+                        "observation_type, "
                         "length(content) AS content_len, '' AS snippet "
                         "FROM memories_meta "
                         "WHERE (title LIKE ? OR content LIKE ?)" +
@@ -227,6 +237,7 @@ class FullTextIndex:
                         "scope": r["scope"],
                         "project_id": r["project_id"],
                         "created": r["created"],
+                        "observation_type": r["observation_type"] or "",
                         "token_estimate": max(1, int((r["content_len"] or 0) // 4)),
                         "source": "fulltext",
                         "snippet": r["snippet"] or "",

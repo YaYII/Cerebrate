@@ -319,7 +319,8 @@ class SwarmMemory:
             self._fts_upsert(memory_id, title=title, content=content,
                              tags=",".join(tags), category=category,
                              scope=scope, project_id=project_id,
-                             created=now, updated=now)
+                             created=now, updated=now,
+                             observation_type=observation_type)
             # 同步元数据到 PostgreSQL
             self._sync_meta(memory_id, title=title, category=category,
                             tags=tags, source_agent=source_agent,
@@ -424,7 +425,8 @@ class SwarmMemory:
         self._fts_upsert(memory_id, title=title, content=content,
                          tags=",".join(tags), category=category,
                          scope=scope, project_id=project_id,
-                         created=now, updated=now)
+                         created=now, updated=now,
+                         observation_type=observation_type)
         # 同步元数据到 PostgreSQL
         self._sync_meta(memory_id, title=title, category=category,
                         tags=tags, source_agent=source_agent,
@@ -691,7 +693,8 @@ class SwarmMemory:
 
     def _fts_upsert(self, memory_id: str, *, title: str, content: str,
                     tags: str, category: str, scope: str, project_id: str,
-                    created: str, updated: str) -> bool:
+                    created: str, updated: str,
+                    observation_type: str = "") -> bool:
         """双写 FTS5（失败静默降级，不影响主写入路径）。"""
         fts = self._get_fulltext()
         if not fts or not fts.available:
@@ -699,7 +702,8 @@ class SwarmMemory:
         return fts.upsert(
             memory_id, title=title, content=content, tags=tags,
             category=category, scope=scope, project_id=project_id,
-            created=created, updated=updated)
+            created=created, updated=updated,
+            observation_type=observation_type or observation_type_for(category))
 
     def fulltext_query(self, query_text: str, limit: int = 20,
                        project_id: Optional[str] = None,
@@ -734,7 +738,7 @@ class SwarmMemory:
                 if not mem:
                     continue
                 meta = mem
-                self._fts_upsert(
+                ok = self._fts_upsert(
                     eid, title=meta.get("title", ""),
                     content=meta.get("content", ""),
                     tags=",".join(meta.get("tags", []) or []),
@@ -742,8 +746,12 @@ class SwarmMemory:
                     scope=meta.get("scope", "general"),
                     project_id=meta.get("project_id", ""),
                     created=meta.get("created", ""),
-                    updated=meta.get("updated", ""))
-                indexed += 1
+                    updated=meta.get("updated", ""),
+                    observation_type=meta.get("observation_type", ""))
+                if ok:
+                    indexed += 1
+                else:
+                    failed += 1
             except Exception:
                 failed += 1
         return {
