@@ -81,7 +81,12 @@ class MemoryVectorKernelTests(unittest.TestCase):
     def test_legacy_semantic_index_code_is_not_exposed(self):
         from cerebrate.config import config
 
-        self.assertIsNone(importlib.util.find_spec("memory.semantic"))
+        # find_spec 对不存在的顶级包会抛 ModuleNotFoundError 而非返回 None
+        try:
+            spec = importlib.util.find_spec("memory.semantic")
+        except ModuleNotFoundError:
+            spec = None
+        self.assertIsNone(spec)
         self.assertFalse(hasattr(config, "semantic_index_path"))
 
     def test_brain_sense_reports_vector_index(self):

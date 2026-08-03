@@ -164,6 +164,7 @@ class HttpBrainServerTests(unittest.TestCase):
         self.env["CEREBRATE_MEMORY_ROOT"] = str(Path(self.tmp.name) / "memory")
         self.env["CEREBRATE_EMBEDDING_MODEL"] = "not-a-real-local-model"
         self.env["CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD"] = "false"
+        self.env["CEREBRATE_MEMORY_MIN_TOKENS"] = "0"  # 测试用短内容，不做长度限制
         self.env["CEREBRATE_SERVER_TOKEN"] = ""
         self.env["PYTHONPYCACHEPREFIX"] = str(Path(self.tmp.name) / "pycache")
         self.proc = subprocess.Popen(

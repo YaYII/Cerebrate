@@ -23,6 +23,30 @@ class KnowledgeBase:
         engine = get_embedding_engine(config.embedding_model, config.embedding_device)
         self._store = ChromaStore(config.chroma_path, "knowledge_base", engine)
 
+    def _get_fulltext(self):
+        """懒加载知识库 FTS5 全文索引（独立 db + 表前缀，与 swarm 隔离）。"""
+        if not config.fulltext_enabled:
+            return None
+        if not hasattr(self, "_fulltext_cache"):
+            from cerebrate.core.fulltext import FullTextIndex
+            self._fulltext_cache = FullTextIndex(
+                Path(config.memory_root) / "knowledge_fulltext.sqlite3",
+                table_prefix="knowledge")
+        return self._fulltext_cache
+
+    def _fts_upsert(self, doc_id: str, *, title: str, content: str,
+                    tags: str, scope: str, project_id: str,
+                    created: str, updated: str) -> bool:
+        """双写 FTS5（失败静默降级，不影响主写入路径）。"""
+        fts = self._get_fulltext()
+        if not fts or not fts.available:
+            return False
+        return fts.upsert(
+            doc_id, title=title, content=content, tags=tags,
+            category="knowledge", scope=scope, project_id=project_id,
+            created=created, updated=updated,
+            observation_type="knowledge")
+
     def _build_hash_index(self):
         """启动时扫描一次，建立 content hash → doc_id 索引"""
         self._hash_index.clear()
@@ -84,7 +108,54 @@ class KnowledgeBase:
 
         self._store.add(doc_id, search_text, metadata)
         self._hash_index[doc_hash] = doc_id
+        # 双写 FTS5 全文索引（精确关键词检索）
+        self._fts_upsert(doc_id, title=title, content=content,
+                         tags=",".join(topics), scope=scope,
+                         project_id=project_id, created=now, updated=now)
         return doc_id
+
+    def fulltext_query(self, query: str, limit: int = 20,
+                       scope: Optional[str] = None,
+                       project_id: Optional[str] = None) -> list[dict]:
+        """知识库 FTS5 全文检索（精确关键词：命令/错误码/策略名）。"""
+        fts = self._get_fulltext()
+        if not fts or not fts.available:
+            return []
+        return fts.search(query, limit=limit, scope=scope, project_id=project_id)
+
+    def rebuild_fulltext(self, batch_size: int = 200) -> dict:
+        """从 ChromaDB 全量重建知识库 FTS5 索引。"""
+        fts = self._get_fulltext()
+        if not fts:
+            return {"status": "skipped", "reason": "fulltext disabled"}
+        if not fts.available:
+            return {"status": "error", "reason": "fulltext unavailable"}
+        fts.clear()
+        indexed = 0
+        failed = 0
+        for did in self._store.get_all_ids():
+            item = self._store.get(did)
+            if not item:
+                continue
+            meta = item["metadata"]
+            ok = self._fts_upsert(
+                did, title=meta.get("title", ""),
+                content=meta.get("content", ""),
+                tags=meta.get("topics", ""),
+                scope=meta.get("scope", "general"),
+                project_id=meta.get("project_id", ""),
+                created=meta.get("created", ""),
+                updated=meta.get("updated", ""))
+            if ok:
+                indexed += 1
+            else:
+                failed += 1
+        return {
+            "status": "ok",
+            "indexed": indexed,
+            "failed": failed,
+            "total": fts.count(),
+        }
 
     # ==================== 查询 ====================
 
@@ -182,6 +253,14 @@ class KnowledgeBase:
             meta["updated"] = datetime.now(timezone.utc).isoformat()
             text = f"{meta.get('title','')}\n{meta.get('content','')}"
             self._store.upsert(doc_id, text, meta)
+            self._fts_upsert(
+                doc_id, title=meta.get("title", ""),
+                content=meta.get("content", ""),
+                tags=meta.get("topics", ""),
+                scope=meta.get("scope", "general"),
+                project_id=meta.get("project_id", ""),
+                created=meta.get("created", ""),
+                updated=meta.get("updated", ""))
 
     def deprecate(self, doc_id: str):
         item = self._store.get(doc_id)
@@ -191,6 +270,14 @@ class KnowledgeBase:
             meta["updated"] = datetime.now(timezone.utc).isoformat()
             text = f"{meta.get('title','')}\n{meta.get('content','')}"
             self._store.upsert(doc_id, text, meta)
+            self._fts_upsert(
+                doc_id, title=meta.get("title", ""),
+                content=meta.get("content", ""),
+                tags=meta.get("topics", ""),
+                scope=meta.get("scope", "general"),
+                project_id=meta.get("project_id", ""),
+                created=meta.get("created", ""),
+                updated=meta.get("updated", ""))
 
     def list_topics(self) -> list[str]:
         topics = set()
@@ -224,4 +311,11 @@ class KnowledgeBase:
             meta.update(metadata)
         text = f"{title}\n{content[:500]}"
         self._store.upsert(doc_id, text, meta)
+        self._fts_upsert(
+            doc_id, title=title, content=content,
+            tags=meta.get("topics", ""),
+            scope=meta.get("scope", "general"),
+            project_id=meta.get("project_id", ""),
+            created=meta.get("created", ""),
+            updated=meta.get("updated", ""))
         return True

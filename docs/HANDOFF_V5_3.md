@@ -4,6 +4,10 @@
 > 交接人：AI 工程师（v5.3 实施）
 > 上游文档：`docs/DESIGN_OPTIMIZATION_V5_3.md`（设计+实施记录）、`docs/MEMORY_SCOPE_UPGRADE.md`（v5.2）
 
+> **状态更新（2026-08-03，v5.4 接续）**：本交接文档的"待提交"状态已由 v5.4 完成 ——
+> v5.3 提交已推入 main（094a953 + be3656d），13 个失败测试全部清零，
+> knowledge 已接入 FTS5，sense 新增 recent_index。见 `docs/HANDOFF_V5_4.md`。
+
 ---
 
 ## 1. 任务背景与需求

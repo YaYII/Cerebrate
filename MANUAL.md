@@ -100,6 +100,16 @@ GET  /v1/brain/assess       元认知评估
 GET  /v1/llm/status         免疫系统状态
 ```
 
+`POST /v1/fulltext/rebuild` 会同时重建两类 FTS5 索引：
+
+```
+swarm 记忆（memories_fulltext.sqlite3）  ← 主记忆全文索引
+知识库（knowledge_fulltext.sqlite3）     ← 权威知识全文索引（v5.3 补全）
+```
+
+`GET /v1/sense` 额外返回 `recent_index`（最近记忆紧凑索引，含 token 成本），
+会话开始即见「存在什么 + 取它要花多少 token」。
+
 ---
 
 ## 6. 核心流程：以 query 为中心

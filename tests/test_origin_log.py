@@ -248,11 +248,11 @@ class OriginLogTests(unittest.TestCase):
             "validate": False,
         })
 
-        # 触发进化合并
+        # 触发进化聚类（v5 语义聚类：标记 cluster_id，不删除记忆）
         from cerebrate.config import config
         from cerebrate.memory.evolution import EvolutionEngine
         engine = EvolutionEngine(config.evolution_path, api.mm)
-        merged = engine._deduplicate_semantic(threshold=0.75)
+        merged = engine._cluster_semantic(threshold=0.75)
 
         if merged > 0:
             # 保留的记忆应包含双方的 origin_ids

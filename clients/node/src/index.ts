@@ -42,6 +42,9 @@ function jsonReq<T>(baseUrl: string, method: string, path: string, body?: Record
     };
     if (bodyText) {
       (opts.headers as Record<string,string>)["Content-Type"] = "application/json; charset=utf-8";
+      // 显式设置 Content-Length：node 默认使用 chunked 编码，
+      // Python BaseHTTPRequestHandler 不解析 chunked body，会读到空 payload
+      (opts.headers as Record<string,string>)["Content-Length"] = Buffer.byteLength(bodyText).toString();
       // timeout set on req.setTimeout below
     }
     const req = httpRequest(opts, (res) => {

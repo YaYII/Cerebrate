@@ -83,6 +83,14 @@ class DocStoreFormatTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def md_path(self, doc_id: str) -> Path:
+        """新版子目录结构: {type}/content/{id}.md（put 默认 type=memory）"""
+        return self.ds.storage_path / "memory" / "content" / f"{doc_id}.md"
+
+    def json_path(self, doc_id: str) -> Path:
+        """新版子目录结构: {type}/meta/{id}.json（put 默认 type=memory）"""
+        return self.ds.storage_path / "memory" / "meta" / f"{doc_id}.json"
+
     def test_md_file_is_pure_text(self):
         """.md 文件是纯文本，无 JSON 包裹"""
         self.ds.put("doc1", {
@@ -92,7 +100,7 @@ class DocStoreFormatTests(unittest.TestCase):
             "solution": "方案",
             "total_chunks": 1,
         })
-        md_path = self.ds.storage_path / "doc1.md"
+        md_path = self.md_path("doc1")
         raw = md_path.read_text(encoding='utf-8')
         # 必须是纯 Markdown 开头，不能是 { "content":
         self.assertTrue(raw.startswith("#"), f".md 应以 Markdown 开头, 实际: {raw[:50]}")
@@ -110,7 +118,7 @@ class DocStoreFormatTests(unittest.TestCase):
             "source_agent": "test",
             "total_chunks": 1,
         })
-        json_path = self.ds.storage_path / "doc2.json"
+        json_path = self.json_path("doc2")
         meta = json.loads(json_path.read_text(encoding='utf-8'))
         self.assertNotIn("content", meta, ".json 不应包含 content")
         self.assertNotIn("full_content", meta, ".json 不应包含 full_content")
@@ -162,7 +170,7 @@ class DocStoreFormatTests(unittest.TestCase):
             "content": "这是一个独特的词: XYZ_UNIQUE_TOKEN_12345",
             "total_chunks": 1,
         })
-        md_path = self.ds.storage_path / "grep-test.md"
+        md_path = self.md_path("grep-test")
         result = subprocess.run(
             ["grep", "XYZ_UNIQUE_TOKEN_12345", str(md_path)],
             capture_output=True, text=True)
@@ -177,7 +185,7 @@ class DocStoreFormatTests(unittest.TestCase):
             "content": "第一行\n第二行\n第三行",
             "total_chunks": 1,
         })
-        md_path = self.ds.storage_path / "diff-test.md"
+        md_path = self.md_path("diff-test")
         lines = md_path.read_text(encoding='utf-8').split("\n")
         self.assertEqual(lines[0], "第一行")
         self.assertEqual(lines[1], "第二行")
@@ -189,8 +197,8 @@ class DocStoreFormatTests(unittest.TestCase):
             "content": "待删除内容",
             "total_chunks": 1,
         })
-        md_path = self.ds.storage_path / "del-test.md"
-        json_path = self.ds.storage_path / "del-test.json"
+        md_path = self.md_path("del-test")
+        json_path = self.json_path("del-test")
         self.assertTrue(md_path.exists())
         self.assertTrue(json_path.exists())
         self.ds.delete("del-test")
@@ -206,7 +214,7 @@ class DocStoreFormatTests(unittest.TestCase):
         })
         self.assertTrue(self.ds.exists("exist-test"))
         # 只删 .json，.md 还在
-        self.ds.storage_path.joinpath("exist-test.json").unlink()
+        self.json_path("exist-test").unlink()
         self.assertTrue(self.ds.exists("exist-test"))
         # 全清
         self.ds.delete("exist-test")
@@ -602,7 +610,11 @@ class EmbeddingSummaryTests(unittest.TestCase):
         self.assertIn("怎么解决的", text)
 
     def test_chroma_document_text_is_summary(self):
-        """写入 ChromaDB 的 documents 字段是摘要而非全文"""
+        """长文档分块后，ChromaDB 父条目只存标题摘要而非全文。
+
+        设计说明（v5）：短记忆（不分块）全文直接入向量库是刻意行为，
+        长文档分块后父条目 ChromaDB 只存标题（摘要），全文在 DocumentStore。
+        """
         from cerebrate.memory.swarm import SwarmMemory
         from cerebrate.config import config
 
@@ -610,7 +622,8 @@ class EmbeddingSummaryTests(unittest.TestCase):
         config.swarm_path = Path(self.tmp.name) / "swarm"
         config.chroma_path = Path(self.tmp.name) / "chroma"
         config.docstore_path = Path(self.tmp.name) / "docstore"
-        config.chunk_enabled = False
+        config.chunk_enabled = True
+        config.chunk_max_chars = 2000  # 强制 7500 字符长文档走分块路径
         import cerebrate.core.embedding as embedding
         embedding._engine = None
 
@@ -623,10 +636,10 @@ class EmbeddingSummaryTests(unittest.TestCase):
             tags=[],
             source_agent="test",
         )
-        # 直接检查 ChromaDB 的 documents 字段
+        # 直接检查 ChromaDB 父条目的 documents 字段（分块后只存标题）
         item = swarm._store.get(mid)
         chroma_doc = item.get("document", "")
-        # ChromaDB 的文档文本应远短于原文（因为是摘要）
+        # ChromaDB 父条目的文档文本应远短于原文（只存标题/摘要）
         self.assertLess(len(chroma_doc), len(full) * 0.5,
                         f"ChromaDB 文档文本 ({len(chroma_doc)}) 应远短于原文 ({len(full)})")
         # 应包含标题

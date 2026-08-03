@@ -36,10 +36,17 @@ def _escape_fts(query: str) -> str:
 
 
 class FullTextIndex:
-    """SQLite FTS5 全文索引（线程安全）。"""
+    """SQLite FTS5 全文索引（线程安全）。
 
-    def __init__(self, db_path: Path):
+    table_prefix: 表名前缀，用于隔离不同数据域（如 memories / knowledge）。
+    同一 db 文件可用多个 prefix；不同 prefix 各自独立 FTS5 表。
+    """
+
+    def __init__(self, db_path: Path, table_prefix: str = "memories"):
         self.db_path = Path(db_path)
+        self._prefix = table_prefix
+        self._fts_table = f"{table_prefix}_fts"
+        self._meta_table = f"{table_prefix}_meta"
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -60,33 +67,35 @@ class FullTextIndex:
         with self._lock, sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                CREATE VIRTUAL TABLE IF NOT EXISTS {fts} USING fts5(
                     title, content, tags, category, scope, project_id,
                     doc_id UNINDEXED,
                     tokenize='trigram'
                 )
-                """
+                """.format(fts=self._fts_table)
             )
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS memories_meta (
+                CREATE TABLE IF NOT EXISTS {meta} (
                     doc_id TEXT PRIMARY KEY,
                     title TEXT, content TEXT, tags TEXT,
                     category TEXT, scope TEXT, project_id TEXT,
                     created TEXT, updated TEXT,
                     observation_type TEXT
                 )
-                """
+                """.format(meta=self._meta_table)
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_meta_scope ON memories_meta(scope, project_id)"
+                "CREATE INDEX IF NOT EXISTS idx_{p}_meta_scope ON {meta}(scope, project_id)".format(
+                    p=self._prefix, meta=self._meta_table)
             )
             # 迁移：旧表无 observation_type 列时补充（CREATE IF NOT EXISTS 不会加列）
             cols = [r[1] for r in conn.execute(
-                "PRAGMA table_info(memories_meta)").fetchall()]
+                "PRAGMA table_info({meta})".format(meta=self._meta_table)).fetchall()]
             if "observation_type" not in cols:
                 conn.execute(
-                    "ALTER TABLE memories_meta ADD COLUMN observation_type TEXT")
+                    "ALTER TABLE {meta} ADD COLUMN observation_type TEXT".format(
+                        meta=self._meta_table))
             conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -105,14 +114,14 @@ class FullTextIndex:
         try:
             with self._lock, self._conn() as conn:
                 conn.execute(
-                    "DELETE FROM memories_fts WHERE doc_id = ?", (doc_id,))
+                    "DELETE FROM {fts} WHERE doc_id = ?".format(fts=self._fts_table), (doc_id,))
                 conn.execute(
-                    "INSERT INTO memories_fts(title, content, tags, category, scope, project_id, doc_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO {fts}(title, content, tags, category, scope, project_id, doc_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)".format(fts=self._fts_table),
                     (title, content, tags, category, scope, project_id, doc_id))
                 conn.execute(
                     """
-                    INSERT INTO memories_meta(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type)
+                    INSERT INTO {meta}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(doc_id) DO UPDATE SET
                         title=excluded.title, content=excluded.content,
@@ -120,7 +129,7 @@ class FullTextIndex:
                         scope=excluded.scope, project_id=excluded.project_id,
                         created=excluded.created, updated=excluded.updated,
                         observation_type=excluded.observation_type
-                    """,
+                    """.format(meta=self._meta_table),
                     (doc_id, title, content, tags, category, scope,
                      project_id, created, updated, observation_type))
                 conn.commit()
@@ -135,9 +144,9 @@ class FullTextIndex:
         try:
             with self._lock, self._conn() as conn:
                 conn.execute(
-                    "DELETE FROM memories_fts WHERE doc_id = ?", (doc_id,))
+                    "DELETE FROM {fts} WHERE doc_id = ?".format(fts=self._fts_table), (doc_id,))
                 conn.execute(
-                    "DELETE FROM memories_meta WHERE doc_id = ?", (doc_id,))
+                    "DELETE FROM {meta} WHERE doc_id = ?".format(meta=self._meta_table), (doc_id,))
                 conn.commit()
             return True
         except Exception as e:
@@ -196,12 +205,12 @@ class FullTextIndex:
                         "SELECT f.doc_id, m.title, m.category, m.scope, "
                         "m.project_id, m.created, m.observation_type, "
                         "length(m.content) AS content_len, "
-                        "snippet(memories_fts, 1, '[', ']', '…', 12) AS snippet "
-                        "FROM memories_fts f "
-                        "JOIN memories_meta m ON m.doc_id = f.doc_id "
-                        "WHERE memories_fts MATCH ?" + scope_cond + cat_cond +
-                        " ORDER BY bm25(memories_fts) LIMIT ?"
-                    )
+                        "snippet({fts}, 1, '[', ']', '…', 12) AS snippet "
+                        "FROM {fts} f "
+                        "JOIN {meta} m ON m.doc_id = f.doc_id "
+                        "WHERE {fts} MATCH ?" + scope_cond + cat_cond +
+                        " ORDER BY bm25({fts}) LIMIT ?"
+                    ).format(fts=self._fts_table, meta=self._meta_table)
                     rows = conn.execute(sql, (fts_q, limit * 3)).fetchall()
 
                 # 2. LIKE 回退（中文 1-2 字词、FTS 漏网）
@@ -212,10 +221,10 @@ class FullTextIndex:
                         "SELECT doc_id, title, category, scope, project_id, created, "
                         "observation_type, "
                         "length(content) AS content_len, '' AS snippet "
-                        "FROM memories_meta "
+                        "FROM {meta} "
                         "WHERE (title LIKE ? OR content LIKE ?)" +
                         scope_cond_like + cat_cond_like + " LIMIT ?"
-                    )
+                    ).format(meta=self._meta_table)
                     try:
                         like_rows = conn.execute(
                             sql, (like_q, like_q, limit)).fetchall()
@@ -255,17 +264,55 @@ class FullTextIndex:
         try:
             with self._conn() as conn:
                 return conn.execute(
-                    "SELECT COUNT(*) FROM memories_meta").fetchone()[0]
+                    "SELECT COUNT(*) FROM {meta}".format(
+                        meta=self._meta_table)).fetchone()[0]
         except Exception:
             return 0
+
+    def recent(self, limit: int = 10,
+               scope: Optional[str] = None,
+               project_id: Optional[str] = None) -> list[dict]:
+        """最近写入的文档紧凑索引（按 created 倒序）。
+
+        Phase 5：sense 返回"最近记忆紧凑索引"（含 token 成本），
+        让会话开始即见"存在什么 + 取它要花多少 token"。
+        """
+        if not self._ready:
+            return []
+        scope_cond = self._scope_conditions(scope, project_id, prefix="m")
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT doc_id, title, category, scope, project_id, created, "
+                    "observation_type, length(content) AS content_len "
+                    "FROM {meta} m WHERE 1=1".format(meta=self._meta_table)
+                    + scope_cond + " ORDER BY created DESC LIMIT ?",
+                    (limit,)).fetchall()
+            result = []
+            for r in rows:
+                result.append({
+                    "memory_id": r["doc_id"],
+                    "title": r["title"],
+                    "category": r["category"],
+                    "scope": r["scope"],
+                    "project_id": r["project_id"],
+                    "created": r["created"],
+                    "observation_type": r["observation_type"] or "",
+                    "token_estimate": max(1, int((r["content_len"] or 0) // 4)),
+                    "source": "recent",
+                })
+            return result
+        except Exception as e:
+            logger.warning(f"FTS recent 失败: {e}")
+            return []
 
     def clear(self) -> bool:
         if not self._ready:
             return False
         try:
             with self._lock, self._conn() as conn:
-                conn.execute("DELETE FROM memories_fts")
-                conn.execute("DELETE FROM memories_meta")
+                conn.execute("DELETE FROM {fts}".format(fts=self._fts_table))
+                conn.execute("DELETE FROM {meta}".format(meta=self._meta_table))
                 conn.commit()
             return True
         except Exception as e:

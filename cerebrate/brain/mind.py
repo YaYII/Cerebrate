@@ -105,6 +105,7 @@ class CerebrateMind:
                 "project": stats.get("scope", {}).get("project", 0),
                 "by_project": stats.get("scope", {}).get("by_project", {}),
             },
+            "recent_index": self._recent_index(),
             "quarantined_memories": lifecycle.get("quarantined", 0),
             "verified_skills": lifecycle.get("verified_skill", 0),
             "doctrines": lifecycle.get("doctrine", 0),
@@ -115,6 +116,18 @@ class CerebrateMind:
             "embedding_mode": vector.get("embedding_mode", "unknown"),
             "last_evolution": self._last_evolution_time(),
         }
+
+    def _recent_index(self, limit: int = 10) -> list[dict]:
+        """最近记忆紧凑索引（含 token 成本），供 sense 展示。
+
+        Phase 5（对齐 claude-mem）：会话开始即见"存在什么 + 取它要花多少 token"。
+        FTS 索引未就绪时返回空列表，不阻塞 sense。
+        """
+        try:
+            return self.mm.swarm.recent_index(
+                limit=limit, scope="all")
+        except Exception:
+            return []
 
     def _last_evolution_time(self) -> str:
         # 从 ChromaDB evolution_logs 读取最后时间

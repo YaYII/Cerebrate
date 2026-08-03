@@ -719,6 +719,19 @@ class SwarmMemory:
         return fts.search(query_text, limit=limit, scope=scope,
                           project_id=project_id, category=category)
 
+    def recent_index(self, limit: int = 10,
+                     project_id: Optional[str] = None,
+                     scope: Optional[str] = None) -> list[dict]:
+        """最近记忆紧凑索引（Phase 5）：会话开始即见存在什么 + token 成本。
+
+        数据源优先 FTS5 meta 表（轻量）；FTS 不可用时降级返回空列表
+        （sense 是低风险读路径，不因索引缺失阻塞）。
+        """
+        fts = self._get_fulltext()
+        if not fts or not fts.available:
+            return []
+        return fts.recent(limit=limit, scope=scope, project_id=project_id)
+
     def rebuild_fulltext(self, batch_size: int = 200) -> dict:
         """从 DocStore + ChromaDB 全量重建 FTS5 索引。"""
         fts = self._get_fulltext()
@@ -1540,8 +1553,8 @@ class SwarmMemory:
             "nutrient_score": meta.get("nutrient_score", 1.0),
             "confidence": meta.get("confidence", 1.0),
             "evidence": meta.get("evidence", ""),
-            "supersedes": [s for s in ((meta.get("supersedes") or "") if isinstance(meta.get("supersedes"), str) else meta.get("supersedes") or []) if s],
-            "origin_ids": [s for s in ((meta.get("origin_ids") or "") if isinstance(meta.get("origin_ids"), str) else meta.get("origin_ids") or []) if s],
+            "supersedes": _safe_split(meta.get("supersedes")),
+            "origin_ids": _safe_split(meta.get("origin_ids")),
             "category": meta.get("category", ""),
             "observation_type": meta.get("observation_type", ""),
             "facts": _safe_split(meta.get("facts")),

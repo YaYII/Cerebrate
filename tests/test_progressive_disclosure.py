@@ -159,6 +159,43 @@ class ProgressiveDisclosureTests(unittest.TestCase):
         result = api.timeline({"anchor": "nonexistent-id"})
         self.assertFalse(result["found"])
 
+    def test_sense_returns_recent_index(self):
+        """sense 返回最近记忆紧凑索引（含 token 成本）— Phase 5。"""
+        from cerebrate.server.api import BrainAPI
+        api = BrainAPI()
+        api.register_agent({
+            "agent_id": "sense-recent",
+            "capabilities": ["testing"],
+            "physical_user": "tester",
+        })
+        api.propose_memory({
+            "title": "最近记忆甲",
+            "content": "第一条最近记忆内容验证。",
+            "category": "testing",
+            "agent_id": "sense-recent",
+            "validate": False,
+        })
+        api.propose_memory({
+            "title": "最近记忆乙",
+            "content": "第二条最近记忆内容验证。",
+            "category": "testing",
+            "agent_id": "sense-recent",
+            "validate": False,
+        })
+        sense = api.sense()
+        index = sense.get("recent_index", [])
+        self.assertIsInstance(index, list)
+        self.assertGreaterEqual(len(index), 2)
+        # 紧凑索引：不含 content，含 token 成本
+        first = index[0]
+        self.assertIn("memory_id", first)
+        self.assertIn("title", first)
+        self.assertIn("token_estimate", first)
+        self.assertNotIn("content", first)
+        # 按 created 倒序（最近的在最前）
+        titles = [m["title"] for m in index]
+        self.assertIn("最近记忆乙", titles)
+
 
 if __name__ == "__main__":
     unittest.main()

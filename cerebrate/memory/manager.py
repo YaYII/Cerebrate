@@ -121,8 +121,29 @@ class MemoryManager:
             query_text, limit=limit, project_id=project_id,
             scope=scope, category=category)
 
+    def fulltext_query_knowledge(self, query_text: str, limit: int = 20,
+                                 project_id: Optional[str] = None,
+                                 scope: Optional[str] = None) -> list[dict]:
+        return self.knowledge.fulltext_query(
+            query_text, limit=limit, project_id=project_id, scope=scope)
+
     def rebuild_fulltext(self, batch_size: int = 200) -> dict:
-        return self.swarm.rebuild_fulltext(batch_size=batch_size)
+        """全量重建 FTS5 索引（swarm 记忆 + 权威知识库）。"""
+        swarm_result = self.swarm.rebuild_fulltext(batch_size=batch_size)
+        kb_result = self.knowledge.rebuild_fulltext(batch_size=batch_size)
+        ok = (swarm_result.get("status") == "ok"
+              or kb_result.get("status") == "ok")
+        return {
+            "status": "ok" if ok else "error",
+            "indexed": (swarm_result.get("indexed", 0) or 0)
+            + (kb_result.get("indexed", 0) or 0),
+            "failed": (swarm_result.get("failed", 0) or 0)
+            + (kb_result.get("failed", 0) or 0),
+            "total": (swarm_result.get("total", 0) or 0)
+            + (kb_result.get("total", 0) or 0),
+            "swarm": swarm_result,
+            "knowledge": kb_result,
+        }
 
     def mark_swarm_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
         self.swarm.mark_reused(memory_id, success, feedback)
