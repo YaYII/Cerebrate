@@ -5,6 +5,8 @@ import type {
   EventsData,
   EvolveData,
   HelpData,
+  ProjectContextData,
+  ProjectContextParams,
   ProposeData,
   ProposeParams,
   QueryData,
@@ -31,7 +33,7 @@ function parseUrl(raw: string) {
   return { hostname: u.hostname, port: parseInt(u.port || "8765", 10), protocol: u.protocol };
 }
 
-function jsonReq<T>(baseUrl: string, method: string, path: string, body?: Record<string, unknown>, timeout?: number): Promise<CerebrateResponse<T>> {
+function jsonReq<T>(baseUrl: string, method: string, path: string, body?: Record<string, unknown>, timeout?: number, token?: string): Promise<CerebrateResponse<T>> {
   return new Promise((resolve) => {
     const { hostname, port } = parseUrl(baseUrl);
     const bodyText = body ? JSON.stringify(body) : undefined;
@@ -40,6 +42,9 @@ function jsonReq<T>(baseUrl: string, method: string, path: string, body?: Record
       timeout: timeout ?? DEFAULT_TIMEOUT_MS,
       headers: { Accept: "application/json" },
     };
+    if (token) {
+      (opts.headers as Record<string,string>)["Authorization"] = `Bearer ${token}`;
+    }
     if (bodyText) {
       (opts.headers as Record<string,string>)["Content-Type"] = "application/json; charset=utf-8";
       // 显式设置 Content-Length：node 默认使用 chunked 编码，
@@ -73,16 +78,18 @@ function getQSParams(params?: Record<string, string | number>): string {
 export class BrainClient {
   readonly baseUrl: string;
   readonly timeout: number;
+  readonly token: string;
   constructor(options: BrainClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+    this.token = options.token ?? process.env.CEREBRATE_SERVER_TOKEN ?? "";
   }
 
   private get<T>(path: string, params?: Record<string, string | number>) {
-    return jsonReq<T>(this.baseUrl, "GET", path + getQSParams(params), undefined, this.timeout);
+    return jsonReq<T>(this.baseUrl, "GET", path + getQSParams(params), undefined, this.timeout, this.token);
   }
   private post<T>(path: string, payload: Record<string, unknown> = {}) {
-    return jsonReq<T>(this.baseUrl, "POST", path, payload, this.timeout);
+    return jsonReq<T>(this.baseUrl, "POST", path, payload, this.timeout, this.token);
   }
 
   sense() { return this.get<SenseData>("/v1/sense"); }
@@ -104,4 +111,5 @@ export class BrainClient {
   setPersonal(params: { user: string; key: string; value: string; project_id?: string }) { return this.post<{ stored: boolean }>("/v1/personal", params as unknown as Record<string, unknown>); }
   batchProcess(params: { limit?: number; dry_run?: boolean }) { return this.post<{ processed: number }>("/v1/batch/process", params as unknown as Record<string, unknown>); }
   evolve() { return this.post<EvolveData>("/v1/evolve", {}); }
+  projectContext(params: ProjectContextParams) { return this.post<ProjectContextData>("/v1/project/context", params as unknown as Record<string, unknown>); }
 }

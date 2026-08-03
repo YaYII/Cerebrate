@@ -170,9 +170,28 @@ export interface EvolveData {
   summary: string;
 }
 
+/** POST /v1/project/context */
+export interface ProjectContextParams {
+  project: string;
+  action?: "build" | "read" | "list";
+  limit?: number;
+}
+
+export interface ProjectContextData {
+  project_id?: string;
+  path?: string;
+  memory_count?: number;
+  categories?: string[];
+  generated_at?: string;
+  found?: boolean;
+  content?: string;
+  projects?: string[];
+}
+
 /** Client configuration */
 export interface BrainClientOptions {
   baseUrl?: string;
   timeout?: number;
   maxResponseBytes?: number;
+  token?: string;
 }

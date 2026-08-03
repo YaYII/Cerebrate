@@ -359,9 +359,11 @@ cd /path/to/Cerebrate/clients/node && npm install && npm run build
 ### CLI
 
 ```bash
+export CEREBRATE_SERVER_TOKEN=<与服务端相同的令牌>   # 生产鉴权必填（v5.4+）
 node dist/cli.js --url http://127.0.0.1:8765 sense
 node dist/cli.js --url http://127.0.0.1:8765 register --id node-agent
 node dist/cli.js --url http://127.0.0.1:8765 query "how to deploy" --agent node-agent
+node dist/cli.js --url http://127.0.0.1:8765 project-context --project my-project --action read
 ```
 
 ### 库
@@ -369,10 +371,14 @@ node dist/cli.js --url http://127.0.0.1:8765 query "how to deploy" --agent node-
 ```ts
 import { BrainClient } from "cerebrate-client";
 
-const brain = new BrainClient({ baseUrl: "http://127.0.0.1:8765" });
+const brain = new BrainClient({
+  baseUrl: "http://127.0.0.1:8765",
+  token: process.env.CEREBRATE_SERVER_TOKEN,   // 生产鉴权必填
+});
 
 await brain.sense();
 await brain.registerAgent({ agent_id: "my-agent", physical_user: "tester" });
+await brain.projectContext({ project: "my-project", action: "read" });
 
 const q = await brain.query({ query: "how to fix SSL", agent_id: "my-agent" });
 

@@ -37,6 +37,7 @@ async function main() {
     case "memory-get": return await brain.getMemory(flag("memory-id",""));
     case "evolve": return await brain.evolve();
     case "register": return await brain.registerAgent({ agent_id: flag("id",""), agent_type: flag("type","node"), capabilities: flag("capabilities","").split(",").filter(Boolean), metadata:{ client:"cerebrate-node-cli" }, physical_user: flag("physical-user", process.env.USER ?? process.env.LOGNAME ?? "") });
+    case "project-context": return await brain.projectContext({ project: flag("project",""), action: (flag("action","build") as "build"|"read"|"list"), limit: parseInt(flag("limit","50") || "50", 10) });
     default: return { status: "error", error: { code: 400, message: `unknown command: ${cmd || "(empty)"}` }, meta: { protocol: "v5" } };
   }
 }

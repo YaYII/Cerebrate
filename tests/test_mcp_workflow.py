@@ -87,6 +87,38 @@ class McpWorkflowTests(unittest.TestCase):
                      "cerebrate_propose_skill", "cerebrate_propose_lesson"):
             self.assertIn("deprecated", tools[name]["description"])
 
+    def test_project_context_tool_registered(self):
+        """cerebrate_project_context 工具存在且含 build/read/list 工作流（Phase 5 第 2 项）。"""
+        import cerebrate.mcp as mcp
+        tool = next(t for t in mcp.TOOLS if t["name"] == "cerebrate_project_context")
+        props = tool["inputSchema"]["properties"]
+        self.assertIn("project", props)
+        self.assertIn("action", props)
+        actions = props["action"]["enum"]
+        self.assertIn("build", actions)
+        self.assertIn("read", actions)
+        self.assertIn("list", actions)
+
+    def test_project_context_via_api(self):
+        """MCP 对应的 /v1/project/context 端点：build 后 read 可见。"""
+        from cerebrate.server.api import BrainAPI
+        api = BrainAPI()
+        api.register_agent({
+            "agent_id": "mcp-ctx",
+            "capabilities": ["testing"],
+            "physical_user": "tester",
+        })
+        api.propose_memory({
+            "title": "MCP 上下文测试", "content": "验证 project-context 端点。",
+            "category": "testing", "agent_id": "mcp-ctx",
+            "project_id": "proj-mcp", "validate": False,
+        })
+        built = api.project_context({"project": "proj-mcp", "action": "build"})
+        self.assertEqual(built["memory_count"], 1)
+        read = api.project_context({"project": "proj-mcp", "action": "read"})
+        self.assertTrue(read["found"])
+        self.assertIn("MCP 上下文测试", read["content"])
+
     def test_detail_batch_returns_full_memories(self):
         from cerebrate.server.api import BrainAPI
         mid = self._share("批量详情测试", "批量详情应返回完整内容与结构化字段",
