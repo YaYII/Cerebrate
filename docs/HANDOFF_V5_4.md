@@ -32,6 +32,8 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 | 文档 | MANUAL.md 记录 knowledge FTS + recent_index | MANUAL.md |
 | 部署 | 新增 `scripts/deploy.sh`（node build → 测试 → 启动 → FTS rebuild → 冒烟）；DEPLOY.md 补 v5.4 升级章节 | scripts/deploy.sh / DEPLOY.md |
 | 部署 | **切换为 Docker 目标部署**：Dockerfile 修正模型为 bge-small-zh-v1.5（与 compose/现有数据 512 维一致，防止 mismatch 清空）；deploy.sh 默认 Docker 模式 | Dockerfile / docker-entrypoint.sh / deploy.sh / DEPLOY.md |
+| 记忆接入 | **Claude Code SessionStart hooks**：会话开始自动注入 Cerebrate 记忆概览（health/统计/最近 8 条 + token 成本）到 AI 上下文（用户级 ~/.claude/settings.json，已备份） | ~/.claude/settings.json（用户级，不提交 git） |
+| 记忆契约 | AGENTS.md + CLAUDE.md 新增「记忆使用契约」：任务开始先查记忆（证据收集）、搜索必传 project_id、完成后主动 propose | AGENTS.md / CLAUDE.md |
 
 ### 验证证据
 - **全量测试：178 passed / 0 failed**（基线 161/13，清零）
@@ -40,6 +42,7 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 - node CLI 修复后 `tests/test_http_brain_server.py` 8 passed（含真实服务器 E2E）
 - Docker 切换实测：容器 embedding_mode=bge（512 维一致）、702 记忆完整无清空、
   容器内 rebuild 387 条 0 失败、project-context/search 全通
+- hooks 实测：SessionStart 命令输出正确（708 条记忆 + 最近 8 条概览 + token 成本）
 
 ## 3. 关键决策与理由
 
@@ -72,6 +75,16 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 - **部署方式切换 Docker**（用户确认 Docker 为目标方式）：容器已重建并运行，
   数据目录 `CEREBRATE_DATA_DIR` 未变（`/home/as-workstation01/cerebrate-data`），
   宿主机裸跑服务已停止，8765 端口由容器独占。
+- **AI 默认读记忆**（用户诉求：MCP 是"拉取式"需主动调用，改为 hooks 注入 +
+  指令契约）：SessionStart 自动注入记忆概览；AGENTS.md/CLAUDE.md 记忆契约
+  强制"开工前先查记忆"；MCP 保留为精确检索/写入通道。
+
+### 遗留 / 注意
+
+- **hooks 对新会话生效**：正在运行的 Claude Code 会话需重启才加载新 hooks。
+- **claude-mem 插件仍 enabled 但 server 未运行**（37700 无监听）：若启动
+  claude-mem server，会与 Cerebrate hooks 双份注入记忆，需用户决策用哪套。
+- 用户级 settings.json 改动不提交 git（备份 ~/.claude/settings.json.bak-20260803-130255）。
 
 ## 5. 下一步建议
 

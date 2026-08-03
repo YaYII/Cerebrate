@@ -124,6 +124,29 @@ python3 cerebrate.py events --url http://127.0.0.1:8765 --cursor 0
 - `core/storage.py`：ChromaDB 向量存储。
 - 旧 TF-IDF `SemanticIndex` 已删除，不再维护 `_semantic_index.json` 或重建语义索引入口。
 
+## 记忆使用契约（AI 默认行为，非可选步骤）
+
+Cerebrate 是团队记忆服务端（Docker 运行于 `127.0.0.1:8765`，MCP 工具已注册）。
+以下行为是**默认工作流的一部分**，不是"想到了才查"的选项：
+
+1. **会话开始 / 收到任务后第一件事**：感知记忆系统。
+   - Claude Code 的 SessionStart hooks 已自动注入记忆概览（最近 8 条 + 统计），
+     直接把它当作上下文事实使用，不要忽略。
+   - 未注入时主动调用 `cerebrate_sense`（MCP 或 `cerebrate.py --url ... sense`）。
+2. **任何任务开工前（需求调研阶段）**：先查历史记忆，这是证据收集的一部分。
+   - 调用 `cerebrate_search(query, scope=project/all)` 检索相关记忆，
+     项目相关任务必须传 `project_id`（避免通用记忆隔离误伤）。
+   - 命中关键记忆后用 `cerebrate_timeline`（前因后果）与
+     `cerebrate_detail`（完整详情）补齐上下文。
+   - 检索无命中 ≠ 不存在：可换关键词/换 scope 再查一次，仍无再判断"新经验"。
+3. **任务过程中**：凡是"之前可能解决过类似问题"的判断，先查记忆再回答/动手。
+4. **任务完成后**：有可复用的经验、教训、踩坑记录时，主动
+   `cerebrate_propose` 提交（写路径），让记忆持续生长。
+5. **记忆即证据**：记忆检索结果与日志/数据库/代码同等地位，遵循
+   「证据优先强制顺序」—— 不能跳过记忆查询直接凭经验臆断。
+
+记忆系统不可用时（容器未启动 / 网络不通）降级为无记忆工作，但要在总结中说明。
+
 ## 脑虫裁决与 LLM
 
 - `vote` 只提交共识事件，不直接改写 doctrine。
