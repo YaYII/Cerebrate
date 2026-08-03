@@ -30,6 +30,7 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 | 功能补全 | **Phase 5 第 1 项**：`/v1/sense` 返回 `recent_index`（最近记忆紧凑索引，含 token 成本） | mind.py / swarm.py |
 | 功能补全 | **Phase 5 第 2 项**：项目级上下文 `POST /v1/project/context`（build/read/list）；写入 `{memory_root}/context/{project_id}.md`，`<cerebrate-context>` 标签包裹，绝不写用户项目目录 | 新增 tools/project_context.py / api.py / http.py / cli.py / mcp.py |
 | 文档 | MANUAL.md 记录 knowledge FTS + recent_index | MANUAL.md |
+| 部署 | 新增 `scripts/deploy.sh`（node build → 测试 → 启动 → FTS rebuild → 冒烟）；DEPLOY.md 补 v5.4 升级章节 | scripts/deploy.sh / DEPLOY.md |
 
 ### 验证证据
 - **全量测试：178 passed / 0 failed**（基线 161/13，清零）
@@ -92,4 +93,8 @@ python3 cerebrate.py fulltext rebuild
 # 项目上下文
 python3 cerebrate.py project-context --project my-project
 python3 cerebrate.py project-context --project my-project --action read
+
+# 一键部署/升级
+./scripts/deploy.sh            # 完整
+./scripts/deploy.sh --skip-tests --no-pull   # 快速（当前代码）
 ```

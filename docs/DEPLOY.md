@@ -140,3 +140,56 @@ cerebrate-data/
 ```
 
 > ⚠️ 迁移宿主机时，只需拷走整个 `CEREBRATE_DATA_DIR` 目录到新机器，再调整 `.env` 中的路径即可恢复全部记忆。
+
+---
+
+## 七、v5.4 升级（一次性脚本）
+
+v5.3/v5.4 引入了 node 客户端重建与 FTS5 全文索引，提供一键部署脚本 `scripts/deploy.sh`
+（宿主机裸跑模式，含 node build → 全量测试 → 启动 → FTS rebuild → 冒烟验证）：
+
+```bash
+# 完整部署（推荐）
+./scripts/deploy.sh
+
+# 快速部署（跳过全量测试）
+./scripts/deploy.sh --skip-tests
+
+# Docker 模式
+./scripts/deploy.sh --docker
+
+# 用当前代码（不 git pull）
+./scripts/deploy.sh --skip-tests --no-pull
+```
+
+### 手动升级步骤（v5.3 → v5.4，裸跑）
+
+```bash
+cd /path/to/Cerebrate
+git pull --ff-only origin main
+
+# 1. 重建 node CLI（dist 被 gitignore，Content-Length 修复需重新编译）
+cd clients/node && npm install --no-audit --no-fund && npm run build && cd ../..
+
+# 2. 重启服务（v5.4 新增 project-context 路由）
+pkill -f "cerebrate.py serve" || true
+setsid nohup python3 cerebrate.py serve >> logs/server.log 2>&1 < /dev/null &
+
+# 3. 重建 FTS5 全文索引（swarm + knowledge 双库）
+python3 cerebrate.py fulltext rebuild
+# 期望输出: {"status":"ok","indexed":N,"failed":0,"swarm":{...},"knowledge":{...}}
+
+# 4. 验证
+curl -s http://127.0.0.1:8765/v1/sense
+curl -s -X POST http://127.0.0.1:8765/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"部署","mode":"fts","limit":3}'
+```
+
+### v5.4 新端点速查
+
+```text
+POST /v1/fulltext/rebuild   同时重建 swarm + knowledge 的 FTS5 索引
+POST /v1/project/context    项目级上下文（build/read/list）
+GET  /v1/sense              新增 recent_index（最近记忆紧凑索引）
+```
