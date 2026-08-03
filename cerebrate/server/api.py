@@ -1460,6 +1460,33 @@ class BrainAPI:
                            {"doc_id": doc_id, "title": title})
         return {"doc_id": doc_id}
 
+    def project_context(self, payload: dict) -> dict:
+        """生成/读取项目级上下文文件（Phase 5 第 2 项）。
+
+        action:
+          - build（默认）: 聚合项目记忆生成浓缩上下文文件
+          - read: 读取已生成文件（未生成返回 found=False）
+          - list: 列出已有上下文项目
+        """
+        from cerebrate.tools.project_context import ProjectContext
+        ctx = ProjectContext(self.mm)
+        action = payload.get("action", "build")
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        if action == "read":
+            if not project_id:
+                raise ValueError("project_id is required for read")
+            data = ctx.read(project_id)
+            if not data:
+                return {"found": False, "project_id": project_id}
+            return {"found": True, **data}
+        if action == "list":
+            return {"projects": ctx.list_projects()}
+        try:
+            limit = min(int(payload.get("limit", 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        return ctx.build(project_id, limit=limit)
+
     def list_all_knowledge(self) -> list[dict]:
         """列出知识库所有文档摘要。"""
         docs = []

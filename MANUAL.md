@@ -309,6 +309,8 @@ python3 cerebrate.py --url http://127.0.0.1:8765 query "如何部署" --id my-ag
 python3 cerebrate.py --url http://127.0.0.1:8765 search "NPM_CONFIG_TIMEOUT" --mode fts --id my-agent
 python3 cerebrate.py --url http://127.0.0.1:8765 timeline --anchor <memory-id> --id my-agent
 python3 cerebrate.py --url http://127.0.0.1:8765 fulltext rebuild
+python3 cerebrate.py --url http://127.0.0.1:8765 project-context --project my-project
+python3 cerebrate.py --url http://127.0.0.1:8765 project-context --project my-project --action read
 python3 cerebrate.py --url http://127.0.0.1:8765 propose --title "..." --content "..." --category coding --id my-agent --problem "..." --solution "..."
 python3 cerebrate.py --url http://127.0.0.1:8765 recall
 python3 cerebrate.py --url http://127.0.0.1:8765 remember --user yangying --key pref_tone --value "专业简洁"
@@ -319,6 +321,10 @@ python3 cerebrate.py --url http://127.0.0.1:8765 brain assess
 python3 cerebrate.py --url http://127.0.0.1:8765 consensus --memory-id <id>
 python3 cerebrate.py --url http://127.0.0.1:8765 memory-get --memory-id <id>
 ```
+
+`project-context`（Phase 5）为项目生成浓缩记忆概览文件：
+写入服务端 `{memory_root}/context/{project_id}.md`（绝不写用户项目目录），
+`<cerebrate-context>` 标签包裹自动内容，手动内容放标签外不受影响。
 
 ### 库
 
@@ -388,6 +394,7 @@ cerebrate_sense           感知虫群（含 3-LAYER WORKFLOW 引导）
 cerebrate_search          渐进式披露第1层 — 紧凑索引（推荐首选）
 cerebrate_timeline        渐进式披露第2层 — 时序上下文
 cerebrate_detail          渐进式披露第3层 — 批量完整详情
+cerebrate_project_context 项目级上下文（生成/读取浓缩记忆概览）
 cerebrate_query           决策查询（完整内容+推荐；读侧已弃用，优先 search）
 cerebrate_propose         提交记忆（支持 observation_type/facts/concepts）
 cerebrate_propose_skill   存为技能（已弃用 → propose+category=skill）

@@ -284,6 +284,19 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_project_context",
+        "description": "【项目上下文】为 scope=project 的项目生成/读取浓缩上下文文件（含该项目记忆 + 通用记忆概览，标签包裹，绝不覆盖手动内容）。\naction=build 生成/更新（默认）；action=read 读取已生成内容；action=list 列出已有项目。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "项目 ID"},
+                "action": {"type": "string", "description": "build=生成/更新(默认); read=读取; list=列出", "default": "build", "enum": ["build", "read", "list"]},
+                "limit": {"type": "integer", "description": "build 时收录记忆条数上限（默认 50，最大 200）", "default": 50}
+            },
+            "required": ["project"]
+        }
+    },
+    {
         "name": "cerebrate_batch_process",
         "description": "【会话结束时调用】批量处理 IPC 队列中的待办请求。",
         "inputSchema": {
@@ -495,6 +508,13 @@ def _handle_call(name: str, args: dict) -> dict:
             if args.get("scope"):
                 qparams["scope"] = args["scope"]
             return _request("GET", f"/v1/knowledge?{urlencode(qparams)}")
+
+        elif name == "cerebrate_project_context":
+            return _request("POST", "/v1/project/context", {
+                "project": args.get("project", ""),
+                "action": args.get("action", "build"),
+                "limit": args.get("limit", 50),
+            })
 
         elif name == "cerebrate_batch_process":
             return _request("POST", "/v1/batch/process", {

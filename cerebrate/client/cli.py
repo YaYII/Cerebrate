@@ -73,6 +73,15 @@ def cmd_fulltext_rebuild(args):
     output(client_request(args.url, "POST", "/v1/fulltext/rebuild", {}))
 
 
+def cmd_project_context(args):
+    """生成/读取项目级上下文（Phase 5 第 2 项）"""
+    output(client_request(args.url, "POST", "/v1/project/context", {
+        "project": args.project,
+        "action": args.action,
+        "limit": getattr(args, "limit", 50),
+    }))
+
+
 def cmd_timeline(args):
     """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文"""
     output(client_request(args.url, "POST", "/v1/timeline", {
@@ -253,6 +262,16 @@ def main(argv=None):
     fts_sub = p.add_subparsers(dest="fulltext_command")
     pr = fts_sub.add_parser("rebuild", help="从 DocStore 全量重建全文索引")
     pr.set_defaults(func=cmd_fulltext_rebuild)
+
+    p = sub.add_parser("project-context",
+                       help="项目级上下文（生成/读取浓缩记忆概览文件）")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--action", default="build",
+                   choices=["build", "read", "list"],
+                   help="build=生成/更新(默认); read=读取; list=列出已有项目")
+    p.add_argument("--limit", type=int, default=50,
+                   help="build 时收录的记忆条数上限（默认 50，最大 200）")
+    p.set_defaults(func=cmd_project_context)
 
     p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")
     p.add_argument("--anchor", default="", help="anchor 记忆 ID（不传则用 query 找 top1）")

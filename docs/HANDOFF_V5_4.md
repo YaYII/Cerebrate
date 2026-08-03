@@ -28,11 +28,13 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 | 功能补全 | **knowledge.py 接入 FTS5**：独立 `knowledge_fulltext.sqlite3` + `knowledge_` 表前缀；store/verify/deprecate/update 双写；`fulltext_query`；`rebuild_fulltext` | knowledge.py / fulltext.py / manager.py |
 | 功能补全 | **`FullTextIndex` 支持 `table_prefix`**（memories/knowledge 隔离） + `recent()` 方法 | fulltext.py |
 | 功能补全 | **Phase 5 第 1 项**：`/v1/sense` 返回 `recent_index`（最近记忆紧凑索引，含 token 成本） | mind.py / swarm.py |
+| 功能补全 | **Phase 5 第 2 项**：项目级上下文 `POST /v1/project/context`（build/read/list）；写入 `{memory_root}/context/{project_id}.md`，`<cerebrate-context>` 标签包裹，绝不写用户项目目录 | 新增 tools/project_context.py / api.py / http.py / cli.py / mcp.py |
 | 文档 | MANUAL.md 记录 knowledge FTS + recent_index | MANUAL.md |
 
 ### 验证证据
 - **全量测试：178 passed / 0 failed**（基线 161/13，清零）
 - 新增测试：`test_knowledge_fulltext.py`(3) + `test_progressive_disclosure.py` sense recent_index(1)
+- 新增测试：`test_project_context.py`(2)
 - node CLI 修复后 `tests/test_http_brain_server.py` 8 passed（含真实服务器 E2E）
 
 ## 3. 关键决策与理由
@@ -42,11 +44,12 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 2. **knowledge FTS 用独立 db 文件 + 表前缀**：不与 swarm 混库，`FullTextIndex`
    加 `table_prefix` 参数（默认 memories，向后兼容）；`/v1/fulltext/rebuild`
    现在同时重建 swarm + knowledge，返回结构含 `swarm`/`knowledge` 子结果。
-3. **Phase 5 只做第 1 项（sense 紧凑索引），不做第 2 项（CLAUDE.md 生成）**：
+3. **Phase 5 两项都实施，但第 2 项采用安全策略**：
    - sense recent_index 是纯读取增强、零风险、收益明确（会话开始即见存在+成本）
-   - CLAUDE.md 生成需"项目→文件系统目录"映射，Cerebrate 的 project_id 只是字符串；
-     写入用户磁盘未知路径风险 > 收益；claude-mem 的 Folder Context 是单机场景，
-     与多 agent 服务端不适配（设计文档自己也标注 ⚠️）
+   - 项目上下文**不生成到用户项目目录**（claude-mem 的 Folder Context 是单机场景，
+     且 Cerebrate 无 project_id→目录映射），而是写入服务端
+     `{memory_root}/context/{project_id}.md`，`<cerebrate-context>` 标签包裹，
+     原子写防半成品；对外暴露 CLI `project-context` + MCP `cerebrate_project_context`
 4. **MCP deprecated 别名保留**：调用方（Claude Code 客户端）迁移状态未确认，
    移除风险 > token 收益，按决策权重（稳定性优先）保留。
 
@@ -58,8 +61,6 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
    （新写入已自动双写）。
 3. **MCP 旧工具**（cerebrate_query/propose_skill/propose_lesson/knowledge_search）：
    仍为 deprecated 别名，待确认调用方迁移后移除。
-4. **Phase 5 第 2 项（CLAUDE.md 生成）未实施**：如未来需要，先定义
-   project_id → 目录映射策略。
 5. **PostgreSQL metastore 无独立 scope 列**：scope 在 metadata JSONB，SQL 过滤需加列。
 
 ## 5. 下一步建议
@@ -77,6 +78,7 @@ cerebrate/memory/knowledge.py   # FTS 双写/查询/rebuild（v5.4 补全）
 cerebrate/memory/manager.py     # rebuild 合并 swarm+knowledge
 cerebrate/brain/mind.py         # sense.recent_index（Phase 5 第 1 项）
 cerebrate/memory/swarm.py       # origin_ids 修复 + recent_index
+cerebrate/tools/project_context.py  # 项目上下文生成（Phase 5 第 2 项）
 clients/node/src/index.ts       # Content-Length 修复（需重新 build）
 
 # 测试
@@ -87,4 +89,7 @@ CEREBRATE_DOCKER_SKIP_CHECK=1 python3 -m pytest tests/ -q --ignore=tests/prod_te
 python3 cerebrate.py serve --host 127.0.0.1 --port 8765
 # 重建 FTS（含 knowledge）
 python3 cerebrate.py fulltext rebuild
+# 项目上下文
+python3 cerebrate.py project-context --project my-project
+python3 cerebrate.py project-context --project my-project --action read
 ```
