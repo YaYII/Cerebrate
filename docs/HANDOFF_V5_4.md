@@ -86,6 +86,16 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
   claude-mem server，会与 Cerebrate hooks 双份注入记忆，需用户决策用哪套。
 - 用户级 settings.json 改动不提交 git（备份 ~/.claude/settings.json.bak-20260803-130255）。
 
+### 决策记录（2026-08-03，用户确认）
+
+- **记忆系统二选一 → 选 Cerebrate**（团队多 agent 服务端，符合架构）；
+  claude-mem **保持停用**（不启动其 server，enabledPlugins 不动以免影响
+  verification-platform 项目的既有配置）。
+- hooks 注入内容已优化：统计行 + 最近 8 条概览 + `[记忆契约]` 引导行
+  （任务开始先 search 必传 project_id；完成后主动 propose）。
+- 备份：`~/.claude/settings.json.bak-20260803-130255`（首版）、
+  `~/.claude/settings.json.bak-20260803-1328xx`（优化版）。
+
 ## 5. 下一步建议
 
 1. `git push`（v5.3 的 4 个提交 + v5.4 本次提交）
