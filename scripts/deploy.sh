@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================
-# Cerebrate v5.x — 部署 / 升级脚本（宿主机裸跑模式）
+# Cerebrate v5.x — 部署 / 升级脚本
 # ============================================================
 # 用法:
-#   ./scripts/deploy.sh                  # 完整部署：build node → 测试 → 启动 → rebuild → 冒烟
+#   ./scripts/deploy.sh                  # 完整部署（默认 Docker）：build → 测试 → 启动 → rebuild → 冒烟
 #   ./scripts/deploy.sh --skip-tests     # 跳过全量测试（快速部署）
-#   ./scripts/deploy.sh --docker         # Docker 模式（docker compose up -d --build）
+#   ./scripts/deploy.sh --bare           # 裸跑模式（宿主机 python，非目标方式）
 #   ./scripts/deploy.sh --no-pull        # 不 git pull（用当前代码）
 #
 # 安全:
 #   - set -euo pipefail，任一步失败即中止，不掩盖错误
 #   - .env 读取但不打印任何密钥
+# 说明:
+#   Docker 是目标部署方式（环境隔离/依赖固化/可移植）；裸跑仅用于临时调试。
+#   注意：容器内 embedding 模型必须与已有 ChromaDB 数据维度一致（默认
+#   bge-small-zh-v1.5, 512 维），否则 storage.py 会 delete_collection 清空数据！
 # ============================================================
 set -euo pipefail
 
@@ -19,12 +23,12 @@ cd "$ROOT"
 
 PULL=1
 SKIP_TESTS=0
-MODE="bare"
+MODE="docker"
 
 for arg in "$@"; do
   case "$arg" in
     --skip-tests) SKIP_TESTS=1 ;;
-    --docker)     MODE="docker" ;;
+    --bare)       MODE="bare" ;;
     --no-pull)    PULL=0 ;;
     *) echo "未知参数: $arg" >&2; exit 1 ;;
   esac

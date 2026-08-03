@@ -31,12 +31,15 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 | 功能补全 | **Phase 5 第 2 项**：项目级上下文 `POST /v1/project/context`（build/read/list）；写入 `{memory_root}/context/{project_id}.md`，`<cerebrate-context>` 标签包裹，绝不写用户项目目录 | 新增 tools/project_context.py / api.py / http.py / cli.py / mcp.py |
 | 文档 | MANUAL.md 记录 knowledge FTS + recent_index | MANUAL.md |
 | 部署 | 新增 `scripts/deploy.sh`（node build → 测试 → 启动 → FTS rebuild → 冒烟）；DEPLOY.md 补 v5.4 升级章节 | scripts/deploy.sh / DEPLOY.md |
+| 部署 | **切换为 Docker 目标部署**：Dockerfile 修正模型为 bge-small-zh-v1.5（与 compose/现有数据 512 维一致，防止 mismatch 清空）；deploy.sh 默认 Docker 模式 | Dockerfile / docker-entrypoint.sh / deploy.sh / DEPLOY.md |
 
 ### 验证证据
 - **全量测试：178 passed / 0 failed**（基线 161/13，清零）
 - 新增测试：`test_knowledge_fulltext.py`(3) + `test_progressive_disclosure.py` sense recent_index(1)
 - 新增测试：`test_project_context.py`(2)
 - node CLI 修复后 `tests/test_http_brain_server.py` 8 passed（含真实服务器 E2E）
+- Docker 切换实测：容器 embedding_mode=bge（512 维一致）、702 记忆完整无清空、
+  容器内 rebuild 387 条 0 失败、project-context/search 全通
 
 ## 3. 关键决策与理由
 
@@ -63,6 +66,12 @@ Phase 5 未实施 + 4 个提交未推送。用户授权 AI 工程师独立判断
 3. **MCP 旧工具**（cerebrate_query/propose_skill/propose_lesson/knowledge_search）：
    仍为 deprecated 别名，待确认调用方迁移后移除。
 5. **PostgreSQL metastore 无独立 scope 列**：scope 在 metadata JSONB，SQL 过滤需加列。
+
+### 已解决（2026-08-03 晚）
+
+- **部署方式切换 Docker**（用户确认 Docker 为目标方式）：容器已重建并运行，
+  数据目录 `CEREBRATE_DATA_DIR` 未变（`/home/as-workstation01/cerebrate-data`），
+  宿主机裸跑服务已停止，8765 端口由容器独占。
 
 ## 5. 下一步建议
 

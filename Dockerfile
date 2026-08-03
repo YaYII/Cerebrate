@@ -28,9 +28,12 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-# 构建阶段预下载 BGE-M3 模型（8192 tokens, 1024维），固化进镜像层，运行时离线读取
+# 构建阶段预下载 BGE 模型（与 docker-compose.yml 的 CEREBRATE_EMBEDDING_MODEL 一致），
+# 固化进镜像层，运行时离线读取（CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD=false）
+# 注意：模型维度必须与已有 ChromaDB 数据一致（512 维），否则 storage.py 会
+# 因 embedding function mismatch 执行 delete_collection 清空向量数据！
 # 同时下载 ReRanker 交叉编码器用于精排
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh-v1.5')"
 RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-v2-m3')" \
     || echo 'ReRanker 下载失败（可选，服务端降级为不重排）'
 
@@ -51,7 +54,7 @@ ENV CEREBRATE_SERVER_HOST=0.0.0.0 \
     CEREBRATE_SERVER_PORT=8765 \
     CEREBRATE_MEMORY_ROOT=/data \
     CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD=false \
-    CEREBRATE_EMBEDDING_MODEL=BAAI/bge-m3 \
+    CEREBRATE_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5 \
     CEREBRATE_EMBEDDING_MAX_LENGTH=8192 \
     CEREBRATE_EMBEDDING_HASH_DIM=1024
 

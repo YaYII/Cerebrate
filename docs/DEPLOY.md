@@ -2,6 +2,9 @@
 
 把权威脑虫服务端（Brain Server）打包成 Docker 容器独立运行，其他 MCP / CLI 客户端通过 HTTP + Bearer token 远程连接。
 
+> **部署原则（2026-08-03 确认）**：Docker 是**目标部署方式**（环境隔离、依赖固化、可移植）。
+> 宿主机裸跑仅用于临时调试，不作为正式部署。
+
 > **快速开始（30 秒）**
 > ```bash
 > cd /home/as-workstation01/Documents/project/Cerebrate
@@ -146,21 +149,27 @@ cerebrate-data/
 ## 七、v5.4 升级（一次性脚本）
 
 v5.3/v5.4 引入了 node 客户端重建与 FTS5 全文索引，提供一键部署脚本 `scripts/deploy.sh`
-（宿主机裸跑模式，含 node build → 全量测试 → 启动 → FTS rebuild → 冒烟验证）：
+（**默认 Docker 模式**，含 node build → 全量测试 → 启动 → FTS rebuild → 冒烟验证）：
 
 ```bash
-# 完整部署（推荐）
+# 完整部署（推荐，Docker）
 ./scripts/deploy.sh
 
 # 快速部署（跳过全量测试）
 ./scripts/deploy.sh --skip-tests
 
-# Docker 模式
-./scripts/deploy.sh --docker
-
 # 用当前代码（不 git pull）
 ./scripts/deploy.sh --skip-tests --no-pull
+
+# 临时调试用裸跑（非目标方式）
+./scripts/deploy.sh --bare
 ```
+
+> ⚠️ **embedding 维度一致性（必须遵守）**：容器内 `CEREBRATE_EMBEDDING_MODEL`
+> 必须与已有 ChromaDB 数据的向量维度一致（默认 `BAAI/bge-small-zh-v1.5`，512 维）。
+> 若维度不一致，`core/storage.py` 会因 embedding function mismatch 执行
+> `delete_collection` **清空向量数据**。切换模型前先检查：
+> `docker compose exec cerebrate python3 -c "from cerebrate.config import config; print(config.embedding_model)"`。
 
 ### 手动升级步骤（v5.3 → v5.4，裸跑）
 

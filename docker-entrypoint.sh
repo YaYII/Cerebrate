@@ -9,7 +9,7 @@ echo "[entrypoint] Cerebrate v5 脑虫服务初始化"
 echo "[entrypoint] 数据目录: ${DATA_DIR}"
 
 # ── 1. 确保数据目录存在 ──
-mkdir -p "${DATA_DIR}"/{chroma_data,personal,swarm,knowledge,agents,events,evolution,docstore}
+mkdir -p "${DATA_DIR}"/{chroma_data,personal,swarm,knowledge,agents,events,evolution,docstore,context}
 
 # ── 2. 确保 /data 可写 ──
 if [ ! -w "${DATA_DIR}" ]; then
