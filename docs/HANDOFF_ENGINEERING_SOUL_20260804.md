@@ -32,6 +32,21 @@
 - `tests/test_soul.py` 4 项：doctrine 写入 / soul_get 过滤 / doctrines 包含 / 客户端 propose 不能写 doctrine
 - 全量回归：211 passed / 0 failed
 
+### 2.5 Codex 侧灵魂注入（v2.2 追加）
+- `~/.codex/AGENTS.md`：升级为 v2.2
+  - 修正过时声明（v2.1「Cerebrate 已暂停」→ v2.2「已恢复 + 灵魂机制」）
+  - 新增「0. 工程化思维灵魂」章节：五铁律（证据优先/开工前调研/最小修改/验证结果/总结交接）+ 行为习惯（不说空话/只讲证据/收集证据/快速收敛/先理解再判定）+ 服务端灵魂引用（`GET /v1/soul`）
+  - 清理重复的 4.1 段落
+  - Codex 每次会话自动加载本文件 → 灵魂全自动生效（无 hook 机制也能全自动）
+
+### 2.6 codegraph 代码图谱重建
+- 工具：reasonix codegraph v0.9.7（`~/.cache/reasonix/codegraph/v0.9.7/bin/codegraph`）
+- 重建命令：`codegraph index /home/as-workstation01/Documents/project/Cerebrate`
+- 结果：73 files（python 67 / ts 3 / yaml 3）、1577 nodes、3911 edges、DB 4.23MB
+- 对比旧数据：57 files / 1176 nodes / 2532 edges（6 月 9 日）→ 全部更新到 8 月 4 日当前代码
+- 验证：`codegraph query "soul_set"` 命中 `cerebrate/server/api.py:1266`（新代码已入图谱）
+- 后续增量更新：`codegraph sync <path>`（daemon 或手动）
+
 ## 3. 关键决策与理由
 
 | 决策 | 理由 |
@@ -43,8 +58,9 @@
 
 ## 4. 遗留问题
 
-- `.codegraph/codegraph.db` 代码图谱库停留在 6 月 9 日（daemon 已停）——如需代码级知识图谱实时可用，需重建/迁移
-- Codex 客户端的灵魂注入目前靠项目 AGENTS.md（工程学工作规程 v2.1，本就是工程化思维灵魂）+ MCP `cerebrate_doctrines` 可手动读取；未做自动 hook（Codex 无 SessionStart hook 机制）
+- ~~`.codegraph/codegraph.db` 代码图谱库停留在 6 月 9 日~~ ✅ 已重建（2026-08-04，1577 nodes）
+- ~~Codex 侧灵魂~~ ✅ 已同步进 `~/.codex/AGENTS.md`（v2.2，会话自动加载）
+- 项目级 `AGENTS.md`（Cerebrate 仓库）标题仍为 v2.1（含过时「Cerebrate 已暂停」说明），建议下次顺手升级为 v2.2 保持全局一致
 - 若未来要更新灵魂，重新 `soul set` 即可（写入新 doctrine；旧灵魂保留，`soul_get` 取第一条）
 
 ## 5. 下一步建议
@@ -67,6 +83,11 @@ curl -s http://127.0.0.1:8765/v1/soul -H "Authorization: Bearer $TOKEN"
 # 读全部权威教条
 python3 cerebrate.py doctrines
 
+# codegraph 重建（reasonix codegraph v0.9.7）
+~/.cache/reasonix/codegraph/v0.9.7/bin/codegraph status <项目路径>
+~/.cache/reasonix/codegraph/v0.9.7/bin/codegraph index <项目路径>   # 全量重建
+~/.cache/reasonix/codegraph/v0.9.7/bin/codegraph sync <项目路径>    # 增量更新
+
 # 测试
 CEREBRATE_DOCKER_SKIP_CHECK=1 python3 -m pytest tests/test_soul.py -q
 CEREBRATE_DOCKER_SKIP_CHECK=1 python3 -m pytest tests/ -q --ignore=tests/prod_test.py
@@ -85,3 +106,5 @@ echo '{"session_id":"t1","prompt":"测试","cwd":"/home/as-workstation01/Documen
 - `docs/ENGINEERING_SOUL.md`（灵魂模板，唯一内容源）
 - `tests/test_soul.py`
 - `~/.claude/hooks/cerebrate-session-start.py`、`~/.qoder/hooks/cerebrate-memory-inject.py`（客户端注入）
+- `~/.codex/AGENTS.md`（Codex 侧灵魂，v2.2）
+- `.codegraph/codegraph.db`（代码图谱库，reasonix codegraph 生成）
