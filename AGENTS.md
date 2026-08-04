@@ -139,6 +139,13 @@ Cerebrate 是团队记忆服务端（Docker 运行于 `127.0.0.1:8765`，MCP 工
    - 命中关键记忆后用 `cerebrate_timeline`（前因后果）与
      `cerebrate_detail`（完整详情）补齐上下文。
    - 检索无命中 ≠ 不存在：可换关键词/换 scope 再查一次，仍无再判断"新经验"。
+- **记忆分类（技术/业务二分，v5.2）**：scope=general 是技术层面（跨项目可复用）；scope=project+project_id 是业务层面（项目专属）。检索项目业务记忆必须传 project_id。
+- **业务画像（数据世界+流程世界，v6/v7）**：了解项目结构时**禁止全盘扫描代码**，用三段式工作流：
+  ① `harvest-push --project <id> --dir <本地路径>`（本地 AST 分析，只推结构，代码不离开本地；确需服务端访问代码再用 code-sync）
+  ② `cerebrate_project_profile` level=summary 宏观俯瞰（域/流程）→ `cerebrate_project_navigate` 微观定位到真实代码文件
+  ③ 基于当前代码仓真实代码具体分析；**记忆仅为参考（参考答案），禁止背诵/照搬旧结论**——实事求是，具体问题具体分析。
+- **多人协作感知（v7）**：处理某功能前 `cerebrate_project_work` claim（告知脑虫谁在哪个分支做什么），同模块冲突会被告知；处理完 release。多分支同项目：代码仓/画像按分支隔离（git 自动推断）。
+
 3. **任务过程中**：凡是"之前可能解决过类似问题"的判断，先查记忆再回答/动手。
 4. **任务完成后**：有可复用的经验、教训、踩坑记录时，主动
    `cerebrate_propose` 提交（写路径），让记忆持续生长。
