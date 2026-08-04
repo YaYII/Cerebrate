@@ -258,8 +258,15 @@ class ProfileStore:
 
     # ── Phase 2: 构建草稿 ──
     def build_draft(self, project_id: str, limit: int = 200,
-                    llm_refine: Optional[bool] = None) -> dict:
-        """从业务记忆生成画像草稿（规则骨架 + 可选 LLM 精炼）。"""
+                    llm_refine: Optional[bool] = None,
+                    harvest: Optional[dict] = None) -> dict:
+        """从业务记忆生成画像草稿（真实代码骨架 + 规则兜底 + 可选 LLM 精炼）。
+
+        融合优先级（企业级精度）:
+          1. harvest（真实代码 AST 结构）→ domains/entities/endpoints 骨架
+          2. LLM 精炼 → 语义描述/关系/流程（flows）
+          3. 规则兜底 → 未被覆盖的业务记忆
+        """
         if llm_refine is None:
             llm_refine = config.profile_llm_enabled
         memories = self._collect_memories(project_id, limit=limit)
@@ -273,7 +280,11 @@ class ProfileStore:
             "flows": [],
             "shared_tech": {"stack": [], "tech_memories": []},
         }
-        if business:
+        harvest_domains = self._harvest_domains(harvest) if harvest else []
+        if harvest_domains:
+            profile["domains"] = harvest_domains
+            profile["_harvest_source"] = harvest.get("project_id", "")
+        elif business:
             profile["domains"] = self._rule_domains(business)
         profile["shared_tech"]["tech_memories"] = [
             m["memory_id"] for m in memories["tech"][:80]]
@@ -282,11 +293,79 @@ class ProfileStore:
             try:
                 refined = self._llm_refine(project_id, profile, business)
                 if refined:
+                    # 保留真实代码骨架（harvest）中未被 LLM 覆盖的域
+                    if harvest_domains:
+                        merged_ids = {d.get("id") for d in refined["domains"]}
+                        for d in harvest_domains:
+                            if d["id"] not in merged_ids:
+                                refined["domains"].append(d)
                     profile = refined
                     profile["status"] = "draft"
             except Exception as e:
                 logger.warning("画像 LLM 精炼失败（%s），保留规则骨架", e)
+        profile.pop("_harvest_source", None)
         return profile
+
+    @staticmethod
+    def _harvest_domains(harvest: dict) -> list[dict]:
+        """从真实代码 AST 构建画像骨架：模块目录 → 域，数据模型 → 实体，端点挂载。"""
+        modules = harvest.get("modules", [])
+        data_models = harvest.get("data_models", [])
+        endpoints = harvest.get("endpoints", [])
+        # 按顶层包分组模块
+        by_pkg: dict[str, list[dict]] = {}
+        for m in modules:
+            parts = m["path"].split("/")
+            pkg = parts[0] if len(parts) > 1 else m["module"]
+            by_pkg.setdefault(pkg, []).append(m)
+        # 数据模型按文件归属
+        models_by_file: dict[str, list[dict]] = {}
+        for dm in data_models:
+            models_by_file.setdefault(dm["file"], []).append(dm)
+        endpoints_by_file: dict[str, list[str]] = {}
+        for ep in endpoints:
+            endpoints_by_file.setdefault(ep.get("file", ""), []).append(
+                f"{ep.get('method', '')} {ep.get('path', '')}")
+        domains = []
+        for pkg, mods in sorted(by_pkg.items()):
+            entities = []
+            for m in mods[:40]:
+                f = m["path"]
+                for dm in models_by_file.get(f, []):
+                    entities.append({
+                        "id": _slug(dm["name"]),
+                        "name": dm["name"],
+                        "description": dm.get("doc", ""),
+                        "fields": dm.get("fields", [])[:30],
+                        "relations": [],
+                        "code_hint": f,
+                        "memories": [],
+                    })
+                for cls in m.get("classes", [])[:10]:
+                    if cls in {e["name"] for e in entities}:
+                        continue
+                    entities.append({
+                        "id": _slug(cls),
+                        "name": cls,
+                        "description": "代码类",
+                        "fields": [],
+                        "relations": [],
+                        "code_hint": f,
+                        "memories": [],
+                    })
+            ep_hints = []
+            for m in mods[:40]:
+                ep_hints.extend(endpoints_by_file.get(m["path"], [])[:5])
+            domains.append({
+                "id": _slug(pkg),
+                "name": pkg,
+                "description": f"代码模块 {pkg}（真实代码结构）",
+                "entities": entities[:50],
+                "depends_on": [],
+                "endpoints": ep_hints[:20],
+                "memories": [],
+            })
+        return domains
 
     @staticmethod
     def _domain_name(category: str) -> str:

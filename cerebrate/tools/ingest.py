@@ -399,7 +399,7 @@ def ingest_directory(root: Path, project_id: str = "", dry_run: bool = False,
                 "version": "1.0",
                 "author": _PHYSICAL_USER,
                 "project_id": project_id,
-                "scope": args.scope if hasattr(args, "scope") else "",
+                "scope": "",
                 "agent_id": "ingest-tool",
             }
 

@@ -117,6 +117,9 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/project/navigate":
             payload = self._read_json()
             return self.api.project_navigate(payload)
+        if method == "POST" and path == "/v1/project/harvest":
+            payload = self._read_json()
+            return self.api.project_harvest(payload)
 
         payload = self._read_json()
         if method == "POST" and path == "/v1/agents/register":

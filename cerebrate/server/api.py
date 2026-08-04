@@ -1521,12 +1521,24 @@ class BrainAPI:
             except (TypeError, ValueError):
                 limit = 200
             llm_refine = payload.get("llm_refine")
+            harvest = None
+            if payload.get("use_harvest"):
+                from cerebrate.tools.code_harvest import load_harvest
+                harvest = load_harvest(project_id)
+                if not harvest:
+                    return {
+                        "project_id": project_id,
+                        "error": "harvest_not_found",
+                        "hint": "请先 POST /v1/project/harvest 生成代码结构",
+                    }
             draft = store.build_draft(project_id, limit=limit,
-                                      llm_refine=llm_refine)
+                                      llm_refine=llm_refine,
+                                      harvest=harvest)
             return {
                 "project_id": project_id,
                 "status": draft.get("status", "draft"),
                 "domain_count": len(draft.get("domains", [])),
+                "harvest_source": bool(harvest),
                 "business_memories": len(
                     store._collect_memories(project_id, limit=limit)["business"]),
                 "draft": draft,
@@ -1549,6 +1561,36 @@ class BrainAPI:
                 raise ValueError("node_path and memory_id are required for attach")
             return store.attach_memory(project_id, node_path, memory_id)
         raise ValueError(f"unknown action: {action}")
+
+    def project_harvest(self, payload: dict) -> dict:
+        """代码结构养料收割（真实代码 AST → 结构图谱）。
+
+        - dir 必传：扫描该目录生成代码结构（存 {memory_root}/harvest/{project_id}.json）
+        - 不传 dir：读取已生成的代码结构
+        """
+        from cerebrate.tools.code_harvest import (
+            harvest_project, save_harvest, load_harvest)
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        if not project_id:
+            raise ValueError("project_id is required")
+        dir_raw = payload.get("dir") or ""
+        if not dir_raw:
+            h = load_harvest(project_id)
+            if not h:
+                return {"found": False, "project_id": project_id,
+                        "hint": "请传 dir 扫描代码目录"}
+            return {"found": True, **h}
+        from pathlib import Path
+        root = Path(dir_raw).resolve()
+        if not root.is_dir():
+            raise ValueError(f"目录不存在: {root}")
+        exts = tuple(payload.get("exts") or [".py"])
+        h = harvest_project(root, project_id=project_id, exts=exts)
+        result = save_harvest(h)
+        self.events.append("harvest_ok", source_agent="brain-server",
+                           payload={"project_id": project_id,
+                                    "stats": h.get("stats", {})})
+        return result
 
     def project_navigate(self, payload: dict) -> dict:
         """在业务画像中定位目标域/实体（导航），返回路径 + 挂载记忆 + 依赖。"""

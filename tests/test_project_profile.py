@@ -270,6 +270,52 @@ class ProjectProfileTests(unittest.TestCase):
         self.assertIn("协调员 → 提交重指派请求", md)
         self.assertIn("状态机: pending → assigned → success → rollback", md)
 
+    def test_harvest_code_fusion(self):
+        """代码养料收割：真实代码 AST → 画像骨架（数据模型字段/端点真实）。"""
+        import tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.tools.code_harvest import harvest_project
+        proj = Path(self.tmp.name) / "demo_project"
+        (proj / "app").mkdir(parents=True)
+        (proj / "app" / "models.py").write_text(textwrap.dedent("""\
+            from dataclasses import dataclass
+            @dataclass
+            class User:
+                id: int
+                name: str
+                email: str
+            @dataclass
+            class Order:
+                order_id: str
+                amount: float
+        """), encoding="utf-8")
+        (proj / "app" / "api.py").write_text(textwrap.dedent("""\
+            def query():
+                pass
+        """), encoding="utf-8")
+        h = harvest_project(proj, project_id="demo")
+        self.assertGreaterEqual(h["stats"]["data_models"], 2)
+        self.assertEqual(h["stats"]["files"], 2)
+        # 融合进画像
+        from cerebrate.tools.project_profile import ProfileStore
+        store = ProfileStore(self.api.mm)
+        draft = store.build_draft("demo", harvest=h)
+        self.assertGreaterEqual(len(draft["domains"]), 1)
+        entity_names = [e["name"] for d in draft["domains"]
+                        for e in d["entities"]]
+        self.assertIn("User", entity_names)
+        self.assertIn("Order", entity_names)
+        user_entity = next(e for d in draft["domains"]
+                           for e in d["entities"] if e["name"] == "User")
+        self.assertTrue(any(f["name"] == "email" for f in user_entity["fields"]))
+        # 保存后可导航到真实代码入口
+        store.save("demo", draft)
+        nav = store.navigate("demo", "User")
+        self.assertTrue(nav["found"])
+        self.assertTrue(any("models.py" in h.get("code_hint", "")
+                            for hit in nav["hits"]
+                            for h in [hit]))
+
 
 if __name__ == "__main__":
     unittest.main()

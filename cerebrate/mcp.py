@@ -326,6 +326,19 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_project_harvest",
+        "description": "【代码结构养料收割】扫描项目真实代码（AST 解析）生成代码结构图谱（模块树/数据模型/API端点），作为业务画像的真实骨架（企业级精度：结构不从记忆推断）。\n传 dir 扫描并保存；不传 dir 读取已生成结构。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "项目 ID"},
+                "dir": {"type": "string", "description": "项目代码根目录（如 /home/as-workstation01/Documents/project/Cerebrate）"},
+                "exts": {"type": "array", "items": {"type": "string"}, "description": "扫描的文件扩展名（默认 [\".py\"]）"}
+            },
+            "required": ["project"]
+        }
+    },
+    {
         "name": "cerebrate_batch_process",
         "description": "【会话结束时调用】批量处理 IPC 队列中的待办请求。",
         "inputSchema": {
@@ -560,6 +573,13 @@ def _handle_call(name: str, args: dict) -> dict:
             return _request("POST", "/v1/project/navigate", {
                 "project": args.get("project", ""),
                 "target": args.get("target", ""),
+            })
+
+        elif name == "cerebrate_project_harvest":
+            return _request("POST", "/v1/project/harvest", {
+                "project": args.get("project", ""),
+                "dir": args.get("dir", ""),
+                "exts": args.get("exts") or [".py"],
             })
 
         elif name == "cerebrate_batch_process":

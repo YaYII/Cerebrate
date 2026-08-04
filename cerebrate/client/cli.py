@@ -99,6 +99,14 @@ def cmd_project_navigate(args):
         "target": args.target,
     }))
 
+def cmd_project_harvest(args):
+    """代码结构养料收割：扫描真实代码生成结构图谱（画像真实骨架）"""
+    output(client_request(args.url, "POST", "/v1/project/harvest", {
+        "project": args.project,
+        "dir": args.dir,
+        "exts": [args.exts] if args.exts else [".py"],
+    }))
+
 
 def cmd_timeline(args):
     """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文"""
@@ -309,6 +317,13 @@ def main(argv=None):
     p.add_argument("--project", default="", help="项目 ID")
     p.add_argument("--target", default="", help="目标业务关键词")
     p.set_defaults(func=cmd_project_navigate)
+
+    p = sub.add_parser("project-harvest",
+                       help="代码结构养料收割（真实代码 AST → 画像骨架）")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--dir", default="", help="项目代码根目录（留空则读取已生成）")
+    p.add_argument("--exts", default=".py", help="扫描扩展名（默认 .py）")
+    p.set_defaults(func=cmd_project_harvest)
 
     p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")
     p.add_argument("--anchor", default="", help="anchor 记忆 ID（不传则用 query 找 top1）")

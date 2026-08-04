@@ -75,3 +75,35 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"project":"ihm-backend","action":"draft","llm_refine":true}' http://127.0.0.1:8765/v1/project/profile
 ```
+
+---
+
+## 7. v3 演进：代码养料收割（企业级精度核心）（2026-08-04）
+
+### 7.1 需求
+把项目真实代码/文档/数据作为「养料」喂养脑虫，画像从「记忆推断」升级为「真实代码驱动」，满足企业级精度。
+
+### 7.2 三层养料管线
+1. **文档养料**：docs/*.md + README → `/v1/ingest` 吸入知识库（Cerebrate 实测 9 文件→17 知识块）
+2. **代码结构养料（新增）**：`cerebrate/tools/code_harvest.py` 用 **AST 解析**真实代码 → 模块树/数据模型（真实字段）/API 端点/类清单，存 `{memory_root}/harvest/{project_id}.json`
+3. **记忆养料**：现有业务记忆
+
+### 7.3 画像融合优先级（企业级精度）
+`真实代码结构(harvest) > LLM 语义(flows/关系) > 业务记忆(经验)`：
+- build_draft 支持 `use_harvest=true`：harvest 生成 domains/entities 骨架（真实 code_hint）
+- LLM 在其上提炼语义域/流程，harvest 域不被覆盖则保留
+
+### 7.4 API/MCP/CLI
+- `POST /v1/project/harvest`（dir 扫描/读取）+ `cerebrate_project_harvest` MCP + `project-harvest` CLI
+- profile draft 支持 `use_harvest` 参数
+
+### 7.5 试点（cerebrate 真实代码）
+- harvest：40 文件/40 模块/1 数据模型(CerebrateConfig 真实字段)/31 端点(/v1/sense 等)
+- 画像 v3（代码驱动+LLM）：cerebrate 域 27 真实类（code_hint=cerebrate/brain/decision.py 等）+ 5 流程
+- **精度验证**：navigate「DecisionRouter」→ 命中真实代码路径 `cerebrate/brain/decision.py`
+
+### 7.6 Bug 修复
+- `cerebrate/tools/ingest.py` line 402 `args` 未定义（既有 bug）→ 修复为 `scope=""`
+
+### 7.7 测试
+- test_harvest_code_fusion 新增；全量 **191 passed / 0 failed**
