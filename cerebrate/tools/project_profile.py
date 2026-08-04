@@ -74,6 +74,9 @@ class ProfileStore:
     def _md_path(self, project_id: str) -> Path:
         return self._profile_dir() / f"{project_id}.md"
 
+    def _draft_path(self, project_id: str) -> Path:
+        return self._profile_dir() / f"{project_id}.draft.json"
+
     # ── CRUD ──
     def read(self, project_id: str, level: str = "detail") -> Optional[dict]:
         p = self._path(project_id)
@@ -222,7 +225,45 @@ class ProfileStore:
         d = self._profile_dir()
         if not d.exists():
             return []
-        return sorted(p.stem for p in d.glob("*.json"))
+        return sorted(p.stem for p in d.glob("*.json")
+                      if not p.name.endswith(".draft.json"))
+
+    # ── 草稿态（sync 自动生成，人工确认后才覆盖 confirmed）──
+    def read_draft(self, project_id: str) -> Optional[dict]:
+        p = self._draft_path(project_id)
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def save_draft(self, project_id: str, draft: dict) -> dict:
+        """保存草稿（不覆盖人工确认版）；promote 时才覆盖 confirmed。"""
+        draft = self._sanitize(draft)
+        draft["project_id"] = project_id
+        draft["status"] = "draft"
+        draft["updated_at"] = datetime.now(timezone.utc).isoformat()
+        draft["version"] = int(draft.get("version", 0)) + 1
+        target = self._draft_path(project_id)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(draft, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        tmp.replace(target)
+        return {"project_id": project_id, "version": draft["version"],
+                "status": "draft", "path": str(target)}
+
+    def promote(self, project_id: str) -> dict:
+        """把草稿提升为人工确认版（覆盖 confirmed）。"""
+        draft = self.read_draft(project_id)
+        if not draft:
+            return {"ok": False, "reason": "no_draft", "project_id": project_id}
+        result = self.save(project_id, draft)
+        # 草稿已被消费，删除草稿文件
+        dp = self._draft_path(project_id)
+        if dp.exists():
+            dp.unlink(missing_ok=True)
+        return {"ok": True, **result}
 
     # ── 画像输入收集 ──
     def _collect_memories(self, project_id: str, limit: int = 200) -> dict:
@@ -575,6 +616,8 @@ class ProfileStore:
             return {"found": False, "project_id": project_id,
                     "reason": "no_profile",
                     "hint": f"项目 {project_id} 暂无业务画像，请先 POST /v1/project/profile 构建"}
+        verified = self.verify(project_id)
+        verified_ok = verified.get("ok", False)
         hits = []
         for domain in profile.get("domains", []):
             if _match(domain, target):
@@ -604,7 +647,84 @@ class ProfileStore:
                     "reason": "no_match", "target": target,
                     "domains": [d.get("id") for d in profile.get("domains", [])]}
         return {"found": True, "project_id": project_id, "target": target,
-                "hits": hits[:20]}
+                "hits": hits[:20],
+                "profile_verified": verified_ok,
+                "sources": {
+                    "code_verified": verified_ok,
+                    "memory_note": "业务记忆仅为参考（参考答案），具体以代码仓真实代码为准",
+                }}
+
+    def verify(self, project_id: str) -> dict:
+        """画像 vs 代码仓一致性校验（实事求是：画像必须对得上真实代码）。
+
+        检查:
+          1. 画像实体 code_hint 文件是否真实存在于代码仓（漂移）
+          2. 代码仓真实类/数据模型 是否在画像中（缺漏）
+          3. 端点是否存在（若画像含端点）
+        返回: ok=True 无漂移；issues 列出漂移项（画像有但代码无），
+              missing_in_profile 列出缺漏（代码有但画像无，供人工补）。
+        """
+        from cerebrate.tools.code_harvest import load_harvest
+        profile = self.read(project_id)
+        if not profile:
+            return {"ok": False, "reason": "no_profile", "project_id": project_id}
+        harvest = load_harvest(project_id)
+        if not harvest:
+            return {"ok": False, "reason": "no_harvest", "project_id": project_id,
+                    "hint": "请先同步代码（code-sync）或收割（project-harvest）"}
+        code_files = {m["path"] for m in harvest.get("modules", [])}
+        code_classes = set()
+        for m in harvest.get("modules", []):
+            code_classes.update(m.get("classes", []))
+        code_models = {dm["name"] for dm in harvest.get("data_models", [])}
+        code_endpoints = {ep.get("path") for ep in harvest.get("endpoints", [])}
+        issues = []
+        entity_names = set()
+        for d in profile.get("domains", []):
+            for e in d.get("entities", []):
+                name = e.get("name", "")
+                entity_names.add(name)
+                hint = e.get("code_hint", "")
+                # 只对「形如代码路径」的 code_hint 严格校验（LLM 语义描述不误报）
+                if hint and self._looks_like_code_path(hint) \
+                        and hint not in code_files:
+                    issues.append(f"code_hint 漂移: {name} → {hint}（代码仓不存在）")
+                for ep in e.get("relations", []):
+                    pass
+            for ep in d.get("endpoints", []) or []:
+                # 端点格式 "METHOD /path" 或 "/path"
+                ep_path = ep.split(" ", 1)[-1] if isinstance(ep, str) else ""
+                if ep_path and ep_path.startswith("/") and ep_path not in code_endpoints:
+                    issues.append(f"端点漂移: {ep}（代码仓不存在）")
+        # 代码有但画像缺漏（供人工补，不算失败）
+        missing_in_profile = sorted(
+            (code_classes | code_models) - entity_names)[:20]
+        return {
+            "project_id": project_id,
+            "ok": len(issues) == 0,
+            "issues": issues[:20],
+            "issue_count": len(issues),
+            "missing_in_profile": missing_in_profile,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _looks_like_code_path(hint: str) -> bool:
+        """判断 code_hint 是否形如代码文件路径（含扩展名或 / 分隔）。"""
+        code_exts = (".py", ".php", ".java", ".js", ".ts", ".go", ".rb",
+                     ".cs", ".c", ".cpp", ".h", ".hpp", ".rs", ".kt",
+                     ".swift", ".vue", ".jsx", ".tsx", ".sh", ".sql",
+                     ".xml", ".yml", ".yaml", ".json", ".md", ".txt")
+        if hint.endswith(code_exts):
+            return True
+        if "/" not in hint and "\\" not in hint:
+            return False
+        # 含路径分隔符的必须是「干净路径」：无空格、无中文（否则是语义描述）
+        if " " in hint:
+            return False
+        if any("\u4e00" <= ch <= "\u9fff" for ch in hint):
+            return False
+        return True
 
     # ── Phase 4: 记忆挂载 ──
     def attach_memory(self, project_id: str, node_path: str,
@@ -653,6 +773,8 @@ class ProfileStore:
         domains = profile.get("domains", [])
         if not domains:
             lines.append("_该项目暂无业务画像，请先 build draft。_")
+        lines.append("> ⚠️ 业务记忆为参考（参考答案），具体以代码仓真实代码为准；"
+                     "如有漂移请先 code-sync。")
         for domain in domains:
             lines.append(f"## 📦 {domain.get('name', domain.get('id', ''))}"
                          f" `/{domain.get('id', '')}`")

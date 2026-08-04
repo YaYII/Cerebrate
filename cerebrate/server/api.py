@@ -1515,6 +1515,21 @@ class BrainAPI:
             if not p:
                 return {"found": False, "project_id": project_id}
             return {"found": True, **p}
+        if action == "read_draft":
+            p = store.read_draft(project_id)
+            if not p:
+                return {"found": False, "project_id": project_id,
+                        "hint": "暂无草稿（code-sync 自动生成或 action=save_draft）"}
+            return {"found": True, **p}
+        if action == "save_draft":
+            profile = payload.get("profile") or {}
+            if not isinstance(profile, dict) or not profile:
+                raise ValueError("profile is required for save_draft")
+            return store.save_draft(project_id, profile)
+        if action == "promote":
+            return store.promote(project_id)
+        if action == "verify":
+            return store.verify(project_id)
         if action == "draft":
             try:
                 limit = min(int(payload.get("limit", 200)), 500)
@@ -1593,7 +1608,8 @@ class BrainAPI:
         return result
 
     def code_sync(self, payload: dict) -> dict:
-        """代码同步：接收本地项目代码包，解压到代码仓并自动 harvest。"""
+        """代码同步：接收本地项目代码包（含增量删除清单），解压到代码仓，
+        自动 harvest；auto_profile=True 时自动生成画像草稿（不覆盖人工确认版）。"""
         from cerebrate.tools.code_sync import receive_package
         project_id = payload.get("project") or payload.get("project_id") or ""
         package_b64 = payload.get("package_b64") or ""
@@ -1601,10 +1617,27 @@ class BrainAPI:
             raise ValueError("project_id and package_b64 are required")
         auto_harvest = payload.get("auto_harvest", True)
         result = receive_package(project_id, package_b64,
+                                 delete_list=payload.get("delete_list") or [],
                                  auto_harvest=auto_harvest)
+        if (payload.get("auto_profile", True) and result.get("harvest")
+                and (result.get("files_written", 0) > 0
+                     or result.get("files_removed", 0) > 0)):
+            try:
+                from cerebrate.tools.project_profile import ProfileStore
+                from cerebrate.tools.code_harvest import load_harvest
+                h = load_harvest(project_id)
+                store = ProfileStore(self.mm)
+                draft = store.build_draft(
+                    project_id, harvest=h,
+                    llm_refine=config.profile_llm_enabled)
+                draft_res = store.save_draft(project_id, draft)
+                result["profile_draft"] = draft_res
+            except Exception as e:
+                result["profile_draft_error"] = str(e)
         self.events.append("code_sync_ok", source_agent="brain-server",
                            payload={"project_id": project_id,
-                                    "files_written": result["files_written"]})
+                                    "files_written": result["files_written"],
+                                    "files_removed": result.get("files_removed", 0)})
         return result
 
     def project_navigate(self, payload: dict) -> dict:

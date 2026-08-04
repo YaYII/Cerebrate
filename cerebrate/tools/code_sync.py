@@ -9,9 +9,11 @@
 """
 
 import base64
+import hashlib
 import io
 import json
 import logging
+import os
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +46,10 @@ SYNC_EXCLUDE_SUFFIXES = (
 )
 SYNC_EXCLUDE_NAME_TOKENS = ("token", "secret", "credential", "private", "password")
 
+# 本地同步清单缓存目录（不污染项目目录）
+SYNC_CACHE_DIR = Path(
+    os.environ.get("CEREBRATE_SYNC_CACHE", str(Path.home() / ".cerebrate-sync")))
+
 
 def _is_sensitive_path(rel: str) -> Optional[str]:
     """返回敏感原因（None=安全）。文件名级判断。"""
@@ -62,14 +68,40 @@ def _is_sensitive_path(rel: str) -> Optional[str]:
     return None
 
 
-def build_package(root: Path, project_id: str = "",
-                  max_bytes: int = 0) -> dict:
-    """本地打包：扫描目录生成 tar.gz（排除敏感），返回 base64 包 + 清单。"""
-    root = root.resolve()
-    max_bytes = max_bytes or config.code_sync_max_bytes
-    files = []
-    excluded = []
-    total = 0
+def _sha256(filepath: Path) -> str:
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _manifest_path(project_id: str) -> Path:
+    SYNC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return SYNC_CACHE_DIR / f"{project_id}.json"
+
+
+def _load_manifest(project_id: str) -> Optional[dict]:
+    p = _manifest_path(project_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _save_manifest(project_id: str, manifest: dict) -> None:
+    p = _manifest_path(project_id)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=1),
+                   encoding="utf-8")
+    tmp.replace(p)
+
+
+def _scan_files_with_hash(root: Path) -> tuple[list[tuple[str, int]], list[dict]]:
+    """扫描目录，返回 (files: [(rel, size)], excluded)。"""
+    files, excluded = [], []
     for filepath in sorted(root.rglob("*")):
         if not filepath.is_file():
             continue
@@ -82,26 +114,68 @@ def build_package(root: Path, project_id: str = "",
             size = filepath.stat().st_size
         except OSError:
             continue
-        total += size
         files.append((rel, size))
+    return files, excluded
+
+
+def build_package(root: Path, project_id: str = "",
+                  max_bytes: int = 0, incremental: bool = True) -> dict:
+    """本地打包：扫描目录生成 tar.gz（排除敏感），支持增量（只传变更文件）。"""
+    root = root.resolve()
+    max_bytes = max_bytes or config.code_sync_max_bytes
+    files, excluded = _scan_files_with_hash(root)
+    total = 0
+    current_hash: dict[str, str] = {}
+    for rel, size in files:
+        total += size
+        current_hash[rel] = _sha256(root / rel)
     if total > max_bytes:
         raise ValueError(
             f"代码包 {total/1024/1024:.1f}MB 超过上限 {max_bytes/1024/1024:.0f}MB，"
             f"请排除大目录后重试")
+
+    prev = _load_manifest(project_id) if incremental else None
+    if prev and prev.get("root") == str(root):
+        # 增量：变更 + 新增 + 删除
+        changed = [rel for rel, h in current_hash.items()
+                   if prev.get("files", {}).get(rel) != h]
+        added = [rel for rel in current_hash
+                 if rel not in prev.get("files", {})]
+        deleted = [rel for rel in prev.get("files", {})
+                   if rel not in current_hash]
+        to_pack = sorted(set(changed) | set(added))
+        incremental_used = True
+    else:
+        to_pack = [rel for rel, _ in files]
+        deleted = []
+        incremental_used = False
+
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        for rel, _ in files:
+        for rel in to_pack:
             tf.add(root / rel, arcname=rel)
     package_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    # 更新本地清单（记录当前全量状态）
+    _save_manifest(project_id, {
+        "project_id": project_id,
+        "root": str(root),
+        "files": current_hash,
+        "synced_at": datetime.now(timezone.utc).isoformat(),
+    })
     return {
         "project_id": project_id,
         "root": str(root),
-        "files_count": len(files),
+        "incremental": incremental_used,
+        "files_total": len(files),
+        "files_changed": len(to_pack),
+        "files_deleted": len(deleted),
+        "deleted": deleted,
+        "files_count": len(to_pack),
         "excluded_count": len(excluded),
         "total_bytes": total,
         "package_bytes": len(buf.getvalue()),
         "package_b64": package_b64,
-        "files": [{"path": p, "size": s} for p, s in files],
+        "files": [{"path": p, "size": s} for p, s in files if p in set(to_pack)],
         "excluded": excluded[:100],
     }
 
@@ -142,9 +216,22 @@ def _safe_extract(tar_bytes: bytes, dest: Path) -> int:
     return count
 
 
+def _safe_remove(repo_root: Path, rel: str) -> bool:
+    """安全删除代码仓内文件（拒绝路径穿越）。"""
+    target = (repo_root / rel).resolve()
+    if not str(target).startswith(str(repo_root) + "/"):
+        logger.warning("拒绝删除越界路径: %s", rel)
+        return False
+    if target.is_file():
+        target.unlink(missing_ok=True)
+        return True
+    return False
+
+
 def receive_package(project_id: str, package_b64: str,
+                    delete_list: Optional[list] = None,
                     auto_harvest: bool = True) -> dict:
-    """服务端接收：解压代码仓 → 可选自动 harvest。"""
+    """服务端接收：解压代码仓（增量应用删除清单）→ 可选自动 harvest。"""
     try:
         tar_bytes = base64.b64decode(package_b64)
     except Exception as e:
@@ -154,10 +241,15 @@ def receive_package(project_id: str, package_b64: str,
                          f"{config.code_sync_max_bytes/1024/1024:.0f}MB")
     repo_root = config.memory_root / "code_repos" / project_id
     written = _safe_extract(tar_bytes, repo_root)
+    removed = 0
+    for rel in (delete_list or []):
+        if _safe_remove(repo_root, rel):
+            removed += 1
     result = {
         "project_id": project_id,
         "repo_path": str(repo_root),
         "files_written": written,
+        "files_removed": removed,
         "received_bytes": len(tar_bytes),
     }
     if auto_harvest:

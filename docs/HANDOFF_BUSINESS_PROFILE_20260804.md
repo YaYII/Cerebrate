@@ -134,3 +134,39 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 - 服务器：解压 105 文件到 /data/code_repos/cerebrate → harvest 41 文件/41 模块/1 数据模型/32 端点
 - navigate「DecisionRouter」→ cerebrate/brain/decision.py（代码仓驱动）
 - 测试：test_code_sync_roundtrip；全量 **192 passed / 0 failed**
+
+---
+
+## 9. v5 演进：基础建设加固 — 自动画像联动 + 增量同步 + 一致性校验（2026-08-04）
+
+### 9.1 需求
+用户明确：基础建设功能必须做扎实（「功能没有做好，基本死就会出现问题」），并强调「禁止背诵答案、实事求是」——记忆只是参考（参考答案），具体问题必须基于当前项目真实代码分析。
+
+### 9.2 功能 2：自动画像联动
+- code_sync 支持 `auto_profile=true`（默认）：同步后自动 build_draft + **保存为草稿**（`{project_id}.draft.json`，不覆盖人工确认版）
+- ProfileStore 草稿态：`save_draft/read_draft/promote`；promote 把草稿提升为 confirmed（version+1，删除草稿文件）
+- API：profile action=read_draft/save_draft/promote
+- 优化：0 变更时跳过自动画像（省 LLM）
+
+### 9.3 功能 3：增量同步
+- `build_package(incremental=True)`：本地 manifest（`~/.cerebrate-sync/{project_id}.json`，sha256 全量哈希）
+- 增量只打包「变更+新增」，删除文件进 `delete_list`；服务器 `_safe_remove` 安全删除
+- 实测：二次 sync 变更 0 → 服务器接收仅 **45 字节**
+- CLI：`--full` 强制全量、`--no-profile` 关自动画像
+
+### 9.4 功能 4：一致性校验
+- `ProfileStore.verify(project_id)`：画像 vs 代码仓（harvest）
+  - code_hint 漂移检查（只对「形如代码路径」的 hint 严格校验，含中文/空格的语义描述不误报）
+  - 代码仓真实类/数据模型缺漏（missing_in_profile）
+  - 端点漂移检查
+- API：profile action=verify；navigate 返回 `profile_verified` + `sources`（标注「业务记忆仅为参考，以代码仓真实代码为准」）
+- 实测：cerebrate verify **ok=True / 0 issues / 0 missing**
+
+### 9.5 设计理念（回应用户「禁止背诵」）
+- 画像 = 项目地图（参考）；代码仓 = 事实源（权威）；记忆 = 参考答案（参考）
+- navigate/画像明确标注信息源与验证状态，AI 先看真实代码再分析，不把记忆当答案背诵
+- Markdown 渲染加「⚠️ 业务记忆为参考，以代码仓为准」
+
+### 9.6 测试
+- 新增：test_code_sync_incremental / test_profile_draft_and_promote / test_verify_consistency
+- 全量 **195 passed / 0 failed**

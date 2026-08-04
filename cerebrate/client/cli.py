@@ -118,9 +118,12 @@ def cmd_code_sync(args):
                                     "message": f"目录不存在: {root}"}},
                          ensure_ascii=False))
         sys.exit(1)
-    pkg = build_package(root, project_id=args.project)
-    print(f"打包完成: {pkg['files_count']} 文件 / "
-          f"{pkg['total_bytes']/1024:.1f}KB / 排除 {pkg['excluded_count']} 项",
+    pkg = build_package(root, project_id=args.project,
+                        incremental=not args.full)
+    mode = "增量" if pkg["incremental"] else "全量"
+    print(f"打包完成[{mode}]: 变更 {pkg['files_changed']} / "
+          f"删除 {pkg['files_deleted']} / 排除 {pkg['excluded_count']} 项 / "
+          f"{pkg['total_bytes']/1024:.1f}KB",
           file=sys.stderr)
     for ex in pkg["excluded"][:10]:
         print(f"  ⛔ 排除 {ex['path']} ({ex['reason']})", file=sys.stderr)
@@ -128,6 +131,8 @@ def cmd_code_sync(args):
         "project": args.project,
         "package_b64": pkg["package_b64"],
         "auto_harvest": True,
+        "auto_profile": not args.no_profile,
+        "delete_list": pkg.get("deleted", []),
     })
     output(resp)
 
@@ -353,6 +358,10 @@ def main(argv=None):
                        help="代码同步：本地完整项目代码打包上传到脑虫（→代码仓→harvest→画像）")
     p.add_argument("--project", default="", help="项目 ID")
     p.add_argument("--dir", default="", help="本地项目代码根目录")
+    p.add_argument("--full", action="store_true",
+                   help="强制全量同步（默认增量，只传变更文件）")
+    p.add_argument("--no-profile", action="store_true",
+                   help="同步后不自动生成画像草稿")
     p.set_defaults(func=cmd_code_sync)
 
     p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")

@@ -352,6 +352,96 @@ class ProjectProfileTests(unittest.TestCase):
         self.assertTrue(any("SyncEntity" in m.get("classes", [])
                             for m in h["modules"]))
 
+    def test_code_sync_incremental(self):
+        """增量同步：二次 sync 只传变更/新增，删除文件进入 delete_list。"""
+        import tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.config import config
+        from cerebrate.tools.code_sync import (
+            build_package, receive_package)
+        proj = Path(self.tmp.name) / "incr_project"
+        (proj / "src").mkdir(parents=True)
+        (proj / "src" / "a.py").write_text("A = 1", encoding="utf-8")
+        # 首次全量
+        pkg1 = build_package(proj, project_id="incr")
+        self.assertFalse(pkg1["incremental"])
+        self.assertEqual(pkg1["files_changed"], 1)
+        # 服务器接收
+        receive_package("incr", pkg1["package_b64"], auto_harvest=False)
+        # 修改 a.py + 新增 b.py + 删除 c.py（先建再删）
+        (proj / "src" / "c.py").write_text("C = 3", encoding="utf-8")
+        receive_package("incr",
+                        build_package(proj, project_id="incr")["package_b64"],
+                        auto_harvest=False)
+        (proj / "src" / "a.py").write_text("A = 2", encoding="utf-8")
+        (proj / "src" / "b.py").write_text("B = 2", encoding="utf-8")
+        (proj / "src" / "c.py").unlink()
+        pkg2 = build_package(proj, project_id="incr")
+        self.assertTrue(pkg2["incremental"])
+        self.assertEqual(pkg2["files_changed"], 2)  # a.py(改) + b.py(新)
+        self.assertIn("src/c.py", pkg2["deleted"])
+        # 服务器应用增量（含删除）
+        res = receive_package("incr", pkg2["package_b64"],
+                              delete_list=pkg2["deleted"], auto_harvest=False)
+        self.assertGreaterEqual(res["files_written"], 2)
+        self.assertEqual(res["files_removed"], 1)
+        repo = Path(config.memory_root) / "code_repos" / "incr"
+        self.assertFalse((repo / "src" / "c.py").exists())
+        self.assertTrue((repo / "src" / "b.py").exists())
+
+    def test_profile_draft_and_promote(self):
+        """草稿态：save_draft 不覆盖 confirmed；promote 提升为 confirmed。"""
+        self._seed()
+        from cerebrate.tools.project_profile import ProfileStore
+        store = ProfileStore(self.api.mm)
+        draft = store.build_draft("ihm-backend")
+        store.save("ihm-backend", draft)          # confirmed v1
+        draft2 = store.build_draft("ihm-backend")
+        store.save_draft("ihm-backend", draft2)   # draft 不覆盖
+        self.assertEqual(store.read("ihm-backend")["version"], 1)
+        self.assertEqual(store.read_draft("ihm-backend")["status"], "draft")
+        # promote
+        res = store.promote("ihm-backend")
+        self.assertTrue(res["ok"])
+        self.assertEqual(store.read("ihm-backend")["version"], 2)
+        self.assertIsNone(store.read_draft("ihm-backend"))
+
+    def test_verify_consistency(self):
+        """一致性校验：code_hint 漂移检出；无 harvest 时提示。"""
+        import tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.tools.code_harvest import (
+            harvest_project, save_harvest)
+        from cerebrate.tools.project_profile import ProfileStore
+        proj = Path(self.tmp.name) / "verify_project"
+        (proj / "app").mkdir(parents=True)
+        (proj / "app" / "svc.py").write_text(
+            "class RealService:\n    pass\n", encoding="utf-8")
+        h = harvest_project(proj, project_id="verify-p")
+        save_harvest(h)
+        store = ProfileStore(self.api.mm)
+        # 无 harvest 的项目 → no_harvest
+        no_h = store.verify("no-such-project")
+        self.assertFalse(no_h["ok"])
+        self.assertIn("reason", no_h)
+        # 构建画像：code_hint 指向不存在文件 → 漂移
+        draft = store.build_draft("verify-p", harvest=h)
+        draft["domains"][0]["entities"].append({
+            "id": "ghost", "name": "GhostClass",
+            "description": "", "fields": [], "relations": [],
+            "code_hint": "app/nonexistent.py", "memories": [],
+        })
+        store.save("verify-p", draft)
+        v = store.verify("verify-p")
+        self.assertFalse(v["ok"])
+        self.assertTrue(any("漂移" in i for i in v["issues"]))
+        # 真实类应在 missing_in_profile 或已收录
+        self.assertTrue(
+            "RealService" in v["missing_in_profile"]
+            or "RealService" in {
+                e["name"] for d in draft["domains"]
+                for e in d["entities"]})
+
 
 if __name__ == "__main__":
     unittest.main()
