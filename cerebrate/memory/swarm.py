@@ -219,7 +219,8 @@ class SwarmMemory:
               memory_id: Optional[str] = None,
               observation_type: str = "",
               facts: Optional[list[str]] = None,
-              concepts: Optional[list[str]] = None) -> str:
+              concepts: Optional[list[str]] = None,
+              knowledge_type: str = "") -> str:
         """向虫群共享记忆
 
         架构:
@@ -254,6 +255,12 @@ class SwarmMemory:
             project_id = project_id or config.current_project_id
             scope = "project" if project_id else "general"
         language = language or config.default_language
+        # 知识类型（业务层面/技术层面）：
+        #   业务层面 = 项目专属（无法被其他项目继承）→ scope=project
+        #   技术层面 = 跨项目可复用参考 → scope=general
+        # 未显式指定时按 scope 自动推断；允许调用方显式覆盖（混合记忆）
+        if not knowledge_type:
+            knowledge_type = "business" if project_id else "tech"
         now = datetime.now(timezone.utc).isoformat()
         supersedes = supersedes or []
         origin_ids = origin_ids or []
@@ -306,6 +313,7 @@ class SwarmMemory:
                 observation_type=observation_type,
                 facts=facts,
                 concepts=concepts,
+                knowledge_type=knowledge_type,
             )
             # 短记忆标记位：让 enrich 知道内容已在 ChromaDB 中
             if is_short_memory:
@@ -393,6 +401,7 @@ class SwarmMemory:
                 observation_type=observation_type,
                 facts=facts,
                 concepts=concepts,
+                knowledge_type=knowledge_type,
             )
             self._store.add(chunk_mid, search_text, chunk_meta)
 
@@ -414,6 +423,7 @@ class SwarmMemory:
             observation_type=observation_type,
             facts=facts,
             concepts=concepts,
+            knowledge_type=knowledge_type,
         )
         parent_meta["_content_len"] = str(len(content))
         self._store.add(memory_id, title, parent_meta)
@@ -639,7 +649,8 @@ class SwarmMemory:
                         chunk_index=0, total_chunks=1, full_content="",
                         doc_group_id="", is_parent=False,
                         token_estimate=0,
-                        observation_type="", facts=None, concepts=None) -> dict:
+                        observation_type="", facts=None, concepts=None,
+                        knowledge_type="") -> dict:
         """构建统一的元数据字典"""
         return {
             "title": title,
@@ -656,6 +667,7 @@ class SwarmMemory:
             "outcome": outcome,
             "project_id": project_id,
             "scope": scope,
+            "knowledge_type": knowledge_type,
             "language": language,
             "score": 1.0,
             "reuse_count": 0,
@@ -1564,6 +1576,7 @@ class SwarmMemory:
             "physical_user": meta.get("physical_user", ""),
             "project_id": meta.get("project_id", ""),
             "scope": meta.get("scope", "project" if meta.get("project_id") else "general"),
+            "knowledge_type": meta.get("knowledge_type", ""),
             "created": meta.get("created", ""),
             "total_chunks": meta.get("total_chunks", 1),
         }

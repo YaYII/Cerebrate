@@ -730,6 +730,7 @@ class BrainAPI:
             supersedes_raw = [s.strip() for s in supersedes_raw.split(",") if s.strip()]
         project_id = payload.get("project") or payload.get("project_id", "")
         scope = payload.get("scope", "")
+        knowledge_type = payload.get("knowledge_type", "")
         requested_stage = payload.get("life_stage", "memory")
         life_stage = requested_stage if requested_stage in self.CLIENT_LIFE_STAGES else "memory"
         confidence = float(payload.get("confidence", 1.0))
@@ -803,6 +804,7 @@ class BrainAPI:
             observation_type=observation_type,
             facts=facts,
             concepts=concepts,
+            knowledge_type=knowledge_type,
         )
         data = {
             "memory_id": memory_id,
@@ -1486,6 +1488,77 @@ class BrainAPI:
         except (TypeError, ValueError):
             limit = 50
         return ctx.build(project_id, limit=limit)
+
+    def project_profile(self, payload: dict) -> dict:
+        """业务画像（数据世界）：项目的领域树 + 实体关系 + 依赖导航。
+
+        action:
+          - read（默认）: 读取已确认画像（未生成返回 found=False）
+          - list: 列出已有画像项目
+          - draft: 从业务记忆构建画像草稿（规则骨架；llm_refine=True 时 LLM 精炼）
+          - save: 保存人工确认版画像（body.profile），version+1 并渲染 Markdown
+          - attach: 把业务记忆挂到画像节点（node_path + memory_id）
+        """
+        from cerebrate.tools.project_profile import ProfileStore
+        store = ProfileStore(self.mm)
+        action = payload.get("action", "read")
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        if action == "list":
+            return {"projects": store.list_projects()}
+        if not project_id:
+            raise ValueError("project_id is required")
+        if action == "read":
+            level = payload.get("level", "detail")
+            if level not in ("summary", "graph", "detail"):
+                raise ValueError("level must be summary|graph|detail")
+            p = store.read(project_id, level=level)
+            if not p:
+                return {"found": False, "project_id": project_id}
+            return {"found": True, **p}
+        if action == "draft":
+            try:
+                limit = min(int(payload.get("limit", 200)), 500)
+            except (TypeError, ValueError):
+                limit = 200
+            llm_refine = payload.get("llm_refine")
+            draft = store.build_draft(project_id, limit=limit,
+                                      llm_refine=llm_refine)
+            return {
+                "project_id": project_id,
+                "status": draft.get("status", "draft"),
+                "domain_count": len(draft.get("domains", [])),
+                "business_memories": len(
+                    store._collect_memories(project_id, limit=limit)["business"]),
+                "draft": draft,
+            }
+        if action == "save":
+            profile = payload.get("profile") or {}
+            if not isinstance(profile, dict) or not profile:
+                raise ValueError("profile is required for save")
+            profile["project_id"] = project_id
+            result = store.save(project_id, profile)
+            self.events.append(
+                "profile_saved", source_agent="brain-server",
+                payload={"project_id": project_id,
+                         "version": result["version"]})
+            return result
+        if action == "attach":
+            node_path = payload.get("node_path") or payload.get("node") or ""
+            memory_id = payload.get("memory_id") or ""
+            if not node_path or not memory_id:
+                raise ValueError("node_path and memory_id are required for attach")
+            return store.attach_memory(project_id, node_path, memory_id)
+        raise ValueError(f"unknown action: {action}")
+
+    def project_navigate(self, payload: dict) -> dict:
+        """在业务画像中定位目标域/实体（导航），返回路径 + 挂载记忆 + 依赖。"""
+        from cerebrate.tools.project_profile import ProfileStore
+        store = ProfileStore(self.mm)
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        target = payload.get("target") or payload.get("query") or ""
+        if not project_id or not target:
+            raise ValueError("project_id and target are required")
+        return store.navigate(project_id, target)
 
     def list_all_knowledge(self) -> list[dict]:
         """列出知识库所有文档摘要。"""

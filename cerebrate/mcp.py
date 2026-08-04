@@ -297,6 +297,35 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_project_profile",
+        "description": "【业务画像-数据世界】为项目构建/读取业务画像（领域树+实体关系+依赖导航，地图式分层：先宏观俯瞰再微观深挖，避免 AI 大面积扫代码/被文档淹没）。\naction=read 读取画像（默认；level=summary 宏观概览/level=graph 中观图谱/level=detail 微观完整）；action=list 列出已有画像项目；action=draft 从业务记忆构建草稿（llm_refine=true 时用 LLM 精炼）；action=save 保存人工确认版（profile 字段传画像 JSON）；action=attach 把业务记忆挂到画像节点（node_path + memory_id）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "项目 ID"},
+                "action": {"type": "string", "description": "read=读取(默认); list=列出; draft=构建草稿; save=保存确认版; attach=挂载记忆", "default": "read", "enum": ["read", "list", "draft", "save", "attach"]},
+                "level": {"type": "string", "description": "read 时披露层级: summary=宏观概览(域+依赖+实体数); graph=中观图谱(域+实体+关系); detail=微观完整(字段+记忆)", "default": "detail", "enum": ["summary", "graph", "detail"]},
+                "llm_refine": {"type": "boolean", "description": "draft 时是否用 LLM 精炼（默认取服务端配置）", "default": False},
+                "profile": {"type": "object", "description": "save 时传入的画像 JSON（domains/shared_tech 结构）"},
+                "node_path": {"type": "string", "description": "attach 时的节点路径，如 domain 或 domain/entity"},
+                "memory_id": {"type": "string", "description": "attach 时要挂载的记忆 ID"}
+            },
+            "required": ["project"]
+        }
+    },
+    {
+        "name": "cerebrate_project_navigate",
+        "description": "【业务画像导航】在项目业务画像中定位目标域/实体（微观深挖），返回路径+挂载业务记忆+依赖关系+代码入口提示，供 AI 精准读取目标模块（避免全量扫描代码）。配合 cerebrate_project_profile(level=summary) 宏观俯瞰使用。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "项目 ID"},
+                "target": {"type": "string", "description": "目标业务关键词，如「DOB 指派」「个案」「审批」"}
+            },
+            "required": ["project", "target"]
+        }
+    },
+    {
         "name": "cerebrate_batch_process",
         "description": "【会话结束时调用】批量处理 IPC 队列中的待办请求。",
         "inputSchema": {
@@ -514,6 +543,23 @@ def _handle_call(name: str, args: dict) -> dict:
                 "project": args.get("project", ""),
                 "action": args.get("action", "build"),
                 "limit": args.get("limit", 50),
+            })
+
+        elif name == "cerebrate_project_profile":
+            return _request("POST", "/v1/project/profile", {
+                "project": args.get("project", ""),
+                "action": args.get("action", "read"),
+                "level": args.get("level", "detail"),
+                "llm_refine": args.get("llm_refine", False),
+                "profile": args.get("profile"),
+                "node_path": args.get("node_path", ""),
+                "memory_id": args.get("memory_id", ""),
+            })
+
+        elif name == "cerebrate_project_navigate":
+            return _request("POST", "/v1/project/navigate", {
+                "project": args.get("project", ""),
+                "target": args.get("target", ""),
             })
 
         elif name == "cerebrate_batch_process":

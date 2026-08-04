@@ -205,6 +205,13 @@ class CerebrateConfig:
         self.chroma_path = self.memory_root / "chroma_data"
         self.docstore_path = self.memory_root / "docstore"
         self.fulltext_path = self.memory_root / "fulltext.sqlite3"
+        self.profile_path = self.memory_root / "profiles"
+
+    # 业务画像（数据世界）
+    profile_llm_enabled: bool = field(
+        default_factory=lambda: os.environ.get(
+            "CEREBRATE_PROFILE_LLM_ENABLED", "false").lower() in (
+                "1", "true", "yes", "on"))
 
 
 config = CerebrateConfig()

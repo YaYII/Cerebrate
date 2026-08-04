@@ -81,6 +81,24 @@ def cmd_project_context(args):
         "limit": getattr(args, "limit", 50),
     }))
 
+def cmd_project_profile(args):
+    """业务画像（数据世界）：构建/读取项目领域树+依赖导航"""
+    body = {
+        "project": args.project,
+        "action": args.action,
+    }
+    if args.action == "draft":
+        body["llm_refine"] = args.llm_refine
+        body["limit"] = args.limit
+    output(client_request(args.url, "POST", "/v1/project/profile", body))
+
+def cmd_project_navigate(args):
+    """业务画像导航：定位目标域/实体，避免全量扫描代码"""
+    output(client_request(args.url, "POST", "/v1/project/navigate", {
+        "project": args.project,
+        "target": args.target,
+    }))
+
 
 def cmd_timeline(args):
     """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文"""
@@ -272,6 +290,25 @@ def main(argv=None):
     p.add_argument("--limit", type=int, default=50,
                    help="build 时收录的记忆条数上限（默认 50，最大 200）")
     p.set_defaults(func=cmd_project_context)
+
+    p = sub.add_parser("project-profile",
+                       help="业务画像（数据世界）：项目的领域树+实体关系+依赖导航")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--action", default="read",
+                   choices=["read", "list", "draft", "save", "attach"],
+                   help="read=读取(默认); list=列出; draft=构建草稿; "
+                        "save=保存确认版; attach=挂载记忆")
+    p.add_argument("--llm-refine", action="store_true",
+                   help="draft 时用 LLM 精炼画像（默认关）")
+    p.add_argument("--limit", type=int, default=200,
+                   help="draft 时收录的业务记忆条数上限（默认 200，最大 500）")
+    p.set_defaults(func=cmd_project_profile)
+
+    p = sub.add_parser("project-navigate",
+                       help="业务画像导航：定位目标域/实体（避免大面积扫描代码）")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--target", default="", help="目标业务关键词")
+    p.set_defaults(func=cmd_project_navigate)
 
     p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")
     p.add_argument("--anchor", default="", help="anchor 记忆 ID（不传则用 query 找 top1）")
