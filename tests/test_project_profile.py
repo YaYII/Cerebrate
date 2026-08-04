@@ -222,6 +222,54 @@ class ProjectProfileTests(unittest.TestCase):
         self.assertTrue(api_summary["found"])
         self.assertEqual(api_summary["level"], "summary")
 
+    def test_flow_view(self):
+        """流程视图：flows 持久化 + 分层披露 + Markdown 渲染。"""
+        self._seed()
+        from cerebrate.tools.project_profile import ProfileStore
+        store = ProfileStore(self.api.mm)
+        draft = store.build_draft("ihm-backend")
+        draft["flows"] = [{
+            "id": "dob-reassign",
+            "name": "DOB 人员重新指派流程",
+            "trigger": "协调员发起重新指派",
+            "actors": ["协调员", "系统"],
+            "steps": [
+                {"seq": 1, "actor": "协调员", "action": "提交重指派请求",
+                 "input": "case_id+角色槽位", "output": "待校验"},
+                {"seq": 2, "actor": "系统", "action": "槽位校验+两阶段执行",
+                 "condition": "校验通过", "output": "成功/回滚",
+                 "detail": "DobReassignmentServiceV2"},
+            ],
+            "state_machine": {
+                "states": ["pending", "assigned", "success", "rollback"],
+                "transitions": [{"from": "pending", "to": "assigned",
+                                 "on": "校验通过"}],
+            },
+            "depends_on": ["dob-assignment"],
+            "memories": ["m1"],
+        }]
+        store.save("ihm-backend", draft)
+        # detail 含完整 flows
+        detail = store.read("ihm-backend", level="detail")
+        self.assertEqual(len(detail["flows"]), 1)
+        self.assertEqual(detail["flows"][0]["id"], "dob-reassign")
+        self.assertEqual(detail["flows"][0]["state_machine"]["states"][0],
+                         "pending")
+        # summary 含流程名（宏观）
+        summary = store.read("ihm-backend", level="summary")
+        self.assertIn("DOB 人员重新指派流程", summary["summary"]["flows"])
+        self.assertEqual(summary["summary"]["flow_count"], 1)
+        # graph 含流程步骤（中观）
+        graph = store.read("ihm-backend", level="graph")
+        self.assertIn("flows", graph["graph"])
+        self.assertEqual(graph["graph"]["flows"][0]["steps"][0]["actor"],
+                         "协调员")
+        # Markdown 渲染流程
+        md = store._render_markdown(detail)
+        self.assertIn("🔄 流程世界", md)
+        self.assertIn("协调员 → 提交重指派请求", md)
+        self.assertIn("状态机: pending → assigned → success → rollback", md)
+
 
 if __name__ == "__main__":
     unittest.main()

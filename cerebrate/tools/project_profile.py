@@ -106,6 +106,8 @@ class ProfileStore:
             "updated_at": profile.get("updated_at", ""),
         }
         if level == "summary":
+            flow_names = [f.get("name", f.get("id", ""))
+                          for f in profile.get("flows", [])]
             domains = []
             for d in profile.get("domains", []):
                 domains.append({
@@ -119,6 +121,8 @@ class ProfileStore:
             result["summary"] = {
                 "domain_count": len(domains),
                 "domains": domains,
+                "flow_count": len(flow_names),
+                "flows": flow_names,
                 "shared_tech_stack": profile.get(
                     "shared_tech", {}).get("stack", []),
             }
@@ -140,11 +144,25 @@ class ProfileStore:
                 "depends_on": d.get("depends_on", []),
                 "entities": entities,
             })
+        # graph：附加流程（步骤时序，不含状态机细节）
+        flows = []
+        for f in profile.get("flows", []):
+            flows.append({
+                "id": f.get("id", ""),
+                "name": f.get("name", ""),
+                "trigger": f.get("trigger", ""),
+                "actors": f.get("actors", []),
+                "steps": f.get("steps", []),
+                "depends_on": f.get("depends_on", []),
+            })
         result["graph"] = {"domains": domains}
+        if flows:
+            result["graph"]["flows"] = flows
         return result
 
     def save(self, project_id: str, profile: dict) -> dict:
         """保存（人工确认版）画像：version+1，原子写 JSON + 渲染 Markdown。"""
+        profile = self._sanitize(profile)
         profile.setdefault("project_id", project_id)
         profile["project_id"] = project_id
         profile["status"] = "confirmed"
@@ -166,6 +184,39 @@ class ProfileStore:
             "path": str(target),
             "markdown_path": str(self._md_path(project_id)),
         }
+
+    @staticmethod
+    def _sanitize(profile: dict) -> dict:
+        """规范化画像结构：LLM 输出可能含 None/非法类型，统一清洗防渲染崩溃。"""
+        profile = dict(profile or {})
+        for f in profile.get("flows", []) or []:
+            if not isinstance(f, dict):
+                continue
+            f["state_machine"] = f.get("state_machine") or {
+                "states": [], "transitions": []}
+            sm = f["state_machine"]
+            if not isinstance(sm.get("states"), list):
+                sm["states"] = []
+            if not isinstance(sm.get("transitions"), list):
+                sm["transitions"] = []
+            for key in ("actors", "depends_on", "memories"):
+                if not isinstance(f.get(key), list):
+                    f[key] = []
+            f["steps"] = [s for s in (f.get("steps") or [])
+                          if isinstance(s, dict)]
+        for d in profile.get("domains", []) or []:
+            if not isinstance(d, dict):
+                continue
+            for key in ("depends_on", "memories"):
+                if not isinstance(d.get(key), list):
+                    d[key] = []
+            for e in d.get("entities", []) or []:
+                if not isinstance(e, dict):
+                    continue
+                for key in ("fields", "relations", "memories"):
+                    if not isinstance(e.get(key), list):
+                        e[key] = []
+        return profile
 
     def list_projects(self) -> list[str]:
         d = self._profile_dir()
@@ -219,6 +270,7 @@ class ProfileStore:
             "status": "draft",
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "domains": [],
+            "flows": [],
             "shared_tech": {"stack": [], "tech_memories": []},
         }
         if business:
@@ -316,7 +368,9 @@ class ProfileStore:
             mem_blocks.append(
                 f"- {m['memory_id']} | {m['category']} | {m['title']}")
         prompt = f"""你是企业级项目的领域架构师。基于以下项目「{project_id}」的业务记忆清单，
-提炼该项目的业务画像（数据世界）：领域模块、数据实体、依赖关系。
+提炼该项目的业务画像（数据世界 + 流程世界）：
+  - 静态结构：领域模块、数据实体、实体关系、依赖
+  - 动态流程：核心业务流程如何运行（时序/状态流转/功能交互），类似产品经理的时序图/流程图/UI flow
 
 ## 输入：业务记忆（memory_id | 分类 | 标题）
 {chr(10).join(mem_blocks)}
@@ -346,22 +400,63 @@ class ProfileStore:
   "shared_tech": {{
     "stack": ["技术栈关键词"],
     "tech_memories": []
-  }}
+  }},
+  "flows": [
+    {{
+      "id": "流程id",
+      "name": "流程名",
+      "trigger": "触发者/触发条件",
+      "actors": ["参与角色/系统"],
+      "steps": [
+        {{
+          "seq": 1,
+          "actor": "执行者(角色/系统)",
+          "action": "动作描述",
+          "input": "输入",
+          "output": "输出",
+          "condition": "触发/流转条件",
+          "detail": "实现提示(如服务名/接口)"
+        }}
+      ],
+      "state_machine": {{
+        "states": ["状态列表"],
+        "transitions": [{{"from": "起始状态", "to": "目标状态", "on": "触发条件"}}]
+      }},
+      "depends_on": ["依赖的域/流程id"],
+      "memories": ["匹配的 memory_id"]
+    }}
+  ]
 }}
 
 约束：
 - 只使用输入中出现过的 memory_id
 - 实体数 3-15 个；relations 只填确有其事的依赖
+- flows 提炼 1-6 条核心流程（若记忆体现流程）；steps 按执行时序排列；state_machine 只填有依据的状态流转
 - 数据世界必须真实：宁可少而准，不要编造
 """
         text = llm._chat_completion(
-            [{"role": "user", "content": prompt}], max_tokens=4000,
+            [{"role": "user", "content": prompt}], max_tokens=6000,
             temperature=0.1)
         if not text:
             return None
         parsed = self._parse_json(text)
         if not parsed or not isinstance(parsed.get("domains"), list):
             return None
+        if not isinstance(parsed.get("flows"), list):
+            parsed["flows"] = []
+        # 规则骨架兜底：LLM 未提炼流程时，为每个域生成最小流程占位
+        if not parsed["flows"]:
+            for d in parsed["domains"]:
+                parsed["flows"].append({
+                    "id": f"{d.get('id', 'domain')}-flow",
+                    "name": f"{d.get('name', '')} 业务处理流程",
+                    "trigger": "",
+                    "actors": [],
+                    "steps": [],
+                    "state_machine": {"states": [], "transitions": []},
+                    "depends_on": d.get("depends_on", []),
+                    "memories": d.get("memories", [])[:20],
+                })
         # 保留骨架中未被 LLM 覆盖的域（防丢失）
         skeleton_ids = {d["id"] for d in skeleton.get("domains", [])}
         refined_ids = {d.get("id") for d in parsed["domains"]}
@@ -519,5 +614,36 @@ class ProfileStore:
                 lines.append(f"> 关联通用技术记忆 {len(tech['tech_memories'])} 条"
                              "（scope=general，跨项目可复用）")
             lines.append("")
+        flows = profile.get("flows", [])
+        if flows:
+            lines.append("## 🔄 流程世界（业务流程如何运行）")
+            for f in flows:
+                lines.append(f"### ▶ {f.get('name', f.get('id', ''))} "
+                             f"`/{f.get('id', '')}`")
+                if f.get("trigger"):
+                    lines.append(f"- 触发: {f['trigger']}")
+                if f.get("actors"):
+                    lines.append(f"- 参与: {', '.join(f['actors'])}")
+                steps = f.get("steps", [])
+                if steps:
+                    lines.append("- 时序:")
+                    for s in steps:
+                        cond = f" [{s.get('condition')}]" if s.get("condition") else ""
+                        lines.append(
+                            f"  {s.get('seq', 0)}. {s.get('actor', '')} "
+                            f"→ {s.get('action', '')}{cond} "
+                            f"({s.get('output', '')})"
+                            + (f" · {s.get('detail', '')}" if s.get("detail") else ""))
+                sm = f.get("state_machine", {})
+                if sm.get("states"):
+                    lines.append(f"- 状态机: {' → '.join(sm['states'])}")
+                for t in sm.get("transitions", []):
+                    lines.append(f"  - {t.get('from')} → {t.get('to')}"
+                                 f" (on {t.get('on', '-')})")
+                if f.get("depends_on"):
+                    lines.append(f"- 依赖: {' → '.join(f['depends_on'])}")
+                if f.get("memories"):
+                    lines.append(f"- 关联业务记忆 {len(f['memories'])} 条")
+                lines.append("")
         lines.append("</cerebrate-profile>")
         return "\n".join(lines)
