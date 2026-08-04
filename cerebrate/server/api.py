@@ -1282,6 +1282,17 @@ class BrainAPI:
         project_id = ""
         tags = ["soul", "engineering", "doctrine", "灵魂", "工程化思维", "行为准则"]
 
+        # 自动 supersedes 旧灵魂（保持单一「当前版本」，血缘可追溯，避免堆积）
+        supersedes_raw = []
+        try:
+            for d in self.doctrines().get("doctrines", []):
+                d_tags = d.get("tags") or []
+                d_title = d.get("title") or ""
+                if "soul" in d_tags or "灵魂" in d_title or "Engineering Soul" in d_title:
+                    supersedes_raw.append(d.get("memory_id"))
+        except Exception:
+            pass
+
         pre_memory_id = self._generate_memory_id(title, category)
         origin_id = self.mm.origin.add(pre_memory_id, payload)
         origin_ids = [origin_id]
@@ -1300,6 +1311,7 @@ class BrainAPI:
             life_stage=life_stage,
             confidence=1.0,
             origin_ids=origin_ids,
+            supersedes=supersedes_raw or None,
             physical_user=physical_user,
             memory_id=pre_memory_id,
             observation_type="decision",
@@ -1324,7 +1336,13 @@ class BrainAPI:
             title = d.get("title") or ""
             if "soul" in tags or "灵魂" in title or "Engineering Soul" in title:
                 souls.append(d)
-        return {"souls": souls, "count": len(souls)}
+        # 按创建时间降序：最新为当前灵魂（hook 取 souls[0] 即最新版）
+        souls.sort(key=lambda m: m.get("created") or "", reverse=True)
+        return {
+            "souls": souls,
+            "count": len(souls),
+            "current": souls[0] if souls else None,
+        }
 
     def get_personal(self) -> dict:
         """Get personal preferences, equivalent to v3 recall."""
