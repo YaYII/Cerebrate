@@ -14,6 +14,15 @@ import getpass
 import urllib.request
 import urllib.error
 
+# ── 修复：MCP 以绝对路径启动时 sys.path[0] 落在 cerebrate/ 目录，
+#    导致 harvest-push 本地分析时 `import cerebrate` 失败
+#    （错误 "No module named 'cerebrate'"）。把项目根目录加入 sys.path；
+#    若脚本被单独拷贝到其他位置，父目录不在时该插入无副作用。──
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 # ── 获取物理用户身份（操作系统登录用户名），用于安全溯源 ──
 try:
     _PHYSICAL_USER = os.environ.get("USER") or os.environ.get(
