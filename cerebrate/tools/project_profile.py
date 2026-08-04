@@ -401,6 +401,7 @@ class ProfileStore:
             endpoints_by_file.setdefault(ep.get("file", ""), []).append(
                 f"{ep.get('method', '')} {ep.get('path', '')}")
         domains = []
+        seen_entities: set[str] = set()
         for pkg, mods in sorted(by_pkg.items()):
             entities = []
             for m in mods[:40]:
@@ -416,8 +417,9 @@ class ProfileStore:
                         "memories": [],
                     })
                 for cls in m.get("classes", [])[:10]:
-                    if cls in {e["name"] for e in entities}:
+                    if cls in seen_entities:
                         continue
+                    seen_entities.add(cls)
                     entities.append({
                         "id": _slug(cls),
                         "name": cls,

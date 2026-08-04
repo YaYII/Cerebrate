@@ -219,12 +219,54 @@ def _harvest_php(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
     }
 
 
+def _strip_java_comments(text: str) -> str:
+    """剥离 Java 注释（// 行注释、/* */ 块注释），避免注释中的类名/方法名
+    被结构正则误识别（如 Javadoc 里 @see MpayController 会把类名算进该文件）。
+    字符串字面量原样保留（不处理其中的 // 与 /*）。"""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":
+            quote = c
+            out.append(c)
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    out.append(text[i])
+                    i += 1
+                    if i < n:
+                        out.append(text[i])
+                        i += 1
+                    continue
+                out.append(text[i])
+                if text[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _harvest_java(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
     """Java/Kotlin 正则解析：class/interface/method + Spring 注解端点。"""
     try:
         text = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return None
+    text = _strip_java_comments(text)
     classes, functions, endpoints = [], [], []
     for cm in re.finditer(
             r"(?:public\s+|private\s+|protected\s+)?(?:abstract\s+)?"

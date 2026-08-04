@@ -1750,11 +1750,15 @@ class BrainAPI:
                 try:
                     from cerebrate.tools.code_sync import list_branches
                     info = list_branches(project_id)
-                    branch = info.get("default_branch") or ""
-                    if not branch and info.get("branches"):
-                        branch = info["branches"][-1]["branch"]
-                    if branch:
+                    candidates = []
+                    if info.get("default_branch"):
+                        candidates.append(info["default_branch"])
+                    for b in info.get("branches", []):
+                        candidates.append(b["branch"])
+                    for branch in dict.fromkeys(candidates):
                         h = load_harvest(project_id, branch=branch)
+                        if h:
+                            break
                 except Exception:
                     h = None
             if not h:
