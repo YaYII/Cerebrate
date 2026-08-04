@@ -60,3 +60,25 @@
     -d '{"query":"Flowable DOB 重指派","project_id":"ihm-backend"}' http://127.0.0.1:8765/v1/search
   ```
 - 回滚：若需恢复，停容器 → 用备份目录替换 chroma_data → 重启 → 重建 FTS
+
+---
+
+## 7. 追加：技术/业务二分修复（2026-08-04 同日）
+
+用户确认认知模型：「项目记忆 = 技术层面（通用）+ 业务层面（项目专属）」，技术层面可跨项目复用，业务层面无法被其他项目继承。
+
+### 7.1 修复动作
+- **20 条技术记忆移回通用**（ihm-backend 19 + verification-platform 1）：Flowable/Laravel/Eloquent/PHP 技能与教训、API 契约/TDD 规范、禁止底层过渡修复、批量角色变更模式、需求反向定位、分层日志识别、基础设施排查教训等。判据：去掉项目名后内容仍成立。
+- **project_id 大小写统一**：`Cerebrate` → `cerebrate`（51 条），与 ihm-backend/ipim/verification-platform 小写规范一致。
+- 执行方式同前：备份 `chroma_data.fix_20260804_101254` → 停服 → sqlite 更新 → 重启 → FTS rebuild（408 条，0 失败）。
+
+### 7.2 修复后分布（sense 实测）
+- general 500 / project 217（ihm-backend 130、ipim 26、cerebrate 51、verification-platform 10）
+- 通用查询可命中 Flowable/Laravel 技术记忆；项目查询仍命中各自业务记忆；cerebrate 小写可查询 ✓
+
+### 7.3 遗留
+- 系统自动生成的「[自动经验]」记录（usage 调度器）会持续产生，Chrome 扩展类仍落通用（无注册项目）；DOB 类正确落 ihm-backend（服务器按 usage project_id 推导）。
+- 混合记忆（业务+技术）归类依赖人工判定，可后续用 `knowledge_type=tech|business` 元数据显式化（见设计文档）。
+
+### 7.4 下一步
+- 业务画像（数据世界）设计文档：`docs/DESIGN_BUSINESS_PROFILE_DATAWORLD_20260804.md`，待用户确认后按 Phase 1-4 实施。
