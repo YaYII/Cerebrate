@@ -47,6 +47,10 @@
 - 验证：`codegraph query "soul_set"` 命中 `cerebrate/server/api.py:1266`（新代码已入图谱）
 - 后续增量更新：`codegraph sync <path>`（daemon 或手动）
 
+### 2.7 项目级 AGENTS.md 补灵魂章节（v2.2 追加）
+- `AGENTS.md`（Cerebrate 仓库根目录）：顶部新增「工程化思维灵魂」章节（五铁律 + 行为习惯 + 服务端引用）
+- 说明：项目 AGENTS.md 原本是纯协议文档（Cerebrate Protocol v5，**不含** v2.1 过时声明——先前交接中的判断有误，已纠正）；补灵魂章节后，Codex 在 Cerebrate 项目会话时即使全局 AGENTS.md 未加载也能获得灵魂
+
 ## 3. 关键决策与理由
 
 | 决策 | 理由 |
@@ -59,8 +63,7 @@
 ## 4. 遗留问题
 
 - ~~`.codegraph/codegraph.db` 代码图谱库停留在 6 月 9 日~~ ✅ 已重建（2026-08-04，1577 nodes）
-- ~~Codex 侧灵魂~~ ✅ 已同步进 `~/.codex/AGENTS.md`（v2.2，会话自动加载）
-- 项目级 `AGENTS.md`（Cerebrate 仓库）标题仍为 v2.1（含过时「Cerebrate 已暂停」说明），建议下次顺手升级为 v2.2 保持全局一致
+- ~~Codex 侧灵魂~~ ✅ 已同步进 `~/.codex/AGENTS.md`（v2.2）+ 项目 `AGENTS.md`（灵魂章节）
 - 若未来要更新灵魂，重新 `soul set` 即可（写入新 doctrine；旧灵魂保留，`soul_get` 取第一条）
 
 ## 5. 下一步建议
@@ -107,4 +110,5 @@ echo '{"session_id":"t1","prompt":"测试","cwd":"/home/as-workstation01/Documen
 - `tests/test_soul.py`
 - `~/.claude/hooks/cerebrate-session-start.py`、`~/.qoder/hooks/cerebrate-memory-inject.py`（客户端注入）
 - `~/.codex/AGENTS.md`（Codex 侧灵魂，v2.2）
+- `AGENTS.md`（项目根目录，灵魂章节 + Cerebrate Protocol v5）
 - `.codegraph/codegraph.db`（代码图谱库，reasonix codegraph 生成）
