@@ -1282,14 +1282,16 @@ class BrainAPI:
         project_id = ""
         tags = ["soul", "engineering", "doctrine", "灵魂", "工程化思维", "行为准则"]
 
-        # 自动 supersedes 旧灵魂（保持单一「当前版本」，血缘可追溯，避免堆积）
+        # 自动归档旧灵魂 + supersedes 血缘（去重：doctrines/soul_get 只保留当前版本）
         supersedes_raw = []
+        stale_soul_ids = []
         try:
             for d in self.doctrines().get("doctrines", []):
                 d_tags = d.get("tags") or []
                 d_title = d.get("title") or ""
                 if "soul" in d_tags or "灵魂" in d_title or "Engineering Soul" in d_title:
                     supersedes_raw.append(d.get("memory_id"))
+                    stale_soul_ids.append(d.get("memory_id"))
         except Exception:
             pass
 
@@ -1325,6 +1327,19 @@ class BrainAPI:
             "agent": source_agent,
             "authority": "brain_server",
         }
+        # 归档旧灵魂（物理去重）：life_stage=doctrine → archived，doctrines/soul_get 不再返回
+        archived = []
+        for old_id in stale_soul_ids:
+            if old_id and old_id != memory_id:
+                try:
+                    self.mm.swarm.update_lifecycle(
+                        old_id, "archived", confidence=0.0,
+                        evidence=f"superseded by soul {memory_id}")
+                    archived.append(old_id)
+                except Exception:
+                    pass
+        if archived:
+            data["archived_previous"] = archived
         self.events.append("soul.set", source_agent, data, project_id)
         return data
 

@@ -90,6 +90,29 @@ class SoulTests(unittest.TestCase):
         self.assertEqual(docs["count"], 1)
         self.assertEqual(docs["doctrines"][0]["life_stage"], "doctrine")
 
+    def test_soul_set_archives_previous(self):
+        # 连续写入两次：旧灵魂应被归档（life_stage=doctrine → archived），
+        # doctrines/soul_get 只保留当前版本（去重）
+        first = self.api.soul_set({
+            "title": "工程化思维灵魂 v1",
+            "content": "证据优先，不空谈，测试验证。",
+            "agent": "tester",
+        })
+        second = self.api.soul_set({
+            "title": "工程化思维灵魂 v2",
+            "content": "证据优先，不空谈，测试验证。（v2 更新）",
+            "agent": "tester",
+        })
+        self.assertIn("archived_previous", second)
+        self.assertIn(first["memory_id"], second["archived_previous"])
+        old = self.api.mm.get_swarm_memory(first["memory_id"])
+        self.assertEqual(old.get("life_stage"), "archived")
+        # 去重后 soul_get / doctrines 只返回当前版本
+        self.assertEqual(self.api.soul_get()["count"], 1)
+        self.assertEqual(self.api.doctrines()["count"], 1)
+        self.assertEqual(self.api.doctrines()["doctrines"][0]["memory_id"],
+                         second["memory_id"])
+
     def test_client_propose_cannot_write_doctrine(self):
         # 权威规则：客户端 propose 只能写 nutrient|memory，doctrine 会回退
         resp = self.api.propose_memory({
