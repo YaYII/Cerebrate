@@ -401,7 +401,10 @@ class ProfileStore:
             endpoints_by_file.setdefault(ep.get("file", ""), []).append(
                 f"{ep.get('method', '')} {ep.get('path', '')}")
         domains = []
-        seen_entities: set[str] = set()
+        # 去重键 = (文件路径, 类名)：同一文件内同名类去重；
+        # 不同文件（不同包）的同名类必须都保留（Java 常见 model.User / entity.User），
+        # 裸类名全局去重会误删合法实体（P1 修复）。
+        seen_entities: set[tuple[str, str]] = set()
         for pkg, mods in sorted(by_pkg.items()):
             entities = []
             for m in mods[:40]:
@@ -417,9 +420,10 @@ class ProfileStore:
                         "memories": [],
                     })
                 for cls in m.get("classes", [])[:10]:
-                    if cls in seen_entities:
+                    key = (f, cls)
+                    if key in seen_entities:
                         continue
-                    seen_entities.add(cls)
+                    seen_entities.add(key)
                     entities.append({
                         "id": _slug(cls),
                         "name": cls,

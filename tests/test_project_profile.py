@@ -316,6 +316,38 @@ class ProjectProfileTests(unittest.TestCase):
                             for hit in nav["hits"]
                             for h in [hit]))
 
+    def test_harvest_domains_keeps_same_name_classes_across_packages(self):
+        """P1 修复：不同包同名类（Java model.User / entity.User）必须都保留，
+        不能被跨模块全局去重误删；同一文件内同名类仍去重。"""
+        from cerebrate.tools.project_profile import ProfileStore
+        harvest = {
+            "modules": [
+                {"path": "controller/UserController.java",
+                 "module": "controller", "classes": ["UserController"]},
+                {"path": "model/User.java", "module": "model", "classes": ["User"]},
+                {"path": "entity/User.java", "module": "entity", "classes": ["User"]},
+            ],
+            "data_models": [],
+            "endpoints": [],
+        }
+        domains = ProfileStore._harvest_domains(harvest)
+        entities = [(e["name"], e["code_hint"])
+                    for d in domains for e in d.get("entities", [])]
+        self.assertIn(("User", "model/User.java"), entities)
+        self.assertIn(("User", "entity/User.java"), entities)
+        self.assertIn(("UserController", "controller/UserController.java"), entities)
+        # 同一文件内同名类去重
+        harvest_dup = {
+            "modules": [{"path": "a/Foo.java", "module": "a",
+                         "classes": ["Foo", "Foo"]}],
+            "data_models": [],
+            "endpoints": [],
+        }
+        domains2 = ProfileStore._harvest_domains(harvest_dup)
+        foo_count = sum(1 for d in domains2
+                        for e in d.get("entities", []) if e["name"] == "Foo")
+        self.assertEqual(foo_count, 1)
+
     def test_code_sync_roundtrip(self):
         """代码同步闭环：本地打包 → 服务器安全解压 → harvest → 画像。"""
         import tempfile, textwrap
