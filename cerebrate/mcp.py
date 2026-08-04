@@ -620,7 +620,7 @@ def _handle_call(name: str, args: dict) -> dict:
                                   "message": f"目录不存在: {root}"}}
             project_id = args.get("project", "")
             branch = _safe_branch(_git_branch(root))
-            exts = tuple(args.get("exts") or [".py"])
+            exts = tuple(args.get("exts")) if args.get("exts") else None
             harvest = harvest_project(root, project_id=project_id, exts=exts)
             return _request("POST", "/v1/harvest/push", {
                 "project": project_id,

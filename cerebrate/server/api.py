@@ -1605,7 +1605,7 @@ class BrainAPI:
         root = Path(dir_raw).resolve()
         if not root.is_dir():
             raise ValueError(f"目录不存在: {root}")
-        exts = tuple(payload.get("exts") or [".py"])
+        exts = tuple(payload.get("exts")) if payload.get("exts") else None
         h = harvest_project(root, project_id=project_id, exts=exts)
         result = save_harvest(h)
         self.events.append("harvest_ok", source_agent="brain-server",

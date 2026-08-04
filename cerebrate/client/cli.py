@@ -154,7 +154,7 @@ def cmd_harvest_push(args):
     print(f"本地分析中: {root}（分支 {branch}，代码不离开本地）…",
           file=sys.stderr)
     harvest = harvest_project(root, project_id=args.project,
-                              exts=tuple(args.exts.split(",")) if args.exts else (".py",))
+                              exts=tuple(args.exts.split(",")) if args.exts else None)
     print(f"  → 结构: {harvest['stats']['files']} 文件 / "
           f"{harvest['stats']['modules']} 模块 / "
           f"{harvest['stats']['endpoints']} 端点（已排除敏感文件）",

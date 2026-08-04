@@ -35,7 +35,8 @@ SKIP_DIRS = {
     "harvest", "context", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "tests", "test", "docs_build",
 }
-SKIP_FILES = {"__init__.py", "setup.py", "conftest.py"}
+SKIP_FILES = {"__init__.py", "setup.py", "conftest.py",
+              ".env", ".env.example", ".env.local"}
 
 # ── AST 提取 ──
 
@@ -261,9 +262,13 @@ def _harvest_java(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
 def _harvest_text(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
     """通用文本兜底：提取 #!/注释标题/一级标题（用于配置类文档）。"""
     try:
-        text = filepath.read_text(encoding="utf-8", errors="replace")[:4000]
+        raw = filepath.read_bytes()[:4000]
     except Exception:
         return None
+    if b"\x00" in raw:
+        # 二进制文件（图片/压缩包/构建产物等）不收割，避免乱码模块
+        return None
+    text = raw.decode("utf-8", errors="replace")
     title = ""
     for line in text.splitlines()[:30]:
         s = line.strip()
@@ -278,8 +283,13 @@ def _harvest_text(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
 
 
 def harvest_project(root: Path, project_id: str = "",
-                    exts: tuple = (".py",), limit_files: int = 2000) -> dict:
-    """扫描项目目录，AST 提取代码结构。"""
+                    exts: Optional[tuple] = None, limit_files: int = 2000) -> dict:
+    """扫描项目目录，AST 提取代码结构。
+
+    exts=None 表示任意文件都收割：.py/.php/.java/.kt 走精确解析器，
+    其余文本文件走通用兜底（提取标题/模块名）；二进制文件自动跳过。
+    传 exts 时仅收割指定后缀（兼容旧调用）。
+    """
     root = root.resolve()
     modules, endpoints, data_models = [], [], []
     file_count = 0
@@ -292,7 +302,7 @@ def harvest_project(root: Path, project_id: str = "",
             continue
         if filepath.name in SKIP_FILES:
             continue
-        if filepath.suffix not in exts:
+        if exts is not None and filepath.suffix not in exts:
             continue
         if file_count >= limit_files:
             break
