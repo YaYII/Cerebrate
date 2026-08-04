@@ -5,6 +5,7 @@ memory, appends durable events, and controls memory promotion.
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -33,14 +34,27 @@ class BrainAPI:
         self.events = events or EventLog(config.events_path)
         # 人人为我：已自动提取经验的 usage_id 集合，避免重复提取
         self._auto_extracted_usages: set[str] = set()
+        # 会话开始高频读接口 TTL 缓存（sense/doctrines 全库统计慢，
+        # 团队并发会话开始会排队；缓存后 10 并发几乎即时命中）
+        self._sense_cache: Optional[dict] = None
+        self._sense_cache_ts: float = 0.0
+        self._sense_ttl: float = 60.0
+        self._doctrines_cache: Optional[dict] = None
+        self._doctrines_cache_ts: float = 0.0
+        self._doctrines_ttl: float = 10.0
 
     def sense(self) -> dict:
+        now = time.monotonic()
+        if self._sense_cache is not None and now - self._sense_cache_ts < self._sense_ttl:
+            return self._sense_cache
         mind = CerebrateMind(self.mm)
         data = mind.sense()
         data["latest_event_id"] = self.events.latest_id()
         data["server_role"] = "authoritative_brain"
         data["llm"] = CerebrateLLM().status()
         data["consensus"] = self.consensus_overview()
+        self._sense_cache = data
+        self._sense_cache_ts = now
         return data
 
     def assess(self) -> dict:
@@ -1285,12 +1299,18 @@ class BrainAPI:
         }
 
     def doctrines(self) -> dict:
+        now = time.monotonic()
+        if self._doctrines_cache is not None and now - self._doctrines_cache_ts < self._doctrines_ttl:
+            return self._doctrines_cache
         doctrines = []
         for mid in self.mm.swarm.get_all_memory_ids():
             memory = self.mm.get_swarm_memory(mid)
             if memory and memory.get("life_stage") == "doctrine":
                 doctrines.append(memory)
-        return {"doctrines": doctrines, "count": len(doctrines)}
+        result = {"doctrines": doctrines, "count": len(doctrines)}
+        self._doctrines_cache = result
+        self._doctrines_cache_ts = now
+        return result
 
     def soul_set(self, payload: dict) -> dict:
         """写入虫群灵魂（服务端权威操作，绕过客户端白名单限制）。
@@ -1369,6 +1389,8 @@ class BrainAPI:
                     pass
         if archived:
             data["archived_previous"] = archived
+        # 清 doctrines 缓存（灵魂是权威变更，立即可见）
+        self._doctrines_cache = None
         self.events.append("soul.set", source_agent, data, project_id)
         return data
 
@@ -1722,6 +1744,19 @@ class BrainAPI:
         dir_raw = payload.get("dir") or ""
         if not dir_raw:
             h = load_harvest(project_id)
+            if not h:
+                # 兼容分支版：结构 push 存 harvest/{project_id}/{branch}.json，
+                # 无 dir 回读时解析默认/最近同步分支
+                try:
+                    from cerebrate.tools.code_sync import list_branches
+                    info = list_branches(project_id)
+                    branch = info.get("default_branch") or ""
+                    if not branch and info.get("branches"):
+                        branch = info["branches"][-1]["branch"]
+                    if branch:
+                        h = load_harvest(project_id, branch=branch)
+                except Exception:
+                    h = None
             if not h:
                 return {"found": False, "project_id": project_id,
                         "hint": "请传 dir 扫描代码目录"}
