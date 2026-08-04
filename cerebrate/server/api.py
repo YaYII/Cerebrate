@@ -1530,6 +1530,8 @@ class BrainAPI:
             return store.promote(project_id)
         if action == "verify":
             return store.verify(project_id)
+        if action == "fix_hints":
+            return store.fix_drifted_hints(project_id)
         if action == "draft":
             try:
                 limit = min(int(payload.get("limit", 200)), 500)
@@ -1628,8 +1630,7 @@ class BrainAPI:
                 h = load_harvest(project_id)
                 store = ProfileStore(self.mm)
                 draft = store.build_draft(
-                    project_id, harvest=h,
-                    llm_refine=config.profile_llm_enabled)
+                    project_id, harvest=h, llm_refine=True)
                 draft_res = store.save_draft(project_id, draft)
                 result["profile_draft"] = draft_res
             except Exception as e:

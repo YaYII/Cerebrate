@@ -170,3 +170,25 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ### 9.6 测试
 - 新增：test_code_sync_incremental / test_profile_draft_and_promote / test_verify_consistency
 - 全量 **195 passed / 0 failed**
+
+---
+
+## 10. v6 演进：四项能力全实现 + 系统边界测试（2026-08-04）
+
+### 10.1 用户要求
+「全部实现，只要结果」：① AI 客户端注入三段式工作流 ② 画像 draft promote ③ 多语言 harvest ④ verify 定期化；并验证系统边界不崩溃。
+
+### 10.2 已实现
+1. **AI 客户端注入三段式工作流**：Claude Code SessionStart hook（~/.claude/hooks/cerebrate-session-start.py）+ Qoder UserPromptSubmit hook 注入「记忆状态 + 业务画像概览 + 工作流契约（code-sync→俯瞰→微观→记忆仅参考）」
+2. **画像 draft promote**：cerebrate 画像 v4（7 域 5 流程，LLM 精炼+代码仓驱动）promote 为 confirmed；新增 fix_hints（清洗 LLM 幻觉 code_hint，实测 18 条 → verify ok）
+3. **多语言 harvest**：code_harvest 支持 PHP（namespace/class/function + Laravel Route::）与 Java/Kotlin（class/method + Spring 注解端点）；实测检出 /api/dob/my-processes 等
+4. **verify 定期化**：scheduler 新增 verify_loop（默认 6h），遍历画像项目校验，漂移记录日志 + events 告警；实测已运行（ihm-backend no_harvest 被标记）
+
+### 10.3 系统边界测试（tests/test_system_boundaries.py，11 项）
+- 空 harvest/空目录/无画像 navigate/verify → 返回原因不崩
+- 非法 level / 缺 project_id / 未知 action → ValueError（HTTP 400）
+- 恶意 tar 路径穿越 → 拒绝不写出；空包 → ValueError
+- 损坏 manifest → 回退全量；LLM 非法 JSON → _parse_json None → 回退骨架
+
+### 10.4 测试
+- 全量 **206 passed / 0 failed**（+11 边界测试）

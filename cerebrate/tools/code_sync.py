@@ -185,7 +185,11 @@ def _safe_extract(tar_bytes: bytes, dest: Path) -> int:
     dest = dest.resolve()
     dest.mkdir(parents=True, exist_ok=True)
     count = 0
-    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tf:
+    try:
+        tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz")
+    except tarfile.TarError as e:
+        raise ValueError(f"无效或空的代码包: {e}")
+    with tf:
         for member in tf.getmembers():
             name = member.name.replace("\\", "/")
             # 路径穿越防御

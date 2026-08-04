@@ -219,5 +219,10 @@ class CerebrateConfig:
         default_factory=lambda: int(os.environ.get(
             "CEREBRATE_CODE_SYNC_MAX_BYTES", "209715200")))  # 200MB
 
+    # 画像一致性校验周期（小时）
+    profile_verify_interval_hours: int = field(
+        default_factory=lambda: int(os.environ.get(
+            "CEREBRATE_PROFILE_VERIFY_INTERVAL_HOURS", "6")))
+
 
 config = CerebrateConfig()

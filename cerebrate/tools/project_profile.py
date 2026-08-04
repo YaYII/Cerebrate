@@ -265,6 +265,33 @@ class ProfileStore:
             dp.unlink(missing_ok=True)
         return {"ok": True, **result}
 
+    def fix_drifted_hints(self, project_id: str) -> dict:
+        """清洗漂移 code_hint（LLM 幻觉路径）：verify 报漂移的实体清空 code_hint。
+
+        语义域实体（业务概念）无单一代码文件，清空后 verify 通过；
+        真实代码域（harvest 生成，code_hint 为真实路径）不受影响。
+        """
+        profile = self.read(project_id)
+        if not profile:
+            return {"ok": False, "reason": "no_profile"}
+        v = self.verify(project_id)
+        drifted = set()
+        for issue in v.get("issues", []):
+            if issue.startswith("code_hint 漂移: "):
+                name = issue.split("code_hint 漂移: ", 1)[1].split(" → ")[0]
+                drifted.add(name)
+        fixed = 0
+        for d in profile.get("domains", []):
+            for e in d.get("entities", []):
+                if e.get("name") in drifted and e.get("code_hint"):
+                    e["code_hint"] = ""
+                    fixed += 1
+        if fixed:
+            profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+            profile["version"] = int(profile.get("version", 0))
+            self.save(project_id, profile)
+        return {"ok": True, "fixed": fixed, "remaining_issues": v.get("issue_count", 0) - fixed}
+
     # ── 画像输入收集 ──
     def _collect_memories(self, project_id: str, limit: int = 200) -> dict:
         """收集业务记忆（scope=project + project_id）与通用技术记忆。"""
@@ -598,12 +625,14 @@ class ProfileStore:
         if fence:
             text = fence.group(1).strip()
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else None
         except Exception:
             start, end = text.find("{"), text.rfind("}")
             if start >= 0 and end > start:
                 try:
-                    return json.loads(text[start:end + 1])
+                    parsed = json.loads(text[start:end + 1])
+                    return parsed if isinstance(parsed, dict) else None
                 except Exception:
                     return None
             return None

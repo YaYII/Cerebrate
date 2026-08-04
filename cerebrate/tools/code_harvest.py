@@ -20,6 +20,7 @@
 import ast
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -139,6 +140,17 @@ def _extract_endpoints(module: ast.Module, file_rel: str) -> list[dict]:
 
 def harvest_file(filepath: Path, root: Path) -> Optional[dict]:
     file_rel = str(filepath.relative_to(root))
+    ext = filepath.suffix.lower()
+    if ext == ".py":
+        return _harvest_python(filepath, root, file_rel)
+    if ext in (".php",):
+        return _harvest_php(filepath, root, file_rel)
+    if ext in (".java", ".kt"):
+        return _harvest_java(filepath, root, file_rel)
+    return _harvest_text(filepath, root, file_rel)
+
+
+def _harvest_python(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
     try:
         tree = ast.parse(filepath.read_text(encoding="utf-8", errors="replace"))
     except Exception as e:
@@ -158,6 +170,110 @@ def harvest_file(filepath: Path, root: Path) -> Optional[dict]:
         "classes": classes[:80],
         "functions": functions[:80],
         "endpoints": _extract_endpoints(tree, file_rel),
+    }
+
+
+def _harvest_php(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
+    """PHP 正则解析：namespace/class/function + Laravel 风格 Route::。"""
+    try:
+        text = filepath.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    classes, functions, endpoints = [], [], []
+    # namespace
+    ns = ""
+    m = re.search(r"namespace\s+([\w\\]+)", text)
+    if m:
+        ns = m.group(1)
+    for cm in re.finditer(r"(?:abstract\s+|final\s+)?class\s+(\w+)", text):
+        name = cm.group(1)
+        classes.append({
+            "name": name, "bases": [], "decorators": [],
+            "kind": "class", "fields": [], "file": file_rel, "doc": "",
+        })
+    for fm in re.finditer(r"(?:public|protected|private|static)?\s*function\s+(\w+)", text):
+        name = fm.group(1)
+        if name in {"__construct", "__destruct"}:
+            continue
+        functions.append({
+            "name": name, "decorators": [], "args": [],
+            "file": file_rel, "doc": "",
+        })
+    # Laravel Route::get/post/put/delete + 属性路由
+    for rm in re.finditer(r"Route::(get|post|put|patch|delete|any)\(\s*['\"]([^'\"]+)", text):
+        endpoints.append({
+            "method": rm.group(1).upper(), "path": rm.group(2),
+            "handler": "route", "file": file_rel,
+        })
+    for am in re.finditer(r"#\[Route\((['\"][^'\"]+['\"])(?:,\s*methods:\s*\[([^\]]*)\])?", text):
+        endpoints.append({
+            "method": "HTTP", "path": am.group(1).strip("'\""),
+            "handler": "attribute-route", "file": file_rel,
+        })
+    return {
+        "path": file_rel, "module": filepath.stem,
+        "namespace": ns,
+        "classes": classes[:80], "functions": functions[:80],
+        "endpoints": endpoints[:50],
+    }
+
+
+def _harvest_java(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
+    """Java/Kotlin 正则解析：class/interface/method + Spring 注解端点。"""
+    try:
+        text = filepath.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    classes, functions, endpoints = [], [], []
+    for cm in re.finditer(
+            r"(?:public\s+|private\s+|protected\s+)?(?:abstract\s+)?"
+            r"(?:class|interface|enum|record)\s+(\w+)", text):
+        classes.append({
+            "name": cm.group(1), "bases": [], "decorators": [],
+            "kind": "class", "fields": [], "file": file_rel, "doc": "",
+        })
+    for fm in re.finditer(
+            r"(?:public|private|protected)\s+(?:static\s+)?[\w<>\[\],\s]+\s+(\w+)\s*\(",
+            text):
+        functions.append({
+            "name": fm.group(1), "decorators": [], "args": [],
+            "file": file_rel, "doc": "",
+        })
+    # Spring 注解端点
+    for m in re.finditer(r"@(?:Get|Post|Put|Delete|Patch|Request)Mapping\(([^)]*)\)", text):
+        val = m.group(1)
+        p = re.search(r"[\"']([^\"']+)[\"']", val)
+        method = "HTTP"
+        mm = re.search(r"method\s*=\s*RequestMethod\.(\w+)", val)
+        if mm:
+            method = mm.group(1).upper()
+        endpoints.append({
+            "method": method, "path": p.group(1) if p else "",
+            "handler": "spring-mapping", "file": file_rel,
+        })
+    return {
+        "path": file_rel, "module": filepath.stem,
+        "classes": classes[:80], "functions": functions[:80],
+        "endpoints": endpoints[:50],
+    }
+
+
+def _harvest_text(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
+    """通用文本兜底：提取 #!/注释标题/一级标题（用于配置类文档）。"""
+    try:
+        text = filepath.read_text(encoding="utf-8", errors="replace")[:4000]
+    except Exception:
+        return None
+    title = ""
+    for line in text.splitlines()[:30]:
+        s = line.strip()
+        if s.startswith("# ") or s.startswith("// ") or s.startswith("#!"):
+            title = s.lstrip("#/! ").strip()
+            break
+    return {
+        "path": file_rel, "module": filepath.stem,
+        "classes": [], "functions": [],
+        "endpoints": [], "title": title,
     }
 
 
