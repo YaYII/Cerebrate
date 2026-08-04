@@ -192,3 +192,28 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 ### 10.4 测试
 - 全量 **206 passed / 0 failed**（+11 边界测试）
+
+---
+
+## 11. v7 演进：架构转向「代码不离开本地」+ 多人协作感知（2026-08-04）
+
+### 11.1 用户架构判断（采纳）
+1. 代码不应给服务端——本地设备做代码分析（MCP 是脑虫的本地延伸），只把「分析结果（结构）」给脑虫
+2. 多人协作：多分支同项目，脑虫应「知晓谁在处理什么 + 告知」，解决代码冲突
+
+### 11.2 结构 push（代码不离开本地，推荐模式）
+- `POST /v1/harvest/push`：只接收本地 AST 分析结果（结构 JSON：类/函数/端点/字段），服务端不存代码
+- `cerebrate.py harvest-push --project X --dir /path`：本地 harvest → 只推结构（实测 13.6KB vs 代码 5MB）
+- MCP `cerebrate_project_harvest`：传 dir 时本地分析 + push（脑虫本地延伸）
+- code-sync（上传完整代码）降级为可选模式
+- 分支登记 meta 统一到 harvest 目录
+
+### 11.3 多人协作感知
+- `POST /v1/project/work`（claim/release/list）：工作声明 + **同模块冲突检测**（实测 B 声明记忆引擎 → 告知已被 codex-a@master 占用）
+- `POST /v1/project/branch-diff`：两分支 harvest 结构差异 → 冲突点（模块/端点只在某分支）
+- Claude Code / Qoder hooks 注入「当前项目活跃工作」（谁在处理什么）
+- 声明 24h 自动过期（防僵尸）
+
+### 11.4 测试
+- 新增 5 项：分支隔离 / git 分支推断 / harvest_push(不含代码) / 工作声明冲突 / 分支差异
+- 全量 **211 passed / 0 failed**

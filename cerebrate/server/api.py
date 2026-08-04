@@ -1529,7 +1529,10 @@ class BrainAPI:
         if action == "promote":
             return store.promote(project_id)
         if action == "verify":
-            return store.verify(project_id)
+            return store.verify(project_id, branch=payload.get("branch", ""))
+        if action == "branches":
+            from cerebrate.tools.code_sync import list_branches
+            return list_branches(project_id)
         if action == "fix_hints":
             return store.fix_drifted_hints(project_id)
         if action == "draft":
@@ -1615,10 +1618,11 @@ class BrainAPI:
         from cerebrate.tools.code_sync import receive_package
         project_id = payload.get("project") or payload.get("project_id") or ""
         package_b64 = payload.get("package_b64") or ""
+        branch = payload.get("branch", "")
         if not project_id or not package_b64:
             raise ValueError("project_id and package_b64 are required")
         auto_harvest = payload.get("auto_harvest", True)
-        result = receive_package(project_id, package_b64,
+        result = receive_package(project_id, package_b64, branch=branch,
                                  delete_list=payload.get("delete_list") or [],
                                  auto_harvest=auto_harvest)
         if (payload.get("auto_profile", True) and result.get("harvest")
@@ -1627,7 +1631,7 @@ class BrainAPI:
             try:
                 from cerebrate.tools.project_profile import ProfileStore
                 from cerebrate.tools.code_harvest import load_harvest
-                h = load_harvest(project_id)
+                h = load_harvest(project_id, branch=result.get("branch", ""))
                 store = ProfileStore(self.mm)
                 draft = store.build_draft(
                     project_id, harvest=h, llm_refine=True)
@@ -1641,15 +1645,145 @@ class BrainAPI:
                                     "files_removed": result.get("files_removed", 0)})
         return result
 
+    def harvest_push(self, payload: dict) -> dict:
+        """结构 push（代码不离开本地）：接收本地 AST 分析结果（harvest 结构），
+        存 harvest/{project_id}/{branch}.json，供画像构建/校验使用。
+
+        服务端只接收「结构元数据」（类名/函数名/端点路径/字段），不接收源代码。
+        """
+        from cerebrate.tools.code_harvest import (
+            save_harvest, load_harvest, _safe_branch)
+        from cerebrate.tools.code_sync import (
+            _load_meta, _save_meta, SYNC_MAX_BRANCHES)
+        from datetime import datetime, timezone as _tz
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        harvest = payload.get("harvest") or {}
+        branch = _safe_branch(payload.get("branch", ""))
+        if not project_id:
+            raise ValueError("project_id is required")
+        if not isinstance(harvest, dict) or "modules" not in harvest:
+            raise ValueError("harvest 结构缺失 modules（请先本地 harvest_project）")
+        harvest["project_id"] = project_id
+        if branch:
+            harvest["branch"] = branch
+        # 结构是否变化（避免无意义重建画像）
+        prev = load_harvest(project_id, branch=branch)
+        changed = True
+        if prev and prev.get("modules") == harvest.get("modules"):
+            changed = False
+        result = save_harvest(harvest, branch=branch)
+        result["branch"] = branch or "default"
+        # 更新分支登记 meta
+        meta = _load_meta(project_id)
+        if not meta.get("default_branch"):
+            meta["default_branch"] = branch or "default"
+        meta["branches"][branch or "default"] = {
+            "last_synced": datetime.now(_tz.utc).isoformat(),
+            "files": len(harvest.get("modules", [])),
+            "harvest": harvest.get("stats", {}),
+            "source": "local_push",
+        }
+        _save_meta(project_id, meta)
+        result["changed"] = changed
+        result["branches"] = sorted(meta["branches"].keys())
+        result["default_branch"] = meta.get("default_branch", "default")
+        # 自动画像草稿（结构变化才重建）
+        if (payload.get("auto_profile", True) and changed):
+            try:
+                from cerebrate.tools.project_profile import ProfileStore
+                store = ProfileStore(self.mm)
+                draft = store.build_draft(project_id, harvest=harvest,
+                                          llm_refine=True)
+                result["profile_draft"] = store.save_draft(project_id, draft)
+            except Exception as e:
+                result["profile_draft_error"] = str(e)
+        self.events.append("harvest_push_ok", source_agent="brain-server",
+                           payload={"project_id": project_id,
+                                    "branch": branch,
+                                    "modules": len(harvest.get("modules", []))})
+        return result
+
+    def project_work(self, payload: dict) -> dict:
+        """多人协作感知：工作声明（谁在处理哪个功能）+ 冲突检测。
+
+        action:
+          - claim: 声明正在处理某模块（返回冲突检测）
+          - release: 释放声明
+          - list: 列出项目活跃工作（按分支）
+        """
+        from cerebrate.tools.work_claims import (
+            claim, release, list_active)
+        action = payload.get("action", "list")
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        if not project_id:
+            raise ValueError("project_id is required")
+        if action == "claim":
+            return claim(
+                project_id,
+                agent_id=payload.get("agent_id")
+                or payload.get("agent") or "unknown",
+                branch=payload.get("branch", ""),
+                module=payload.get("module", ""),
+                intent=payload.get("intent", ""),
+                session_id=payload.get("session_id", ""))
+        if action == "release":
+            return release(
+                project_id,
+                agent_id=payload.get("agent_id")
+                or payload.get("agent") or "unknown",
+                module=payload.get("module", ""),
+                claim_id=payload.get("claim_id", ""))
+        if action == "list":
+            return list_active(project_id)
+        raise ValueError(f"unknown action: {action}")
+
+    def branch_diff(self, payload: dict) -> dict:
+        """分支差异感知：比较两分支代码结构（harvest），告知冲突点。"""
+        from cerebrate.tools.code_harvest import load_harvest
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        from_b = payload.get("from_branch") or payload.get("from") or ""
+        to_b = payload.get("to_branch") or payload.get("to") or ""
+        if not project_id or not from_b or not to_b:
+            raise ValueError("project_id, from_branch, to_branch are required")
+        ha = load_harvest(project_id, branch=from_b)
+        hb = load_harvest(project_id, branch=to_b)
+        if not ha or not hb:
+            return {"ok": False, "reason": "branch_harvest_missing",
+                    "from": from_b, "to": to_b,
+                    "hint": "请先对两个分支执行 harvest-push"}
+        mods_a = {m["path"] for m in ha.get("modules", [])}
+        mods_b = {m["path"] for m in hb.get("modules", [])}
+        only_a = sorted(mods_a - mods_b)
+        only_b = sorted(mods_b - mods_a)
+        eps_a = {ep.get("path") for ep in ha.get("endpoints", [])}
+        eps_b = {ep.get("path") for ep in hb.get("endpoints", [])}
+        return {
+            "ok": True,
+            "project_id": project_id,
+            "from_branch": from_b,
+            "to_branch": to_b,
+            "conflict_points": {
+                "modules_only_in_from": only_a[:30],
+                "modules_only_in_to": only_b[:30],
+                "endpoints_only_in_from": sorted(eps_a - eps_b)[:30],
+                "endpoints_only_in_to": sorted(eps_b - eps_a)[:30],
+            },
+            "summary": {
+                "modules_from": len(mods_a), "modules_to": len(mods_b),
+                "only_in_from": len(only_a), "only_in_to": len(only_b),
+            },
+        }
+
     def project_navigate(self, payload: dict) -> dict:
         """在业务画像中定位目标域/实体（导航），返回路径 + 挂载记忆 + 依赖。"""
         from cerebrate.tools.project_profile import ProfileStore
         store = ProfileStore(self.mm)
         project_id = payload.get("project") or payload.get("project_id") or ""
         target = payload.get("target") or payload.get("query") or ""
+        branch = payload.get("branch", "")
         if not project_id or not target:
             raise ValueError("project_id and target are required")
-        return store.navigate(project_id, target)
+        return store.navigate(project_id, target, branch=branch)
 
     def list_all_knowledge(self) -> list[dict]:
         """列出知识库所有文档摘要。"""

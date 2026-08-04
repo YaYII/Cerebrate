@@ -341,26 +341,45 @@ def harvest_project(root: Path, project_id: str = "",
     }
 
 
-def save_harvest(harvest: dict) -> dict:
-    """写入 {memory_root}/harvest/{project_id}.json。"""
-    project_id = harvest.get("project_id") or "unknown"
+def _safe_branch(branch: str) -> str:
+    """清洗分支名（feature/dob → feature-dob），避免路径穿越。"""
+    b = re.sub(r"[^0-9a-zA-Z._-]+", "-", str(branch or "").strip())
+    b = b.strip(".-")
+    return b or "default"
+
+
+def _harvest_target(project_id: str, branch: str = "") -> Path:
+    """harvest 文件路径：分支版 harvest/{project_id}/{branch}.json；
+    无分支时兼容旧路径 harvest/{project_id}.json。"""
     d = config.memory_root / "harvest"
-    d.mkdir(parents=True, exist_ok=True)
-    target = d / f"{project_id}.json"
+    if not branch:
+        return d / f"{project_id}.json"
+    return d / project_id / f"{_safe_branch(branch)}.json"
+
+
+def save_harvest(harvest: dict, branch: str = "") -> dict:
+    """写入 harvest（支持按分支）。"""
+    project_id = harvest.get("project_id") or "unknown"
+    target = _harvest_target(project_id, branch)
+    target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(harvest, ensure_ascii=False, indent=2),
                    encoding="utf-8")
     tmp.replace(target)
+    if branch:
+        harvest["branch"] = _safe_branch(branch)
     return {"project_id": project_id, "path": str(target),
             "stats": harvest.get("stats", {})}
 
 
-def load_harvest(project_id: str) -> Optional[dict]:
-    p = config.memory_root / "harvest" / f"{project_id}.json"
+def load_harvest(project_id: str, branch: str = "") -> Optional[dict]:
+    p = _harvest_target(project_id, branch)
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        h = json.loads(p.read_text(encoding="utf-8"))
+        h["branch"] = h.get("branch") or _safe_branch(branch)
+        return h
     except Exception as e:
         logger.warning("读取代码结构失败 %s: %s", p, e)
         return None

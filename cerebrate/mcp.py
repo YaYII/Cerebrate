@@ -327,13 +327,29 @@ TOOLS = [
     },
     {
         "name": "cerebrate_project_harvest",
-        "description": "【代码结构养料收割】扫描项目真实代码（AST 解析）生成代码结构图谱（模块树/数据模型/API端点），作为业务画像的真实骨架（企业级精度：结构不从记忆推断）。\n传 dir 扫描并保存；不传 dir 读取已生成结构。",
+        "description": "【本地代码分析·结构推送】在本地设备分析项目代码（AST 解析，代码不离开本地），只把结构结果（模块/类/端点/字段）push 给脑虫，作为业务画像的真实骨架（企业级精度：结构不从记忆推断）。\n传 dir 则本地分析并 push；不传 dir 则读取服务端已存结构。",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "project": {"type": "string", "description": "项目 ID"},
                 "dir": {"type": "string", "description": "项目代码根目录（如 /home/as-workstation01/Documents/project/Cerebrate）"},
                 "exts": {"type": "array", "items": {"type": "string"}, "description": "扫描的文件扩展名（默认 [\".py\"]）"}
+            },
+            "required": ["project"]
+        }
+    },
+    {
+        "name": "cerebrate_project_work",
+        "description": "【多人协作感知】工作声明：告知脑虫「谁在哪个分支处理哪个功能」，脑虫知晓并检测冲突（同模块已被他人声明时返回冲突告知）。\naction=claim 声明（module 可为画像实体/模块路径）；action=release 释放；action=list 列出项目活跃工作（按分支）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "项目 ID"},
+                "action": {"type": "string", "description": "claim=声明; release=释放; list=列出", "default": "list", "enum": ["claim", "release", "list"]},
+                "branch": {"type": "string", "description": "git 分支（claim 时必传）"},
+                "module": {"type": "string", "description": "正在处理的功能/模块/实体"},
+                "intent": {"type": "string", "description": "处理意图简述"},
+                "agent_id": {"type": "string", "description": "AI/开发者标识"}
             },
             "required": ["project"]
         }
@@ -576,10 +592,42 @@ def _handle_call(name: str, args: dict) -> dict:
             })
 
         elif name == "cerebrate_project_harvest":
-            return _request("POST", "/v1/project/harvest", {
+            dir_raw = args.get("dir", "")
+            if not dir_raw:
+                # 无 dir：读取服务端已存的结构
+                return _request("POST", "/v1/project/harvest", {
+                    "project": args.get("project", ""),
+                    "dir": "",
+                })
+            # 有 dir：本地 AST 分析（代码不离开本地），只把结构 push 给脑虫
+            from pathlib import Path
+            from cerebrate.tools.code_harvest import (
+                harvest_project, _safe_branch)
+            from cerebrate.tools.code_sync import _git_branch
+            root = Path(dir_raw).resolve()
+            if not root.is_dir():
+                return {"status": "error",
+                        "error": {"code": 400,
+                                  "message": f"目录不存在: {root}"}}
+            project_id = args.get("project", "")
+            branch = _safe_branch(_git_branch(root))
+            exts = tuple(args.get("exts") or [".py"])
+            harvest = harvest_project(root, project_id=project_id, exts=exts)
+            return _request("POST", "/v1/harvest/push", {
+                "project": project_id,
+                "branch": branch,
+                "harvest": harvest,
+                "auto_profile": True,
+            })
+
+        elif name == "cerebrate_project_work":
+            return _request("POST", "/v1/project/work", {
                 "project": args.get("project", ""),
-                "dir": args.get("dir", ""),
-                "exts": args.get("exts") or [".py"],
+                "action": args.get("action", "list"),
+                "branch": args.get("branch", ""),
+                "module": args.get("module", ""),
+                "intent": args.get("intent", ""),
+                "agent_id": args.get("agent_id", ""),
             })
 
         elif name == "cerebrate_batch_process":

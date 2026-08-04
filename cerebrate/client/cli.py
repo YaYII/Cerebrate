@@ -119,7 +119,8 @@ def cmd_code_sync(args):
                          ensure_ascii=False))
         sys.exit(1)
     pkg = build_package(root, project_id=args.project,
-                        incremental=not args.full)
+                        incremental=not args.full,
+                        branch=args.branch)
     mode = "增量" if pkg["incremental"] else "全量"
     print(f"打包完成[{mode}]: 变更 {pkg['files_changed']} / "
           f"删除 {pkg['files_deleted']} / 排除 {pkg['excluded_count']} 项 / "
@@ -129,12 +130,53 @@ def cmd_code_sync(args):
         print(f"  ⛔ 排除 {ex['path']} ({ex['reason']})", file=sys.stderr)
     resp = client_request(args.url, "POST", "/v1/code/sync", {
         "project": args.project,
+        "branch": pkg.get("branch", ""),
         "package_b64": pkg["package_b64"],
         "auto_harvest": True,
         "auto_profile": not args.no_profile,
         "delete_list": pkg.get("deleted", []),
     })
     output(resp)
+
+def cmd_harvest_push(args):
+    """结构 push（代码不离开本地）：本地 AST 分析 → 只把结构结果给脑虫"""
+    from cerebrate.tools.code_harvest import harvest_project, _safe_branch
+    from cerebrate.tools.code_sync import _git_branch
+    from pathlib import Path
+    root = Path(args.dir).resolve()
+    if not root.is_dir():
+        print(json.dumps({"status": "error",
+                          "error": {"code": 400,
+                                    "message": f"目录不存在: {root}"}},
+                         ensure_ascii=False))
+        sys.exit(1)
+    branch = _safe_branch(args.branch or _git_branch(root))
+    print(f"本地分析中: {root}（分支 {branch}，代码不离开本地）…",
+          file=sys.stderr)
+    harvest = harvest_project(root, project_id=args.project,
+                              exts=tuple(args.exts.split(",")) if args.exts else (".py",))
+    print(f"  → 结构: {harvest['stats']['files']} 文件 / "
+          f"{harvest['stats']['modules']} 模块 / "
+          f"{harvest['stats']['endpoints']} 端点（已排除敏感文件）",
+          file=sys.stderr)
+    resp = client_request(args.url, "POST", "/v1/harvest/push", {
+        "project": args.project,
+        "branch": branch,
+        "harvest": harvest,
+        "auto_profile": True,
+    })
+    output(resp)
+
+def cmd_project_work(args):
+    """多人协作感知：工作声明/冲突检测"""
+    output(client_request(args.url, "POST", "/v1/project/work", {
+        "project": args.project,
+        "action": args.action,
+        "branch": args.branch,
+        "module": args.module,
+        "intent": args.intent,
+        "agent_id": args.agent_id or "cli",
+    }))
 
 
 def cmd_timeline(args):
@@ -362,7 +404,31 @@ def main(argv=None):
                    help="强制全量同步（默认增量，只传变更文件）")
     p.add_argument("--no-profile", action="store_true",
                    help="同步后不自动生成画像草稿")
+    p.add_argument("--branch", default="",
+                   help="git 分支（默认自动从 git 推断当前分支）")
     p.set_defaults(func=cmd_code_sync)
+
+    p = sub.add_parser("harvest-push",
+                       help="结构 push：本地分析代码→只把结构给脑虫（代码不离开本地，推荐）")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--dir", default="", help="本地项目代码根目录")
+    p.add_argument("--branch", default="",
+                   help="git 分支（默认自动从 git 推断当前分支）")
+    p.add_argument("--exts", default=".py",
+                   help="扫描扩展名，逗号分隔（默认 .py；PHP 用 .php，Java 用 .java）")
+    p.set_defaults(func=cmd_harvest_push)
+
+    p = sub.add_parser("project-work",
+                       help="多人协作感知：声明/释放/列出工作（谁在处理哪个功能）")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--action", default="list",
+                   choices=["claim", "release", "list"],
+                   help="claim=声明; release=释放; list=列出(默认)")
+    p.add_argument("--branch", default="", help="git 分支（claim 时用）")
+    p.add_argument("--module", default="", help="功能/模块/实体")
+    p.add_argument("--intent", default="", help="处理意图")
+    p.add_argument("--agent-id", default="", help="AI/开发者标识")
+    p.set_defaults(func=cmd_project_work)
 
     p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")
     p.add_argument("--anchor", default="", help="anchor 记忆 ID（不传则用 query 找 top1）")

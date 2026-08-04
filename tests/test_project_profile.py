@@ -339,7 +339,7 @@ class ProjectProfileTests(unittest.TestCase):
         self.assertTrue(any(".env" in ex["path"] for ex in pkg["excluded"]))
         # 服务器接收 + 自动 harvest
         result = receive_package("sync-proj", pkg["package_b64"],
-                                 auto_harvest=True)
+                                 branch="default", auto_harvest=True)
         self.assertGreaterEqual(result["files_written"], 1)
         self.assertIn("harvest", result)
         # 解压目录不含 .env
@@ -347,7 +347,7 @@ class ProjectProfileTests(unittest.TestCase):
         self.assertFalse((repo / ".env").exists())
         # harvest 到画像
         from cerebrate.tools.code_harvest import load_harvest
-        h = load_harvest("sync-proj")
+        h = load_harvest("sync-proj", branch="default")
         self.assertIsNotNone(h)
         self.assertTrue(any("SyncEntity" in m.get("classes", [])
                             for m in h["modules"]))
@@ -385,7 +385,7 @@ class ProjectProfileTests(unittest.TestCase):
                               delete_list=pkg2["deleted"], auto_harvest=False)
         self.assertGreaterEqual(res["files_written"], 2)
         self.assertEqual(res["files_removed"], 1)
-        repo = Path(config.memory_root) / "code_repos" / "incr"
+        repo = Path(config.memory_root) / "code_repos" / "incr" / "default"
         self.assertFalse((repo / "src" / "c.py").exists())
         self.assertTrue((repo / "src" / "b.py").exists())
 
@@ -441,6 +441,163 @@ class ProjectProfileTests(unittest.TestCase):
             or "RealService" in {
                 e["name"] for d in draft["domains"]
                 for e in d["entities"]})
+
+    def test_multi_branch_isolation(self):
+        """多分支同步隔离：同项目不同分支代码互不覆盖，harvest 按分支。"""
+        import tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.config import config
+        from cerebrate.tools.code_sync import build_package, receive_package
+        from cerebrate.tools.code_harvest import load_harvest
+        proj = Path(self.tmp.name) / "branch_project"
+        (proj / "src").mkdir(parents=True)
+        (proj / "src" / "master_only.py").write_text(
+            "class MasterOnly: pass", encoding="utf-8")
+        pkg_m = build_package(proj, project_id="bproj", branch="master",
+                              incremental=False)
+        r_m = receive_package("bproj", pkg_m["package_b64"], branch="master",
+                              auto_harvest=True)
+        self.assertEqual(r_m["branch"], "master")
+        # 切到 feature 分支：不同代码
+        (proj / "src" / "master_only.py").unlink()
+        (proj / "src" / "feature_only.py").write_text(
+            "class FeatureOnly: pass", encoding="utf-8")
+        pkg_f = build_package(proj, project_id="bproj", branch="feature-x",
+                              incremental=False)
+        r_f = receive_package("bproj", pkg_f["package_b64"], branch="feature-x",
+                              auto_harvest=True)
+        self.assertEqual(r_f["branch"], "feature-x")
+        # 两个分支代码仓独立
+        repo = Path(config.memory_root) / "code_repos" / "bproj"
+        self.assertTrue((repo / "master" / "src" / "master_only.py").exists())
+        self.assertTrue((repo / "feature-x" / "src" / "feature_only.py").exists())
+        self.assertFalse((repo / "master" / "src" / "feature_only.py").exists())
+        # harvest 按分支隔离
+        h_m = load_harvest("bproj", branch="master")
+        h_f = load_harvest("bproj", branch="feature-x")
+        self.assertTrue(any("MasterOnly" in m.get("classes", [])
+                            for m in h_m["modules"]))
+        self.assertTrue(any("FeatureOnly" in m.get("classes", [])
+                            for m in h_f["modules"]))
+        self.assertFalse(any("FeatureOnly" in m.get("classes", [])
+                             for m in h_m["modules"]))
+
+    def test_git_branch_inference(self):
+        """git 分支自动推断：build_package 无 branch 时从 git 获取当前分支。"""
+        import subprocess, tempfile
+        from pathlib import Path
+        from cerebrate.tools.code_sync import build_package, _safe_branch
+        self.assertEqual(_safe_branch("feature/dob-v2"), "feature-dob-v2")
+        proj = Path(self.tmp.name) / "git_project"
+        proj.mkdir()
+        (proj / "a.py").write_text("A=1", encoding="utf-8")
+        try:
+            subprocess.run(["git", "init", "-q", "-b", "feature/dob"],
+                           cwd=proj, check=True, capture_output=True)
+            subprocess.run(["git", "add", "-A"], cwd=proj, check=True,
+                           capture_output=True)
+            subprocess.run(["git", "-c", "user.email=t@t", "-c",
+                            "user.name=t", "commit", "-q", "-m", "init"],
+                           cwd=proj, check=True, capture_output=True)
+        except Exception:
+            self.skipTest("git 不可用")
+        pkg = build_package(proj, project_id="gproj", incremental=False)
+        self.assertEqual(pkg["branch"], "feature-dob")
+
+    def test_harvest_push_no_code(self):
+        """结构 push：本地 harvest → push 结构（不含源代码内容），服务端可 verify。"""
+        import json, tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.tools.code_harvest import harvest_project
+        from cerebrate.tools.project_profile import ProfileStore
+        proj = Path(self.tmp.name) / "push_project"
+        (proj / "app").mkdir(parents=True)
+        (proj / "app" / "svc.py").write_text(textwrap.dedent("""\
+            from dataclasses import dataclass
+            @dataclass
+            class PushEntity:
+                id: str
+            def do_work():
+                pass
+        """), encoding="utf-8")
+        # 本地 harvest（结构不含源代码函数体）
+        h = harvest_project(proj, project_id="push-p", exts=(".py",))
+        serialized = json.dumps(h)
+        self.assertNotIn("def do_work():", serialized)  # 不含函数体实现
+        self.assertNotIn("pass", serialized)
+        # 通过 API push
+        resp = self.api.harvest_push({
+            "project": "push-p", "branch": "dev", "harvest": h,
+        })
+        self.assertEqual(resp["branch"], "dev")
+        self.assertTrue(resp["changed"])
+        # 服务端可用结构构建画像 + verify
+        store = ProfileStore(self.api.mm)
+        draft = store.build_draft("push-p", harvest=h)
+        store.save("push-p", draft)
+        ver = store.verify("push-p", branch="dev")
+        self.assertEqual(ver.get("branch"), "dev")
+        # 结构未变再 push → changed=False（不重建画像）
+        resp2 = self.api.harvest_push({
+            "project": "push-p", "branch": "dev", "harvest": h,
+        })
+        self.assertFalse(resp2["changed"])
+
+    def test_work_claim_conflict(self):
+        """协作感知：claim 声明 + 同模块他人冲突检测 + release。"""
+        # agent A 声明
+        r1 = self.api.project_work({
+            "project": "coop", "action": "claim", "agent_id": "codex-a",
+            "branch": "feature-x", "module": "dob-assignment",
+            "intent": "重构指派逻辑",
+        })
+        self.assertTrue(r1["ok"])
+        self.assertFalse(r1["conflict"])
+        # agent B 声明同模块 → 冲突告知
+        r2 = self.api.project_work({
+            "project": "coop", "action": "claim", "agent_id": "qoder-b",
+            "branch": "master", "module": "dob-assignment",
+            "intent": "修复指派 bug",
+        })
+        self.assertTrue(r2["conflict"])
+        self.assertEqual(r2["conflicts"][0]["agent_id"], "codex-a")
+        # list 可见
+        lst = self.api.project_work({"project": "coop", "action": "list"})
+        self.assertEqual(lst["active_count"], 2)
+        self.assertIn("feature-x", lst["by_branch"])
+        # release A → 冲突消失
+        rel = self.api.project_work({
+            "project": "coop", "action": "release",
+            "agent_id": "codex-a", "module": "dob-assignment"})
+        self.assertEqual(rel["released"], 1)
+        r3 = self.api.project_work({
+            "project": "coop", "action": "claim", "agent_id": "qoder-b",
+            "branch": "master", "module": "dob-assignment",
+            "intent": "再声明"})
+        self.assertFalse(r3["conflict"])
+
+    def test_branch_diff(self):
+        """分支差异：两分支 harvest 结构差异告知冲突点。"""
+        import tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.tools.code_harvest import harvest_project
+        proj = Path(self.tmp.name) / "diff_project"
+        (proj / "a").mkdir(parents=True)
+        (proj / "a" / "common.py").write_text("X=1", encoding="utf-8")
+        (proj / "a" / "only_a.py").write_text("A=1", encoding="utf-8")
+        self.api.harvest_push({"project": "diff-p", "branch": "master",
+                               "harvest": harvest_project(proj)})
+        (proj / "a" / "only_a.py").unlink()
+        (proj / "a" / "only_b.py").write_text("B=1", encoding="utf-8")
+        self.api.harvest_push({"project": "diff-p", "branch": "feature-z",
+                               "harvest": harvest_project(proj)})
+        diff = self.api.branch_diff({
+            "project": "diff-p", "from_branch": "master",
+            "to_branch": "feature-z"})
+        self.assertTrue(diff["ok"])
+        cp = diff["conflict_points"]
+        self.assertTrue(any("only_a.py" in m for m in cp["modules_only_in_from"]))
+        self.assertTrue(any("only_b.py" in m for m in cp["modules_only_in_to"]))
 
 
 if __name__ == "__main__":

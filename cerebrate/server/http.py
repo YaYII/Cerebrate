@@ -123,6 +123,15 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/code/sync":
             payload = self._read_json()
             return self.api.code_sync(payload)
+        if method == "POST" and path == "/v1/harvest/push":
+            payload = self._read_json()
+            return self.api.harvest_push(payload)
+        if method == "POST" and path == "/v1/project/work":
+            payload = self._read_json()
+            return self.api.project_work(payload)
+        if method == "POST" and path == "/v1/project/branch-diff":
+            payload = self._read_json()
+            return self.api.branch_diff(payload)
 
         payload = self._read_json()
         if method == "POST" and path == "/v1/agents/register":
