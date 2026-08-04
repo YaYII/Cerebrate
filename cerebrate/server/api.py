@@ -1263,6 +1263,69 @@ class BrainAPI:
                 doctrines.append(memory)
         return {"doctrines": doctrines, "count": len(doctrines)}
 
+    def soul_set(self, payload: dict) -> dict:
+        """写入虫群灵魂（服务端权威操作，绕过客户端白名单限制）。
+
+        灵魂 = 工程化思维行为准则（life_stage=doctrine, scope=general，
+        跨项目对每个接入虫群的 AI 生效）。客户端 propose 不能提交 doctrine，
+        本接口是服务端专属通道。
+        """
+        content = (payload.get("content") or "").strip()
+        if not content:
+            raise ValueError("soul content is required")
+        title = (payload.get("title") or "工程化思维灵魂（Engineering Soul）").strip()
+        source_agent = payload.get("agent") or payload.get("agent_id") or "cerebrate-system"
+        physical_user = payload.get("physical_user", "")
+        category = "doctrine"
+        life_stage = "doctrine"
+        scope = "general"  # 灵魂跨项目共享
+        project_id = ""
+        tags = ["soul", "engineering", "doctrine", "灵魂", "工程化思维", "行为准则"]
+
+        pre_memory_id = self._generate_memory_id(title, category)
+        origin_id = self.mm.origin.add(pre_memory_id, payload)
+        origin_ids = [origin_id]
+
+        memory_id = self.mm.share_to_swarm(
+            title=title,
+            content=content,
+            category=category,
+            tags=tags,
+            source_agent=source_agent,
+            problem_solved="",
+            solution="",
+            outcome="success",
+            project_id=project_id,
+            scope=scope,
+            life_stage=life_stage,
+            confidence=1.0,
+            origin_ids=origin_ids,
+            physical_user=physical_user,
+            memory_id=pre_memory_id,
+            observation_type="decision",
+            knowledge_type="tech",
+        )
+        data = {
+            "memory_id": memory_id,
+            "title": title,
+            "life_stage": life_stage,
+            "scope": scope,
+            "agent": source_agent,
+            "authority": "brain_server",
+        }
+        self.events.append("soul.set", source_agent, data, project_id)
+        return data
+
+    def soul_get(self) -> dict:
+        """读取虫群灵魂（权威教条中标记为 soul 的 doctrine）。"""
+        souls = []
+        for d in self.doctrines().get("doctrines", []):
+            tags = d.get("tags") or []
+            title = d.get("title") or ""
+            if "soul" in tags or "灵魂" in title or "Engineering Soul" in title:
+                souls.append(d)
+        return {"souls": souls, "count": len(souls)}
+
     def get_personal(self) -> dict:
         """Get personal preferences, equivalent to v3 recall."""
         users = self.mm.personal.list_users()

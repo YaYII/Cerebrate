@@ -81,6 +81,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.help()
         if method == "GET" and path == "/v1/doctrines":
             return self.api.doctrines()
+        if method == "GET" and path == "/v1/soul":
+            return self.api.soul_get()
         if method == "GET" and path.startswith("/v1/logs"):
             lines = int((params.get("lines") or ["50"])[0])
             level = (params.get("level") or [""])[0]
@@ -146,6 +148,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.rebuild_fulltext()
         if method == "POST" and path == "/v1/memories/propose":
             return self.api.propose_memory(payload)
+        if method == "POST" and path == "/v1/soul/set":
+            return self.api.soul_set(payload)
         if method == "POST" and path == "/v1/memories/detail":
             return self.api.memory_detail(payload)
         if method == "POST" and path == "/v1/usages/start":

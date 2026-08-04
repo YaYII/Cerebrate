@@ -246,6 +246,29 @@ def cmd_doctrines(args):
     output(client_request(args.url, "GET", "/v1/doctrines"))
 
 
+def cmd_soul(args):
+    if args.action == "set":
+        if args.content_file:
+            with open(args.content_file, "r", encoding="utf-8") as f:
+                content = f.read()
+        else:
+            content = args.content or ""
+        if not content.strip():
+            output({"status": "error",
+                    "error": {"code": 400,
+                              "message": "soul content required: --content or --content-file"},
+                    "meta": {"protocol": "v5"}})
+            return
+        body = {
+            "title": args.title or "工程化思维灵魂（Engineering Soul）",
+            "content": content,
+            "agent": args.agent or "cli",
+        }
+        output(client_request(args.url, "POST", "/v1/soul/set", body))
+    else:
+        output(client_request(args.url, "GET", "/v1/soul"))
+
+
 def cmd_vote(args):
     output(client_request(args.url, "POST", "/v1/consensus/vote", {
         "memory_id": args.memory_id,
@@ -489,6 +512,17 @@ def main(argv=None):
 
     p = sub.add_parser("doctrines", help="读取权威教条")
     p.set_defaults(func=cmd_doctrines)
+
+    p = sub.add_parser("soul", help="管理虫群灵魂（工程化思维行为准则）")
+    soul_sub = p.add_subparsers(dest="action")
+    ps = soul_sub.add_parser("set", help="写入灵魂（服务端权威操作）")
+    ps.add_argument("--title", default="")
+    ps.add_argument("--content", default="")
+    ps.add_argument("--content-file", default="")
+    ps.add_argument("--agent", default="cli")
+    ps.set_defaults(func=cmd_soul)
+    pg = soul_sub.add_parser("get", help="读取灵魂")
+    pg.set_defaults(func=cmd_soul)
 
     p = sub.add_parser("vote", help="共识投票")
     p.add_argument("--memory-id", required=True)
