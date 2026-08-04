@@ -258,6 +258,11 @@ class ProfileStore:
         draft = self.read_draft(project_id)
         if not draft:
             return {"ok": False, "reason": "no_draft", "project_id": project_id}
+        # 版本继承：基于 confirmed 与 draft 的较大版本号 +1，避免版本倒退
+        current = self.read(project_id)
+        if current:
+            draft["version"] = max(int(draft.get("version", 0)),
+                                   int(current.get("version", 0)))
         result = self.save(project_id, draft)
         # 草稿已被消费，删除草稿文件
         dp = self._draft_path(project_id)
@@ -265,7 +270,7 @@ class ProfileStore:
             dp.unlink(missing_ok=True)
         return {"ok": True, **result}
 
-    def fix_drifted_hints(self, project_id: str) -> dict:
+    def fix_drifted_hints(self, project_id: str, branch: str = "") -> dict:
         """清洗漂移 code_hint（LLM 幻觉路径）：verify 报漂移的实体清空 code_hint。
 
         语义域实体（业务概念）无单一代码文件，清空后 verify 通过；
@@ -274,7 +279,8 @@ class ProfileStore:
         profile = self.read(project_id)
         if not profile:
             return {"ok": False, "reason": "no_profile"}
-        v = self.verify(project_id)
+        # 与 verify 使用同一分支，避免分支不一致导致漏检/误检
+        v = self.verify(project_id, branch=branch)
         drifted = set()
         for issue in v.get("issues", []):
             if issue.startswith("code_hint 漂移: "):
@@ -638,14 +644,28 @@ class ProfileStore:
             return None
 
     # ── Phase 3: 导航 ──
-    def navigate(self, project_id: str, target: str) -> dict:
+    def _resolve_branch(self, project_id: str, branch: str = "") -> str:
+        """解析分支：显式分支优先，否则取项目默认/最近同步分支。"""
+        if branch:
+            return branch
+        try:
+            from cerebrate.tools.code_sync import list_branches
+            info = list_branches(project_id)
+            if info.get("branches"):
+                return info.get("default_branch") or info["branches"][-1]["branch"]
+        except Exception:
+            pass
+        return ""
+
+    def navigate(self, project_id: str, target: str, branch: str = "") -> dict:
         """在画像中定位目标域/实体，返回路径 + 挂载记忆 + 依赖。"""
         profile = self.read(project_id)
         if not profile:
             return {"found": False, "project_id": project_id,
                     "reason": "no_profile",
                     "hint": f"项目 {project_id} 暂无业务画像，请先 POST /v1/project/profile 构建"}
-        verified = self.verify(project_id)
+        branch = self._resolve_branch(project_id, branch)
+        verified = self.verify(project_id, branch=branch)
         verified_ok = verified.get("ok", False)
         hits = []
         for domain in profile.get("domains", []):
@@ -676,6 +696,7 @@ class ProfileStore:
                     "reason": "no_match", "target": target,
                     "domains": [d.get("id") for d in profile.get("domains", [])]}
         return {"found": True, "project_id": project_id, "target": target,
+                "branch": branch,
                 "hits": hits[:20],
                 "profile_verified": verified_ok,
                 "sources": {
@@ -683,7 +704,7 @@ class ProfileStore:
                     "memory_note": "业务记忆仅为参考（参考答案），具体以代码仓真实代码为准",
                 }}
 
-    def verify(self, project_id: str) -> dict:
+    def verify(self, project_id: str, branch: str = "") -> dict:
         """画像 vs 代码仓一致性校验（实事求是：画像必须对得上真实代码）。
 
         检查:
@@ -697,10 +718,12 @@ class ProfileStore:
         profile = self.read(project_id)
         if not profile:
             return {"ok": False, "reason": "no_profile", "project_id": project_id}
-        harvest = load_harvest(project_id)
+        branch = self._resolve_branch(project_id, branch)
+        harvest = load_harvest(project_id, branch=branch)
         if not harvest:
             return {"ok": False, "reason": "no_harvest", "project_id": project_id,
-                    "hint": "请先同步代码（code-sync）或收割（project-harvest）"}
+                    "branch": branch,
+                    "hint": "请先同步代码（code-sync --branch）或收割（project-harvest）"}
         code_files = {m["path"] for m in harvest.get("modules", [])}
         code_classes = set()
         for m in harvest.get("modules", []):
@@ -730,6 +753,7 @@ class ProfileStore:
             (code_classes | code_models) - entity_names)[:20]
         return {
             "project_id": project_id,
+            "branch": branch,
             "ok": len(issues) == 0,
             "issues": issues[:20],
             "issue_count": len(issues),

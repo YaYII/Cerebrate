@@ -1534,7 +1534,8 @@ class BrainAPI:
             from cerebrate.tools.code_sync import list_branches
             return list_branches(project_id)
         if action == "fix_hints":
-            return store.fix_drifted_hints(project_id)
+            return store.fix_drifted_hints(
+                project_id, branch=payload.get("branch", ""))
         if action == "draft":
             try:
                 limit = min(int(payload.get("limit", 200)), 500)
