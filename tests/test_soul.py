@@ -144,6 +144,27 @@ class SoulTests(unittest.TestCase):
         ids = [m.get("memory_id") for m in res.get("index", [])]
         self.assertNotIn(first["memory_id"], ids)
 
+    def test_auto_lesson_dedup(self):
+        # 自动经验问题级去重：同标题已存在（非 archived）→ 应跳过
+        self.api.propose_memory({
+            "title": "[自动经验] 项目架构介绍",
+            "content": "项目架构的自动经验提取测试内容，证据优先，不空谈。",
+            "category": "coding",
+            "agent_id": "tester",
+            "physical_user": "tester",
+        })
+        self.assertTrue(self.api._auto_lesson_exists("[自动经验] 项目架构介绍"))
+        self.assertFalse(self.api._auto_lesson_exists("[自动经验] 不存在的标题"))
+        # 归档后不再视为存在（可重新提取）
+        resp = self.api.search({
+            "query": "[自动经验] 项目架构介绍", "scope": "all", "limit": 5,
+            "agent_id": "tester", "mode": "fts",
+        })
+        mid = resp["index"][0]["memory_id"] if resp.get("index") else None
+        if mid:
+            self.api.mm.swarm.update_lifecycle(mid, "archived")
+            self.assertFalse(self.api._auto_lesson_exists("[自动经验] 项目架构介绍"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -890,6 +890,15 @@ class BrainAPI:
         if usage_id:
             self._auto_extracted_usages.add(usage_id)
 
+        # 问题级去重：同标题的 [自动经验] 已存在（非 archived）则跳过。
+        # 根因：不同 usage（usage_id 不同）引用相同 problem 时会重复提取同 title 经验，
+        # usage 级去重无法拦截；这里在 propose 前做标题去重，从源头防重复。
+        title = lesson.get("title", f"[自动经验] {problem[:60]}")
+        if self._auto_lesson_exists(title):
+            logger.info(
+                "自动经验去重跳过 (title=%s): 同标题经验已存在", title[:60])
+            return None
+
         # 获取被复用的原始记忆
         original_memory = None
         try:
@@ -919,7 +928,7 @@ class BrainAPI:
             content = self._augment_lesson_content(content, usage_record, original_memory)
 
         propose_payload = {
-            "title": lesson.get("title", f"[自动经验] {problem[:60]}"),
+            "title": title,
             "content": content,
             "category": lesson.get("category", usage_record.get("category", "coding")),
             "tags": lesson.get("tags", ["auto-extracted", outcome]),
@@ -945,6 +954,26 @@ class BrainAPI:
                 "自动经验提取被质量门控拒绝 (usage=%s): %s",
                 usage_record.get("usage_id", ""), e)
             return None
+
+    def _auto_lesson_exists(self, title: str) -> bool:
+        """检查同标题的 [自动经验] 是否已存在（排除 archived）。
+
+        用 ChromaDB metadata 精确匹配 title，避免每次 finish_usage 全库遍历。
+        失败时保守返回 False（不拦截提取，保证主流程可用）。
+        """
+        if not title:
+            return False
+        try:
+            items = self.mm.swarm._store.get_items_by_where(
+                {"title": title}, limit=1000)
+            # ChromaDB where 组合限制（顶层多条件需 $and 且版本差异），
+            # 这里查 title 后 Python 层过滤 archived，兼容所有版本
+            return any(
+                it.get("metadata", {}).get("life_stage") != "archived"
+                for it in items)
+        except Exception as e:
+            logger.warning("自动经验去重检查失败 (%s): %s", title[:40], e)
+            return False
 
     @staticmethod
     def _augment_lesson_content(content: str, usage_record: dict,
