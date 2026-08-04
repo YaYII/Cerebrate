@@ -94,6 +94,28 @@ python3 cerebrate.py query "如何修复导入顺序" --user yangying
 
 `mcp.py` 已无 cerebrate 包依赖，可单独拷贝该文件到任意机器运行，只要能访问容器端口即可。
 
+## 三-b、客户端「工程化思维灵魂」注入部署（v2.2+）
+
+每个接入虫群的 AI 客户端，都会在会话开始自动注入「工程化思维灵魂」
+（证据优先 / 开工前调研 / 最小修改 / 验证结果 / 总结交接）。
+灵魂内容由服务端统一维护（`GET /v1/soul`，scope=general），客户端只需部署注入机制。
+
+```bash
+# 一键部署到本机 Claude Code + Qoder（hook 脚本在 scripts/hooks/）
+./scripts/install-hooks.sh
+
+# 只检查不部署
+./scripts/install-hooks.sh --check
+```
+
+部署内容：
+- Claude Code：`~/.claude/hooks/cerebrate-session-start.py`（SessionStart 事件）
+- Qoder：`~/.qoder/hooks/cerebrate-memory-inject.py`（UserPromptSubmit 事件）
+- Codex：`~/.codex/AGENTS.md` 需含「工程化思维灵魂」章节（脚本检测提示，不覆盖用户内容）
+
+> 其他设备：`git pull` 拉取仓库 → 运行 `./scripts/install-hooks.sh` 即可。
+> hook 脚本不含硬编码机密（token 从 `.env` 读取），可安全入库分发。
+
 ## 四、迁移已有记忆（可选）
 
 容器使用全新空 volume 从零建库。如需把宿主机本地已有记忆迁入容器，注意**维度差异**：本地 `chroma_data` 若由 hash(384 维) 建库，与容器 BGE(512 维) 不兼容，不能直接拷贝 `chroma_data`，必须经 seed 重建：
