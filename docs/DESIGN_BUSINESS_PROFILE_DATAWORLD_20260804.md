@@ -118,3 +118,28 @@
 - 业务层面（项目专属）= `scope=project + project_id`，是「业务画像（数据世界）」的输入。
 - 数据世界 = 画像的领域树 + 实体关系 + 依赖（树导航 + 图依赖）。
 - 画像用途 = 项目信息导航，避免 AI 大面积扫描代码消耗 token。
+
+---
+
+## 7. v2 演进：流程视图（流程世界）— LLM 参与宏观建设（2026-08-04）
+
+### 7.1 新增认知（用户判断，采纳）
+单一数据结构（名词）不够，AI 还需「流程视图」（动词）——系统如何运行：时序、状态流转、功能交互（产品经理的时序图/流程图/UI flow/架构脑图）。**LLM 必须参与宏观数据建设**：从业务记忆提炼流程模型，人工确认。
+
+### 7.2 双视图
+- **静态结构视图**：域 → 实体 → 字段 → 关系（v1 已完成）
+- **动态流程视图（v2）**：flows[] —— trigger / actors / steps(seq,actor,action,input,output,condition,detail) / state_machine(states,transitions) / depends_on / memories
+
+### 7.3 分层披露（地图式，宏观可调控、微观不影响宏观）
+| 层级 | 内容 | 用途 |
+|---|---|---|
+| summary（宏观） | 域列表+依赖+实体数+**流程名列表** | 一眼看全貌 |
+| graph（中观） | 域+实体+关系+**流程步骤时序** | 看结构+走向 |
+| detail（微观） | 完整画像（字段/记忆/状态机） | 深挖细节 |
+
+### 7.4 实现
+- ProfileStore._llm_refine prompt 扩展：要求输出 flows（时序/状态机），LLM 参与流程建模
+- _sanitize：清洗 LLM 输出（None/非法类型），防渲染崩溃
+- Markdown 渲染 🔄 流程世界（时序 + 状态机）
+- 试点：cerebrate（5 流程：语义检索/Git 同步/MCP 蒸馏/扩展激活/崩溃修复）、ihm-backend（DOB 重指派 V2 槽位模式 6 步时序）均 confirmed
+- 测试：test_flow_view 等 8 项画像测试，全量 190 passed
