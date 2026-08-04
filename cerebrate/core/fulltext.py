@@ -81,7 +81,8 @@ class FullTextIndex:
                     title TEXT, content TEXT, tags TEXT,
                     category TEXT, scope TEXT, project_id TEXT,
                     created TEXT, updated TEXT,
-                    observation_type TEXT
+                    observation_type TEXT,
+                    life_stage TEXT
                 )
                 """.format(meta=self._meta_table)
             )
@@ -96,6 +97,10 @@ class FullTextIndex:
                 conn.execute(
                     "ALTER TABLE {meta} ADD COLUMN observation_type TEXT".format(
                         meta=self._meta_table))
+            if "life_stage" not in cols:
+                conn.execute(
+                    "ALTER TABLE {meta} ADD COLUMN life_stage TEXT".format(
+                        meta=self._meta_table))
             conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -106,7 +111,7 @@ class FullTextIndex:
     def upsert(self, doc_id: str, *, title: str = "", content: str = "",
                tags: str = "", category: str = "", scope: str = "general",
                project_id: str = "", created: str = "", updated: str = "",
-               observation_type: str = "") -> bool:
+               observation_type: str = "", life_stage: str = "memory") -> bool:
         """写入/更新一条记忆的全文索引。"""
         if not self._ready or not doc_id:
             return False
@@ -121,17 +126,19 @@ class FullTextIndex:
                     (title, content, tags, category, scope, project_id, doc_id))
                 conn.execute(
                     """
-                    INSERT INTO {meta}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO {meta}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type, life_stage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(doc_id) DO UPDATE SET
                         title=excluded.title, content=excluded.content,
                         tags=excluded.tags, category=excluded.category,
                         scope=excluded.scope, project_id=excluded.project_id,
                         created=excluded.created, updated=excluded.updated,
-                        observation_type=excluded.observation_type
+                        observation_type=excluded.observation_type,
+                        life_stage=excluded.life_stage
                     """.format(meta=self._meta_table),
                     (doc_id, title, content, tags, category, scope,
-                     project_id, created, updated, observation_type))
+                     project_id, created, updated, observation_type,
+                     life_stage))
                 conn.commit()
             return True
         except Exception as e:
@@ -209,6 +216,7 @@ class FullTextIndex:
                         "FROM {fts} f "
                         "JOIN {meta} m ON m.doc_id = f.doc_id "
                         "WHERE {fts} MATCH ?" + scope_cond + cat_cond +
+                        " AND IFNULL(m.life_stage,'') != 'archived'" +
                         " ORDER BY bm25({fts}) LIMIT ?"
                     ).format(fts=self._fts_table, meta=self._meta_table)
                     rows = conn.execute(sql, (fts_q, limit * 3)).fetchall()
@@ -223,7 +231,8 @@ class FullTextIndex:
                         "length(content) AS content_len, '' AS snippet "
                         "FROM {meta} "
                         "WHERE (title LIKE ? OR content LIKE ?)" +
-                        scope_cond_like + cat_cond_like + " LIMIT ?"
+                        scope_cond_like + cat_cond_like +
+                        " AND IFNULL(life_stage,'') != 'archived' LIMIT ?"
                     ).format(meta=self._meta_table)
                     try:
                         like_rows = conn.execute(

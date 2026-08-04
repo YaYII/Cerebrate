@@ -125,6 +125,25 @@ class SoulTests(unittest.TestCase):
         })
         self.assertNotEqual(resp["life_stage"], "doctrine")
 
+    def test_archived_soul_not_in_search(self):
+        # 归档的灵魂不应出现在向量检索中（life_stage=archived 过滤）
+        first = self.api.soul_set({
+            "title": "工程化思维灵魂旧版",
+            "content": "旧的灵魂内容，证据优先，不空谈，测试验证。",
+            "agent": "tester",
+        })
+        self.api.soul_set({
+            "title": "工程化思维灵魂新版",
+            "content": "新的灵魂内容，证据优先，不空谈，测试验证。",
+            "agent": "tester",
+        })
+        res = self.api.search({
+            "query": "工程化思维灵魂旧版", "scope": "all", "limit": 10,
+            "agent_id": "tester", "mode": "vector",
+        })
+        ids = [m.get("memory_id") for m in res.get("index", [])]
+        self.assertNotIn(first["memory_id"], ids)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -328,7 +328,8 @@ class SwarmMemory:
                              tags=",".join(tags), category=category,
                              scope=scope, project_id=project_id,
                              created=now, updated=now,
-                             observation_type=observation_type)
+                             observation_type=observation_type,
+                             life_stage=life_stage)
             # 同步元数据到 PostgreSQL
             self._sync_meta(memory_id, title=title, category=category,
                             tags=tags, source_agent=source_agent,
@@ -436,7 +437,8 @@ class SwarmMemory:
                          tags=",".join(tags), category=category,
                          scope=scope, project_id=project_id,
                          created=now, updated=now,
-                         observation_type=observation_type)
+                         observation_type=observation_type,
+                         life_stage=life_stage)
         # 同步元数据到 PostgreSQL
         self._sync_meta(memory_id, title=title, category=category,
                         tags=tags, source_agent=source_agent,
@@ -706,7 +708,7 @@ class SwarmMemory:
     def _fts_upsert(self, memory_id: str, *, title: str, content: str,
                     tags: str, category: str, scope: str, project_id: str,
                     created: str, updated: str,
-                    observation_type: str = "") -> bool:
+                    observation_type: str = "", life_stage: str = "memory") -> bool:
         """双写 FTS5（失败静默降级，不影响主写入路径）。"""
         fts = self._get_fulltext()
         if not fts or not fts.available:
@@ -715,7 +717,8 @@ class SwarmMemory:
             memory_id, title=title, content=content, tags=tags,
             category=category, scope=scope, project_id=project_id,
             created=created, updated=updated,
-            observation_type=observation_type or observation_type_for(category))
+            observation_type=observation_type or observation_type_for(category),
+            life_stage=life_stage)
 
     def fulltext_query(self, query_text: str, limit: int = 20,
                        project_id: Optional[str] = None,
@@ -772,7 +775,8 @@ class SwarmMemory:
                     project_id=meta.get("project_id", ""),
                     created=meta.get("created", ""),
                     updated=meta.get("updated", ""),
-                    observation_type=meta.get("observation_type", ""))
+                    observation_type=meta.get("observation_type", ""),
+                    life_stage=meta.get("life_stage", "memory"))
                 if ok:
                     indexed += 1
                 else:
@@ -883,7 +887,7 @@ class SwarmMemory:
                 item_tags = set(_safe_split(meta.get("tags")))
                 if not item_tags.intersection(tags):
                     continue
-            if meta.get("life_stage") == "quarantined":
+            if meta.get("life_stage") in ("quarantined", "archived"):
                 continue
             if meta.get("is_parent", False):
                 continue
@@ -1529,6 +1533,22 @@ class SwarmMemory:
             else:
                 text = meta.get("title", "")
             self._store.upsert(item_id, text, meta)
+            # 同步 FTS5 全文索引（life_stage 变化必须反映到 FTS 过滤，
+            # 否则归档/隔离的记忆仍会被全文检索命中）
+            try:
+                self._fts_upsert(
+                    item_id, title=meta.get("title", ""),
+                    content=(doc.get("content", "") if doc else ""),
+                    tags=",".join(_safe_split(meta.get("tags"))),
+                    category=meta.get("category", ""),
+                    scope=meta.get("scope", "general"),
+                    project_id=meta.get("project_id", ""),
+                    created=meta.get("created", ""),
+                    updated=meta.get("updated", ""),
+                    observation_type=meta.get("observation_type", ""),
+                    life_stage=life_stage)
+            except Exception:
+                pass
             return True
 
     def lifecycle_counts(self) -> dict:
