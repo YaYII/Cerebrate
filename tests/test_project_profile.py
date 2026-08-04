@@ -316,6 +316,42 @@ class ProjectProfileTests(unittest.TestCase):
                             for hit in nav["hits"]
                             for h in [hit]))
 
+    def test_code_sync_roundtrip(self):
+        """代码同步闭环：本地打包 → 服务器安全解压 → harvest → 画像。"""
+        import tempfile, textwrap
+        from pathlib import Path
+        from cerebrate.config import config
+        from cerebrate.tools.code_sync import build_package, receive_package
+        proj = Path(self.tmp.name) / "sync_project"
+        (proj / "src").mkdir(parents=True)
+        (proj / "src" / "core.py").write_text(textwrap.dedent("""\
+            from dataclasses import dataclass
+            @dataclass
+            class SyncEntity:
+                id: str
+                name: str
+        """), encoding="utf-8")
+        # 敏感文件应被本地打包排除
+        (proj / ".env").write_text("SECRET=should-not-sync", encoding="utf-8")
+        (proj / "notes.md").write_text("private note", encoding="utf-8")
+        pkg = build_package(proj, project_id="sync-proj")
+        self.assertGreaterEqual(pkg["files_count"], 1)
+        self.assertTrue(any(".env" in ex["path"] for ex in pkg["excluded"]))
+        # 服务器接收 + 自动 harvest
+        result = receive_package("sync-proj", pkg["package_b64"],
+                                 auto_harvest=True)
+        self.assertGreaterEqual(result["files_written"], 1)
+        self.assertIn("harvest", result)
+        # 解压目录不含 .env
+        repo = Path(config.memory_root) / "code_repos" / "sync-proj"
+        self.assertFalse((repo / ".env").exists())
+        # harvest 到画像
+        from cerebrate.tools.code_harvest import load_harvest
+        h = load_harvest("sync-proj")
+        self.assertIsNotNone(h)
+        self.assertTrue(any("SyncEntity" in m.get("classes", [])
+                            for m in h["modules"]))
+
 
 if __name__ == "__main__":
     unittest.main()

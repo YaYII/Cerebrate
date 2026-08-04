@@ -107,3 +107,30 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 ### 7.7 测试
 - test_harvest_code_fusion 新增；全量 **191 passed / 0 failed**
+
+---
+
+## 8. v4 演进：代码同步闭环（本地代码 → 服务器代码仓）（2026-08-04）
+
+### 8.1 需求
+脑虫运行在服务器（Docker 容器），用户代码在本地，harvest 无法直接读取完整项目代码。需要「把用户完整项目代码同步过去」。
+
+### 8.2 闭环
+`本地 CLI 打包上传 → 服务器解压到 {memory_root}/code_repos/{project_id}/ → 自动 harvest（AST）→ 画像数据就绪`
+
+### 8.3 实现
+- `cerebrate/tools/code_sync.py`：
+  - `build_package`：本地扫描 + tar.gz 打包（自动排除敏感文件：.env/密钥/证书/凭据/私有笔记/数据目录/二进制，实测排除 1241 项）
+  - `receive_package`：服务端安全解压（拒绝绝对路径/../符号链接逃逸 + 敏感文件兜底）→ 自动 harvest
+- API：`POST /v1/code/sync`；CLI：`cerebrate.py code-sync --project X --dir /path`
+- 存储：`{memory_root}/code_repos/{project_id}/`（容器 /data/code_repos/，持久）
+- 配置：`CEREBRATE_CODE_SYNC_MAX_BYTES`（默认 200MB）
+
+### 8.4 关键 bug 修复
+- `code_harvest.py`：SKIP_DIRS 误用绝对路径 parts，容器代码仓在 `/data/` 下被「data」规则跳过 → 改为相对路径判断
+
+### 8.5 试点（cerebrate 真实闭环，已验证）
+- CLI 上传：105 文件 / 5070KB / 排除 1241 项（.env、.git、.claude、.codegraph）
+- 服务器：解压 105 文件到 /data/code_repos/cerebrate → harvest 41 文件/41 模块/1 数据模型/32 端点
+- navigate「DecisionRouter」→ cerebrate/brain/decision.py（代码仓驱动）
+- 测试：test_code_sync_roundtrip；全量 **192 passed / 0 failed**

@@ -1592,6 +1592,21 @@ class BrainAPI:
                                     "stats": h.get("stats", {})})
         return result
 
+    def code_sync(self, payload: dict) -> dict:
+        """代码同步：接收本地项目代码包，解压到代码仓并自动 harvest。"""
+        from cerebrate.tools.code_sync import receive_package
+        project_id = payload.get("project") or payload.get("project_id") or ""
+        package_b64 = payload.get("package_b64") or ""
+        if not project_id or not package_b64:
+            raise ValueError("project_id and package_b64 are required")
+        auto_harvest = payload.get("auto_harvest", True)
+        result = receive_package(project_id, package_b64,
+                                 auto_harvest=auto_harvest)
+        self.events.append("code_sync_ok", source_agent="brain-server",
+                           payload={"project_id": project_id,
+                                    "files_written": result["files_written"]})
+        return result
+
     def project_navigate(self, payload: dict) -> dict:
         """在业务画像中定位目标域/实体（导航），返回路径 + 挂载记忆 + 依赖。"""
         from cerebrate.tools.project_profile import ProfileStore

@@ -170,7 +170,9 @@ def harvest_project(root: Path, project_id: str = "",
     for filepath in sorted(root.rglob("*")):
         if not filepath.is_file():
             continue
-        if any(part in SKIP_DIRS for part in filepath.parts):
+        # 只按「项目相对路径」判断排除目录（绝对路径可能含 /data 等挂载点）
+        rel_parts = filepath.relative_to(root).parts
+        if any(part in SKIP_DIRS for part in rel_parts[:-1]):
             continue
         if filepath.name in SKIP_FILES:
             continue

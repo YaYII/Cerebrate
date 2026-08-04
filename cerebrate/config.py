@@ -206,12 +206,18 @@ class CerebrateConfig:
         self.docstore_path = self.memory_root / "docstore"
         self.fulltext_path = self.memory_root / "fulltext.sqlite3"
         self.profile_path = self.memory_root / "profiles"
+        self.code_repos_path = self.memory_root / "code_repos"
 
     # 业务画像（数据世界）
     profile_llm_enabled: bool = field(
         default_factory=lambda: os.environ.get(
             "CEREBRATE_PROFILE_LLM_ENABLED", "false").lower() in (
                 "1", "true", "yes", "on"))
+
+    # 代码同步（本地代码 → 脑虫服务器代码仓）
+    code_sync_max_bytes: int = field(
+        default_factory=lambda: int(os.environ.get(
+            "CEREBRATE_CODE_SYNC_MAX_BYTES", "209715200")))  # 200MB
 
 
 config = CerebrateConfig()

@@ -107,6 +107,30 @@ def cmd_project_harvest(args):
         "exts": [args.exts] if args.exts else [".py"],
     }))
 
+def cmd_code_sync(args):
+    """代码同步：把本地完整项目代码打包上传到脑虫服务器（→代码仓→harvest）"""
+    from cerebrate.tools.code_sync import build_package
+    from pathlib import Path
+    root = Path(args.dir).resolve()
+    if not root.is_dir():
+        print(json.dumps({"status": "error",
+                          "error": {"code": 400,
+                                    "message": f"目录不存在: {root}"}},
+                         ensure_ascii=False))
+        sys.exit(1)
+    pkg = build_package(root, project_id=args.project)
+    print(f"打包完成: {pkg['files_count']} 文件 / "
+          f"{pkg['total_bytes']/1024:.1f}KB / 排除 {pkg['excluded_count']} 项",
+          file=sys.stderr)
+    for ex in pkg["excluded"][:10]:
+        print(f"  ⛔ 排除 {ex['path']} ({ex['reason']})", file=sys.stderr)
+    resp = client_request(args.url, "POST", "/v1/code/sync", {
+        "project": args.project,
+        "package_b64": pkg["package_b64"],
+        "auto_harvest": True,
+    })
+    output(resp)
+
 
 def cmd_timeline(args):
     """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文"""
@@ -324,6 +348,12 @@ def main(argv=None):
     p.add_argument("--dir", default="", help="项目代码根目录（留空则读取已生成）")
     p.add_argument("--exts", default=".py", help="扫描扩展名（默认 .py）")
     p.set_defaults(func=cmd_project_harvest)
+
+    p = sub.add_parser("code-sync",
+                       help="代码同步：本地完整项目代码打包上传到脑虫（→代码仓→harvest→画像）")
+    p.add_argument("--project", default="", help="项目 ID")
+    p.add_argument("--dir", default="", help="本地项目代码根目录")
+    p.set_defaults(func=cmd_code_sync)
 
     p = sub.add_parser("timeline", help="查看记忆时间线（渐进式披露第2层，时序上下文）")
     p.add_argument("--anchor", default="", help="anchor 记忆 ID（不传则用 query 找 top1）")
