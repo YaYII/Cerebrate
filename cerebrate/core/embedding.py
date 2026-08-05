@@ -21,6 +21,9 @@ _encode_lock = threading.Lock()
 # 查询向量 LRU 缓存（高频查询复用编码结果，减 _encode_lock 串行压力，阶段 1 扩展）
 _query_cache: "OrderedDict[str, list[float]]" = OrderedDict()
 _query_cache_lock = threading.Lock()
+# 查询缓存命中/未命中计数（供 /v1/status 调度信号：高频查询复用度）
+_query_cache_hits = 0
+_query_cache_misses = 0
 
 
 def get_embedding_engine(model_name: str = "BAAI/bge-small-zh-v1.5",
@@ -32,6 +35,28 @@ def get_embedding_engine(model_name: str = "BAAI/bge-small-zh-v1.5",
             if _engine is None:  # double-checked locking
                 _engine = EmbeddingEngine(model_name, device)
     return _engine
+
+
+def query_cache_stats() -> dict:
+    """查询向量缓存统计（供 /v1/status 调度信号）。
+
+    返回当前缓存占用、容量、命中/未命中计数与命中率——
+    AI 据此判断「高频查询是否已被缓存复用，现在查询代价高低」。
+    """
+    global _query_cache_hits, _query_cache_misses
+    with _query_cache_lock:
+        hits = _query_cache_hits
+        misses = _query_cache_misses
+        size = len(_query_cache)
+        capacity = config.embedding_query_cache_size
+        total = hits + misses
+        return {
+            "size": size,
+            "capacity": capacity,
+            "hits": hits,
+            "misses": misses,
+            "hit_rate": round(hits / total, 3) if total else 0.0,
+        }
 
 
 class EmbeddingEngine:
@@ -116,13 +141,16 @@ class EmbeddingEngine:
 
     def encode_query(self, query: str, max_length: Optional[int] = None) -> list[float]:
         """编码查询文本（BGE 需要加前缀，线程安全）"""
+        global _query_cache_hits, _query_cache_misses
         # LRU 缓存：相同查询直接命中，避免重复编码（阶段 1 扩展）
         cache_key = query if max_length is None else f"{query}\x00{max_length}"
         with _query_cache_lock:
             hit = _query_cache.get(cache_key)
             if hit is not None:
                 _query_cache.move_to_end(cache_key)
+                _query_cache_hits += 1
                 return hit
+            _query_cache_misses += 1
         with _encode_lock:
             if self._mode == "bge" and self._model:
                 prefixed = f"为这个句子生成表示以用于检索相关文章：{query}"

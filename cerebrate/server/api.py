@@ -39,6 +39,10 @@ class BrainAPI:
         self._sense_cache: Optional[dict] = None
         self._sense_cache_ts: float = 0.0
         self._sense_ttl: float = 60.0
+        # 轻量服务状态缓存（调度信号）：5s TTL，无全库统计，AI 感知脑虫状况用
+        self._status_cache: Optional[dict] = None
+        self._status_cache_ts: float = 0.0
+        self._status_ttl: float = 5.0
         self._doctrines_cache: Optional[dict] = None
         self._doctrines_cache_ts: float = 0.0
         self._doctrines_ttl: float = 10.0
@@ -55,6 +59,73 @@ class BrainAPI:
         data["consensus"] = self.consensus_overview()
         self._sense_cache = data
         self._sense_cache_ts = now
+        return data
+
+    def status(self) -> dict:
+        """轻量服务状态（调度信号）：AI 据此决定查询时机与方式。
+
+        与 sense 的区别：不返回 recent_index 等重内容，5 秒 TTL 缓存；
+        供 AI「感知脑虫状况 → 综合调度」——可先查代码再查记忆交叉印证，
+        不必每次都机械强制先查记忆。
+        """
+        now = time.monotonic()
+        if self._status_cache is not None and now - self._status_cache_ts < self._status_ttl:
+            return self._status_cache
+        stats = self.mm.get_all_stats()
+        swarm = stats.get("swarm", {})
+        vector = stats.get("vector", {})
+        llm = CerebrateLLM().status()
+        embed_mode = vector.get("embedding_mode", "unknown")
+        fulltext = bool(config.fulltext_enabled)
+        llm_ok = bool(llm.get("available"))
+        # 负载信号（O(1) count，不做全量扫描，保持接口轻量）
+        try:
+            usage_count = self.mm._usage_store().count()
+        except Exception:
+            usage_count = 0
+        try:
+            active_agents = len(self.mm.agents.list_active())
+        except Exception:
+            active_agents = 0
+        # 查询向量缓存统计（高频查询复用度）
+        try:
+            from cerebrate.core.embedding import query_cache_stats
+            qcache = query_cache_stats()
+        except Exception:
+            qcache = {}
+        # 建议调度模式（规则驱动，不依赖 LLM）：
+        #   full  = bge + LLM 可用 + 无积压 → 可全力查询（先代码后记忆/先记忆后代码都行）
+        #   light = embedding 退化 hash 或 FTS 关闭或 LLM 不可用 → 轻量精确检索
+        #   defer = 历史使用记录多且并发活跃高 → 先做本地代码调研，记忆查询延后
+        if embed_mode == "hash" or not fulltext:
+            recommended = "light"
+        elif not llm_ok:
+            recommended = "light"
+        elif usage_count > 2000 and active_agents > 10:
+            recommended = "defer"
+        else:
+            recommended = "full"
+        data = {
+            "health": "healthy",
+            "embedding": {"mode": embed_mode, "fulltext": fulltext},
+            "llm": {
+                "available": llm_ok,
+                "provider": llm.get("provider", ""),
+                "immune_enabled": bool(llm.get("immune_enabled")),
+            },
+            "load": {
+                "usage_records": usage_count,
+                "active_agents": active_agents,
+            },
+            "query_cache": qcache,
+            "counts": {
+                "total_memories": swarm.get("total", 0),
+                "kb_docs": vector.get("kb_docs", 0),
+            },
+            "recommended": recommended,
+        }
+        self._status_cache = data
+        self._status_cache_ts = now
         return data
 
     def assess(self) -> dict:
@@ -574,6 +645,20 @@ class BrainAPI:
                     "params": {},
                     "returns": {"health": "ok|degraded", "warnings": [], "total_memories": 0, "total_agents": 0,
                                 "latest_event_id": 0, "server_role": "authoritative_brain"}
+                },
+                {
+                    "command": "status",
+                    "method": "GET",
+                    "path": "/v1/status",
+                    "description": "轻量服务状态（调度信号）：embedding/LLM 可用性、负载、查询缓存命中率、建议调度模式 recommended=full|light|defer",
+                    "params": {},
+                    "returns": {"health": "healthy",
+                                "embedding": {"mode": "bge", "fulltext": True},
+                                "llm": {"available": True, "provider": "deepseek", "immune_enabled": True},
+                                "load": {"usage_records": 0, "active_agents": 0},
+                                "query_cache": {"size": 0, "capacity": 512, "hits": 0, "misses": 0, "hit_rate": 0.0},
+                                "counts": {"total_memories": 0, "kb_docs": 0},
+                                "recommended": "full|light|defer"}
                 },
                 {
                     "command": "doctrines",

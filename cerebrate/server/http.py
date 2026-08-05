@@ -87,6 +87,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str, path: str, params: dict) -> dict:
         if method == "GET" and path == "/v1/sense":
             return self.api.sense()
+        if method == "GET" and path == "/v1/status":
+            return self.api.status()
         if method == "GET" and path == "/v1/brain/assess":
             return self.api.assess()
         if method == "GET" and path == "/v1/llm/status":

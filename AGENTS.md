@@ -151,9 +151,14 @@ Cerebrate 是团队记忆服务端（Docker 运行于 `127.0.0.1:8765`，MCP 工
    - Claude Code 的 SessionStart hooks 已自动注入记忆概览（最近 8 条 + 统计），
      直接把它当作上下文事实使用，不要忽略。
    - 未注入时主动调用 `cerebrate_sense`（MCP 或 `cerebrate.py --url ... sense`）。
-2. **任何任务开工前（需求调研阶段）**：先查历史记忆，这是证据收集的一部分。
-   - 调用 `cerebrate_search(query, scope=project/all)` 检索相关记忆，
-     项目相关任务必须传 `project_id`（避免通用记忆隔离误伤）。
+   - 需要调度信号时调用 `cerebrate_status`（`GET /v1/status`，5s TTL 轻量接口）：
+     返回 embedding 模式、LLM 可用性、负载、查询缓存命中率与
+     `recommended=full|light|defer` 建议调度模式。
+2. **任务开工前（需求调研阶段）**：先感知脑虫状态，再按场景灵活调度查询时机。
+   - 记忆与代码是同等证据，查询顺序不机械固定——以**互相印证**为原则：
+     · 需要项目背景 / 决策历史 → 先查记忆（`cerebrate_search`，项目任务必须传 `project_id`）
+     · 需要确认代码事实 → 先读代码，再查记忆印证补漏（记忆为参考答案，禁止照搬旧结论）
+     · status 显示 `defer` / `light` → 优先本地代码证据，记忆查询延后或改用轻量精确检索
    - 命中关键记忆后用 `cerebrate_timeline`（前因后果）与
      `cerebrate_detail`（完整详情）补齐上下文。
    - 检索无命中 ≠ 不存在：可换关键词/换 scope 再查一次，仍无再判断"新经验"。
