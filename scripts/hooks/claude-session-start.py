@@ -93,6 +93,21 @@ def main():
                             sc.get("general", "?"), sc.get("project", "?")))
     except Exception:
         pass
+    # 1.5 调度信号（感知脑虫状况 → 综合调度记忆查询时机：可先代码后记忆交叉印证）
+    try:
+        status = api_get("/v1/status", token)
+        if status.get("status") == "ok":
+            d = status["data"]
+            emb = d.get("embedding", {})
+            llm = d.get("llm", {})
+            qc = d.get("query_cache", {})
+            lines.append(
+                "[调度信号] recommended=%s | embedding=%s | llm=%s | 查询缓存命中率=%s%%"
+                % (d.get("recommended", "?"), emb.get("mode", "?"),
+                   "可用" if llm.get("available") else "不可用",
+                   round((qc.get("hit_rate") or 0) * 100)))
+    except Exception:
+        pass
     # 2. 当前项目画像概览（宏观俯瞰）
     project_id = os.path.basename(os.path.normpath(cwd))
     if project_id and project_id not in (".", "/", "~"):

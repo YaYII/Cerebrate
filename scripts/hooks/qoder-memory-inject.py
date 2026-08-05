@@ -119,6 +119,21 @@ def main():
             )
     except Exception:
         pass
+    try:
+        status = api_get("/v1/status", token)
+        if status.get("status") == "ok":
+            d = status.get("data", {})
+            emb = d.get("embedding", {})
+            llm = d.get("llm", {})
+            qc = d.get("query_cache", {})
+            lines.append(
+                "[调度信号] recommended=%s | embedding=%s | llm=%s | 查询缓存命中率=%s%%"
+                % (d.get("recommended", "?"), emb.get("mode", "?"),
+                   "可用" if llm.get("available") else "不可用",
+                   round((qc.get("hit_rate") or 0) * 100))
+            )
+    except Exception:
+        pass
 
     # 用用户 prompt 检索相关记忆（项目维度：命中项目记忆+通用记忆）
     if prompt:

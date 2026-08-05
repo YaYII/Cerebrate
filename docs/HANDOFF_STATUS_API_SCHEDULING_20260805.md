@@ -43,6 +43,7 @@
 
 - `AGENTS.md`「记忆使用契约」：第 1 条加 `/v1/status` 感知；第 2 条改为「感知状态→按场景灵活调度」（先代码后记忆互证 / defer 时延后）
 - 服务端 `/v1/soul` 升级 **v1.1**（`fb1f748665d8f792`，旧版 `2d2f8d9516267590` 已归档），新增「记忆使用契约：感知状态→灵活调度」小节——Claude Code / Qoder 会话开始自动注入
+- **hook 注入**：`claude-session-start.py` + `qoder-memory-inject.py` 新增 `[调度信号]` 行（recommended / embedding / llm / 查询缓存命中率），已通过 `./scripts/install-hooks.sh` 部署到 `~/.claude/hooks/` 与 `~/.qoder/hooks/`，下次会话生效
 
 ## 3. 关键决策与理由
 
