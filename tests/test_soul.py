@@ -165,6 +165,42 @@ class SoulTests(unittest.TestCase):
             self.api.mm.swarm.update_lifecycle(mid, "archived")
             self.assertFalse(self.api._auto_lesson_exists("[自动经验] 项目架构介绍"))
 
+    def test_dedup_check_document_dimension(self):
+        """去重检查：独立文档维度，同标题多份才算重复；分块不算。"""
+        # 两条同标题独立记忆 → 识别为重复
+        self.api.propose_memory({
+            "title": "去重检查测试文档",
+            "content": "这是去重检查的第一份测试文档内容，用于验证独立文档维度统计。",
+            "category": "coding",
+            "agent_id": "tester",
+            "physical_user": "tester",
+        })
+        self.api.propose_memory({
+            "title": "去重检查测试文档",
+            "content": "这是去重检查的第二份测试文档内容，标题与第一份相同。",
+            "category": "coding",
+            "agent_id": "tester",
+            "physical_user": "tester",
+        })
+        res = self.api.dedup_check()
+        self.assertGreaterEqual(res["duplicate_groups"], 1)
+        group = next((g for g in res["groups"]
+                      if g["title"] == "去重检查测试文档"), None)
+        self.assertIsNotNone(group)
+        self.assertEqual(group["count"], 2)
+        self.assertEqual(group["redundant"], 1)
+        # 唯一标题不算重复
+        self.api.propose_memory({
+            "title": "去重检查唯一文档",
+            "content": "这份文档标题唯一，不应出现在重复组里。",
+            "category": "coding",
+            "agent_id": "tester",
+            "physical_user": "tester",
+        })
+        res2 = self.api.dedup_check()
+        self.assertNotIn("去重检查唯一文档",
+                         [g["title"] for g in res2["groups"]])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1410,6 +1410,47 @@ class BrainAPI:
             "current": souls[0] if souls else None,
         }
 
+    def dedup_check(self, payload: Optional[dict] = None) -> dict:
+        """记忆去重检查（只读，安全）：
+
+        按「独立文档」维度统计同标题重复——分块（doc_group_id 关联、id 以 _cN 结尾）
+        不算独立文档；只有同一标题存在 >1 个独立文档（父文档或普通记忆）才算重复。
+        避免把长文档分块误判为重复（v1 教训：verified_skill 分块 30-143 个是正常结构）。
+        """
+        from collections import defaultdict
+        limit = int((payload or {}).get("limit", 50))
+        independent: list[dict] = []
+        chunk_items = 0
+        for mid in self.mm.swarm.get_all_memory_ids():
+            if "_c" in mid and mid[mid.rfind("_c") + 2:].isdigit():
+                chunk_items += 1
+                continue
+            mem = self.mm.get_swarm_memory(mid)
+            if mem and mem.get("life_stage") != "archived":
+                independent.append(mem)
+        by_title: dict[str, list[dict]] = defaultdict(list)
+        for m in independent:
+            by_title[(m.get("title") or "")].append(m)
+        dup = {t: v for t, v in by_title.items() if len(v) > 1}
+        redundant = sum(len(v) - 1 for v in dup.values())
+        groups = []
+        for t, v in sorted(dup.items(), key=lambda kv: -len(kv[1]))[:limit]:
+            groups.append({
+                "title": t[:120],
+                "count": len(v),
+                "redundant": len(v) - 1,
+                "life_stages": sorted({m.get("life_stage", "?") for m in v}),
+                "memory_ids": [m.get("memory_id", "") for m in v][:10],
+            })
+        return {
+            "independent_documents": len(independent),
+            "chunk_items": chunk_items,
+            "duplicate_groups": len(dup),
+            "redundant": redundant,
+            "groups": groups,
+            "note": "独立文档维度（分块不算重复）；redundant=可去重冗余条数。",
+        }
+
     def get_personal(self) -> dict:
         """Get personal preferences, equivalent to v3 recall."""
         users = self.mm.personal.list_users()

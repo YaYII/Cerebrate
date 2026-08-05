@@ -246,6 +246,11 @@ def cmd_doctrines(args):
     output(client_request(args.url, "GET", "/v1/doctrines"))
 
 
+def cmd_dedup(args):
+    output(client_request(args.url, "POST", "/v1/memories/dedup-check",
+                          {"limit": args.limit}))
+
+
 def cmd_soul(args):
     if args.action == "set":
         if args.content_file:
@@ -512,6 +517,10 @@ def main(argv=None):
 
     p = sub.add_parser("doctrines", help="读取权威教条")
     p.set_defaults(func=cmd_doctrines)
+
+    p = sub.add_parser("dedup", help="记忆去重检查（独立文档维度，只读安全）")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=cmd_dedup)
 
     p = sub.add_parser("soul", help="管理虫群灵魂（工程化思维行为准则）")
     soul_sub = p.add_subparsers(dest="action")

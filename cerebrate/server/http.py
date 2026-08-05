@@ -150,6 +150,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.propose_memory(payload)
         if method == "POST" and path == "/v1/soul/set":
             return self.api.soul_set(payload)
+        if method == "POST" and path == "/v1/memories/dedup-check":
+            return self.api.dedup_check(payload)
         if method == "POST" and path == "/v1/memories/detail":
             return self.api.memory_detail(payload)
         if method == "POST" and path == "/v1/usages/start":
