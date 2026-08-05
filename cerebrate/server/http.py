@@ -5,6 +5,7 @@ import signal
 import threading
 import time
 import hmac
+from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -12,6 +13,32 @@ from urllib.parse import parse_qs, urlparse
 from cerebrate.config import config
 from cerebrate.protocol import err, ok
 from cerebrate.server.api import BrainAPI
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """限制并发处理线程数，防高并发线程爆炸（阶段 1 扩展）。
+
+    用 ThreadPoolExecutor(max_workers) 提交请求处理：超出上限的请求进入
+    有界队列排队（而非无限开线程），配合客户端超时保护服务稳定性。
+    """
+
+    daemon_threads = True
+
+    def __init__(self, server_address, RequestHandlerClass,
+                 max_workers: int = 64, bind_and_activate: bool = True):
+        super().__init__(server_address, RequestHandlerClass,
+                         bind_and_activate=bind_and_activate)
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="cerebrate-http")
+
+    def process_request(self, request, client_address):
+        self._executor.submit(self.process_request_thread,
+                              request, client_address)
+
+    def shutdown(self):
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        super().shutdown()
 
 
 class BrainRequestHandler(BaseHTTPRequestHandler):
@@ -281,7 +308,9 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 def create_server(host: str = "", port: int = 0, quiet: bool = False) -> ThreadingHTTPServer:
     bind_host = host or config.server_host
     bind_port = config.server_port if port is None else port
-    server = ThreadingHTTPServer((bind_host, bind_port), BrainRequestHandler)
+    server = BoundedThreadingHTTPServer(
+        (bind_host, bind_port), BrainRequestHandler,
+        max_workers=config.http_max_threads)
     server.api = BrainAPI()  # type: ignore[attr-defined]
     server.quiet = quiet  # type: ignore[attr-defined]
     return server

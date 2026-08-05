@@ -46,7 +46,18 @@ class ChromaStore:
     SQLite connection exhaustion under ThreadingHTTPServer load.
     """
 
-    _db_semaphore = threading.BoundedSemaphore(8)
+    _db_semaphore: Optional[threading.BoundedSemaphore] = None
+    _sem_lock = threading.Lock()
+
+    @classmethod
+    def _semaphore(cls) -> threading.BoundedSemaphore:
+        """惰性初始化 DB 并发信号量（值来自 config.db_semaphore，可配置调大）。"""
+        if cls._db_semaphore is None:
+            with cls._sem_lock:
+                if cls._db_semaphore is None:
+                    from cerebrate.config import config
+                    cls._db_semaphore = threading.BoundedSemaphore(config.db_semaphore)
+        return cls._db_semaphore
 
     def __init__(self, persist_dir: Path, collection_name: str,
                  embedding_engine=None):
@@ -110,7 +121,7 @@ class ChromaStore:
             embeddings = [embedding]
 
         def _add():
-            with ChromaStore._db_semaphore, self._write_lock:
+            with ChromaStore._semaphore(), self._write_lock:
                 self._collection.add(
                     ids=[doc_id],
                     documents=[text],
@@ -127,7 +138,7 @@ class ChromaStore:
             embeddings = [embedding]
 
         def _upsert():
-            with ChromaStore._db_semaphore, self._write_lock:
+            with ChromaStore._semaphore(), self._write_lock:
                 self._collection.upsert(
                     ids=[doc_id],
                     documents=[text],
@@ -142,7 +153,7 @@ class ChromaStore:
                where: Optional[dict] = None,
                query_embedding: Optional[list[float]] = None) -> list[dict]:
         def _search():
-            with ChromaStore._db_semaphore:
+            with ChromaStore._semaphore():
                 if query_embedding:
                     results = self._collection.query(
                         query_embeddings=[query_embedding],
@@ -190,7 +201,7 @@ class ChromaStore:
 
     def get(self, doc_id: str) -> Optional[dict]:
         def _get():
-            with ChromaStore._db_semaphore:
+            with ChromaStore._semaphore():
                 results = self._collection.get(
                     ids=[doc_id],
                     include=["metadatas", "documents", "embeddings"],
@@ -211,7 +222,7 @@ class ChromaStore:
 
     def get_all_ids(self) -> list[str]:
         def _get_ids():
-            with ChromaStore._db_semaphore:
+            with ChromaStore._semaphore():
                 results = self._collection.get(include=[])
                 ids_list = results.get("ids") or []
                 return ids_list
@@ -221,7 +232,7 @@ class ChromaStore:
 
     def delete(self, doc_id: str):
         def _del():
-            with ChromaStore._db_semaphore, self._write_lock:
+            with ChromaStore._semaphore(), self._write_lock:
                 self._collection.delete(ids=[doc_id])
         _retry_busy(_del)
 
@@ -229,7 +240,7 @@ class ChromaStore:
 
     def count(self) -> int:
         def _count():
-            with ChromaStore._db_semaphore:
+            with ChromaStore._semaphore():
                 return self._collection.count()
         return _retry_busy(_count)
 
@@ -237,7 +248,7 @@ class ChromaStore:
                          limit: int = 1000) -> list[dict]:
         """批量读取元数据，受 _db_semaphore 和 _retry_busy 保护"""
         def _get():
-            with ChromaStore._db_semaphore:
+            with ChromaStore._semaphore():
                 results = self._collection.get(
                     where=where, include=["metadatas"], limit=limit,
                 )
@@ -256,7 +267,7 @@ class ChromaStore:
             [{"id": ..., "metadata": ..., "document": ..., "embedding": ...}, ...]
         """
         def _get():
-            with ChromaStore._db_semaphore:
+            with ChromaStore._semaphore():
                 results = self._collection.get(
                     where=where,
                     include=["metadatas", "documents", "embeddings"],

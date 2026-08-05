@@ -163,6 +163,17 @@ class CerebrateConfig:
         default_factory=lambda: int(os.environ.get("CEREBRATE_MEMORY_MIN_TOKENS", "500"))
     )
 
+    # ── 并发/性能配置（阶段 1 扩展）──
+    db_semaphore: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_DB_SEMAPHORE", "16"))
+    )
+    http_max_threads: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_HTTP_MAX_THREADS", "64"))
+    )
+    embedding_query_cache_size: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EMBEDDING_QUERY_CACHE", "512"))
+    )
+
     # FTS5 全文索引（Phase 3）：默认开启；SQLite 失败时自动降级为向量检索
     fulltext_enabled: bool = field(
         default_factory=lambda: os.environ.get("CEREBRATE_FULLTEXT_ENABLED", "true").lower() == "true"

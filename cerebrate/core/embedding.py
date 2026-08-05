@@ -5,6 +5,7 @@ import logging
 import math
 import re
 import threading
+from collections import OrderedDict
 from typing import Optional
 
 from cerebrate.config import config
@@ -17,6 +18,9 @@ _engine_lock = threading.Lock()
 
 # 线程安全锁：PyTorch/BGE 模型不是线程安全的，多线程并发调用 encode 可能导致 segfault
 _encode_lock = threading.Lock()
+# 查询向量 LRU 缓存（高频查询复用编码结果，减 _encode_lock 串行压力，阶段 1 扩展）
+_query_cache: "OrderedDict[str, list[float]]" = OrderedDict()
+_query_cache_lock = threading.Lock()
 
 
 def get_embedding_engine(model_name: str = "BAAI/bge-small-zh-v1.5",
@@ -112,6 +116,13 @@ class EmbeddingEngine:
 
     def encode_query(self, query: str, max_length: Optional[int] = None) -> list[float]:
         """编码查询文本（BGE 需要加前缀，线程安全）"""
+        # LRU 缓存：相同查询直接命中，避免重复编码（阶段 1 扩展）
+        cache_key = query if max_length is None else f"{query}\x00{max_length}"
+        with _query_cache_lock:
+            hit = _query_cache.get(cache_key)
+            if hit is not None:
+                _query_cache.move_to_end(cache_key)
+                return hit
         with _encode_lock:
             if self._mode == "bge" and self._model:
                 prefixed = f"为这个句子生成表示以用于检索相关文章：{query}"
@@ -120,8 +131,14 @@ class EmbeddingEngine:
                     normalize_embeddings=True,
                     show_progress_bar=False,
                 )
-                return emb.tolist()
-            return self._hash_encode(query)
+                result = emb.tolist()
+            else:
+                result = self._hash_encode(query)
+        with _query_cache_lock:
+            _query_cache[cache_key] = result
+            if len(_query_cache) > config.embedding_query_cache_size:
+                _query_cache.popitem(last=False)
+        return result
 
     def encode_document(self, text: str, max_length: Optional[int] = None) -> list[float]:
         """编码文档文本（线程安全）"""
