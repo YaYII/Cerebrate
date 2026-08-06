@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Cerebrate 账号绑定</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      margin: 0; padding: 0;
+      background: #f4f6f8; color: #1f2933;
+      display: flex; justify-content: center;
+    }
+    .card {
+      background: #fff; border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.08);
+      margin: 48px 16px; padding: 32px; max-width: 460px; width: 100%;
+    }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    .sub { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
+    #qr { margin: 0 auto 16px; text-align: center; }
+    #qr img { border-radius: 8px; max-width: 100%; height: auto; }
+    .step { display: flex; gap: 10px; margin-bottom: 12px; font-size: 14px; }
+    .step .n {
+      flex: 0 0 22px; height: 22px; border-radius: 50%;
+      background: #2563eb; color: #fff; font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .sec-label { font-size: 13px; color: #6b7280; margin-top: 8px; }
+    .secret {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 10px; font-size: 13px; word-break: break-all;
+      user-select: all; margin-top: 4px;
+    }
+    .ok { color: #16a34a; font-size: 14px; text-align: center; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>绑定 Authenticator</h1>
+    <div class="sub">账号：{{USERNAME}} · 绑定 Cerebrate 记忆服务</div>
+
+    <div class="step"><div class="n">1</div><div>用手机 <b>Authenticator</b> 扫描下方二维码（Google Authenticator / Microsoft Authenticator 均可）</div></div>
+    <div class="step"><div class="n">2</div><div>添加后把 <b>当前 6 位动态码</b> 发给对话中的 AI，即可完成登录</div></div>
+
+    <div id="qr"></div>
+
+    <div class="sec-label">无法扫码？手动输入密钥：</div>
+    <div class="secret">{{SECRET}}</div>
+
+    <div class="ok">扫码后即可返回对话，输入 6 位码完成登录</div>
+  </div>
+
+  <script>
+{{QRCODE_JS}}
+  </script>
+  <script>
+    (function () {
+      var DATA = {{DATA_JSON}};
+      var el = document.getElementById('qr');
+      try {
+        var qr = qrcode(0, 'M');
+        qr.addData(DATA.otpauth_uri);
+        qr.make();
+        el.innerHTML = qr.createImgTag(5, 10);
+      } catch (e) {
+        el.innerHTML = '<p style="color:#dc2626">二维码生成失败：' + e.message + '</p>';
+      }
+    })();
+  </script>
+</body>
+</html>

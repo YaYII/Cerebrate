@@ -65,18 +65,34 @@ class AuthStatusToolTests(unittest.TestCase):
 
 
 class AuthRegisterToolTests(unittest.TestCase):
-    def test_register_returns_uri_and_hint(self):
+    def test_register_returns_bind_url_and_hint(self):
         ok = {"status": "ok", "data": {
             "registered": True, "username": "bob",
+            "bind_token": "tok-abc",
             "otpauth_uri": "otpauth://totp/Cerebrate:bob?secret=XXXX",
             "secret": "XXXX"}}
-        with mock.patch.object(mcp, "_request", return_value=ok):
+        with mock.patch.object(mcp, "_request", return_value=ok), \
+                mock.patch.object(mcp, "_SERVER_URL",
+                                  "https://cerebrate.example.com/cerebrate"):
             r = mcp._handle_call("cerebrate_auth_register",
                                  {"username": "bob"})
         self.assertEqual(r["status"], "ok")
-        self.assertIn("otpauth_uri", r["data"])
+        # 客户端用配置的公网 URL 拼接绑定页链接
+        self.assertEqual(
+            r["data"]["bind_url"],
+            "https://cerebrate.example.com/cerebrate/v1/auth/bind?token=tok-abc")
         self.assertIn("hint", r["data"])
-        self.assertIn("扫码", r["data"]["hint"])
+        self.assertIn("bind_url", r["data"]["hint"])
+
+    def test_register_without_token_no_bind_url(self):
+        ok = {"status": "ok", "data": {
+            "registered": True, "username": "bob"}}
+        with mock.patch.object(mcp, "_request", return_value=ok), \
+                mock.patch.object(mcp, "_SERVER_URL",
+                                  "http://127.0.0.1:8765"):
+            r = mcp._handle_call("cerebrate_auth_register",
+                                 {"username": "bob"})
+        self.assertNotIn("bind_url", r["data"])
 
     def test_register_failure_passthrough(self):
         fail = {"status": "error",

@@ -113,6 +113,26 @@ class UserAuthTests(unittest.TestCase):
         self.assertIsNone(self.auth.resolve("invalid-token"))
         self.assertIsNone(self.auth.resolve(""))
 
+    def test_bind_session_lifecycle(self):
+        """绑定页会话：生成 → 消费有效 → 无效/过期失效。"""
+        self.auth.register("bob")
+        token = self.auth.create_bind_session("bob")
+        s = self.auth.consume_bind_session(token)
+        self.assertIsNotNone(s)
+        self.assertEqual(s["username"], "bob")
+        self.assertIn("otpauth://", s["otpauth_uri"])
+        self.assertTrue(s["secret"])
+        # 无效 token
+        self.assertIsNone(self.auth.consume_bind_session("bad-token"))
+        self.assertIsNone(self.auth.consume_bind_session(""))
+        # 过期 token（ttl 负数 → 立即过期）
+        expired = self.auth.create_bind_session("bob", ttl_seconds=-1)
+        self.assertIsNone(self.auth.consume_bind_session(expired))
+
+    def test_bind_session_unknown_user(self):
+        with self.assertRaises(ValueError):
+            self.auth.create_bind_session("nobody")
+
     def test_persistence(self):
         """注册/登录后重建实例，token 仍可解析（JSON 持久化）。"""
         reg = self.auth.register("dave")

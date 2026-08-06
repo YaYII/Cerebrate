@@ -391,3 +391,42 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - **修复**：_request 每次请求时 `_load_effective_token()`（环境变量 > 本地文件），登录后立即生效，无需重启
 - **测试**：RequestDynamicTokenTests 2 例（文件 token 生效 / 环境变量优先级不变）
 - **重演示验证**：第 6 步 verified_user=demo-user, role=user ✅；演示用户已清理不留痕
+
+---
+
+# 追加（2026-08-06 第十二轮）：网页二维码绑定页（bind_url，客户端零依赖）
+
+## 需求（用户确认）
+- MCP 注册应返回一个**可点击的 URL**（bind_url），用户点开网页 → 网页用 **JS 生成二维码** → Authenticator 扫码绑定
+- 二维码生成功能不放用户本地（无需装 qrcode）；网页 JS 生成，简单
+- 下次用户直接提供「用户名 + 绑定码（TOTP 6 位）」即可登录（已实现）
+
+## 实现（git 待提交）
+### 服务端
+- **绑定页**：`GET /v1/auth/bind?token=xxx`（免认证）返回完整 HTML：
+  - 内联 qrcode-generator JS（`cerebrate/server/static/qrcode.min.js`，MIT，56KB，无外部 CDN 依赖）
+  - `cerebrate/server/static/bind.html` 模板：展示二维码 + secret 文本（手动输入备选）+ 操作指引
+  - `Cache-Control: no-store`（页面含 secret）
+- **短期绑定 token**：auth.py `create_bind_session`（30 分钟 TTL）——URL 不暴露 secret；
+  `consume_bind_session` 换取 otpauth_uri（过期/无效返回错误页）
+- api.py `register_user` 返回 bind_token；`auth_bind_page(token)` 渲染 HTML（错误页兜底）
+- http.py 新增 `_send_raw`（非 JSON 信封响应）
+
+### MCP 客户端
+- `cerebrate_auth_register`：返回 **bind_url**（客户端用配置的 _SERVER_URL 拼接公网地址——
+  服务端在容器内不知道公网 URL）+ hint 引导（打开链接扫码 → 报 6 位码 → login）
+- 本地无任何二维码依赖（qrcode 仅演示用本机 pip，非项目依赖）
+
+## 测试与验证
+- test_auth.py 新增 bind session 生命周期（生成/消费/无效/过期/未知用户）3 例
+- test_mcp_auth_tools.py 更新 register 用例（bind_url 拼接 + 无 token 无 bind_url）
+- 全量回归：**295 passed, 2 skipped**
+- 真实冒烟（容器）：注册 → bind_url ✅；打开绑定页含 qrcode JS + otpauth 数据 + secret ✅；
+  无效 token → 错误页 ✅；扫码后 TOTP 登录 → token_saved ✅；status verify → role=user ✅；
+  demo-user 已清理不留痕（现存 as-workstation01、同事甲）
+
+## 给同事的最终流程
+1. 对话里说「我要注册 用户名=xxx」→ AI 返回 **bind_url 链接**
+2. 用户点开链接 → 网页显示二维码 → 手机 Authenticator 扫码绑定
+3. 用户把当前 6 位码告诉 AI → AI 登录 → token 本地保存
+4. 之后直接用，无需再授权；换机重新登录一次

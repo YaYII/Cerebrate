@@ -502,7 +502,7 @@ TOOLS = [
     },
     {
         "name": "cerebrate_auth_register",
-        "description": "【认证引导·注册】新用户自助注册（服务端匿名可调）：username → 返回 otpauth_uri 与 secret。\n把 otpauth_uri 展示给用户：用 Authenticator 扫码（从 URI 生成）或手动输入密钥（32 位 Base32）。\n用户扫码/添加后，让用户把 Authenticator 当前 6 位码告诉你，你再调 cerebrate_auth_login 完成登录。\n用户名须 3-32 位小写字母/数字/下划线/连字符；重复注册返回 registered=false。",
+        "description": "【认证引导·注册】新用户自助注册（服务端匿名可调）：username → 返回 bind_url 网页链接（网页用 JS 生成二维码，无需用户本地安装任何东西）。\n把 bind_url 发给用户：浏览器打开 → 手机 Authenticator 扫网页上的二维码 → 绑定完成。\n用户扫码后，让用户把 Authenticator 当前 6 位码告诉你，你再调 cerebrate_auth_login 完成登录。\n用户名须 3-32 位小写字母/数字/下划线/连字符；重复注册返回 registered=false。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -853,9 +853,14 @@ def _handle_call(name: str, args: dict) -> dict:
                 return result
             data = result.get("data", {})
             if data.get("registered"):
-                data["hint"] = ("把 otpauth_uri 给用户：Authenticator 扫码"
-                                "（从 URI 生成二维码）或手动输入 secret 密钥；"
-                                "添加后请用户提供当前 6 位码再调 "
+                # 绑定页 URL 由客户端拼接（服务端在容器内不知道公网地址）
+                if data.get("bind_token"):
+                    data["bind_url"] = (
+                        f"{_SERVER_URL.rstrip('/')}/v1/auth/bind"
+                        f"?token={data['bind_token']}")
+                data["hint"] = ("把 bind_url 发给用户：浏览器打开网页 → "
+                                "网页显示二维码 → Authenticator 扫码绑定；"
+                                "绑定后请用户提供当前 6 位码再调 "
                                 "cerebrate_auth_login")
             return {"status": "ok", "data": data}
 

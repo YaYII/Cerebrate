@@ -79,6 +79,7 @@ class UserAuth:
         self._lock = threading.Lock()
         self._users: dict[str, dict] = {}
         self._tokens: dict[str, dict] = {}
+        self._bind_sessions: dict[str, dict] = {}  # bind_token → 绑定页会话（短时效）
         if self._path:
             self._load()
 
@@ -138,6 +139,38 @@ class UserAuth:
             "otpauth_uri": totp_uri(username, secret),
             "message": "把 otpauth_uri 加入 Authenticator（扫码或手动），然后登录",
         }
+
+    def create_bind_session(self, username: str,
+                            ttl_seconds: int = 1800) -> str:
+        """注册后生成一次性绑定 token（短时效，URL 不暴露 secret）。
+
+        绑定页通过该 token 换取 otpauth_uri 生成二维码；过期/使用后失效。
+        """
+        with self._lock:
+            user = self._users.get(username)
+            if not user:
+                raise ValueError(f"用户 {username} 未注册")
+            token = uuid.uuid4().hex
+            self._bind_sessions[token] = {
+                "username": username,
+                "otpauth_uri": totp_uri(username, user.get("secret", "")),
+                "secret": user.get("secret", ""),
+                "expires": time.time() + ttl_seconds,
+            }
+            return token
+
+    def consume_bind_session(self, token: str) -> Optional[dict]:
+        """绑定页换取 otpauth_uri（无效/过期返回 None）。"""
+        if not token:
+            return None
+        with self._lock:
+            s = self._bind_sessions.get(token)
+            if not s:
+                return None
+            if s["expires"] < time.time():
+                self._bind_sessions.pop(token, None)
+                return None
+            return dict(s)
 
     def login(self, username: str, code: str) -> dict:
         """登录：验证 TOTP → 下发/返回长期 user token。"""

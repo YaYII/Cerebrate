@@ -4,12 +4,15 @@ Clients submit observations and requests. The server alone writes group
 memory, appends durable events, and controls memory promotion.
 """
 
+import json
 import logging
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 import time
 from datetime import datetime, timezone
+from html import escape as html_escape
+from pathlib import Path
 from typing import Optional
 
 from cerebrate.brain.mind import CerebrateMind, Metacognition
@@ -197,7 +200,36 @@ class BrainAPI:
         """注册用户（TOTP）：返回 otpauth URI 供 Authenticator 添加。
         username 即用户标识（物理用户概念）。"""
         username = payload.get("username") or payload.get("agent_id") or ""
-        return self.auth.register(username)
+        result = self.auth.register(username)
+        if result.get("registered"):
+            # 生成短期绑定 token：网页绑定页用（URL 不暴露 secret）
+            result["bind_token"] = self.auth.create_bind_session(username)
+        return result
+
+    def auth_bind_page(self, token: str) -> str:
+        """渲染绑定页 HTML：内联 qrcode JS（无外部 CDN 依赖），
+        通过短时效 bind_token 换取 otpauth_uri 生成二维码。"""
+        session = self.auth.consume_bind_session(token)
+        if not session:
+            return ("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                    "<title>绑定链接无效</title></head><body style='font-family:"
+                    "sans-serif;text-align:center;padding:80px 20px;color:#6b7280'>"
+                    "<h2>绑定链接无效或已过期</h2>"
+                    "<p>请回到对话中，重新发起注册获取新的绑定链接。</p>"
+                    "</body></html>")
+        static = Path(__file__).resolve().parent / "static"
+        html = (static / "bind.html").read_text(encoding="utf-8")
+        qr_js = (static / "qrcode.min.js").read_text(encoding="utf-8")
+        data = {
+            "otpauth_uri": session.get("otpauth_uri", ""),
+            "username": session.get("username", ""),
+            "secret": session.get("secret", ""),
+        }
+        html = html.replace("{{QRCODE_JS}}", qr_js)
+        html = html.replace("{{DATA_JSON}}", json.dumps(data, ensure_ascii=False))
+        html = html.replace("{{USERNAME}}", html_escape(session.get("username", "")))
+        html = html.replace("{{SECRET}}", html_escape(session.get("secret", "")))
+        return html
 
     def login_user(self, payload: dict) -> dict:
         """用户登录：验证 TOTP → 返回长期 user token。"""

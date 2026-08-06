@@ -8,6 +8,7 @@ import hmac
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from cerebrate.config import config
@@ -69,6 +70,13 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                                              "/v1/auth/register"):
                 data = self._dispatch(method, path, parse_qs(parsed.query))
                 self._send_json(ok(data, protocol="v5"))
+                return
+            if method == "GET" and path == "/v1/auth/bind":
+                # 绑定页免认证：用户扫码时尚未登录；URL 带短时效 bind_token
+                token = parse_qs(parsed.query).get("token", [""])[0]
+                html = self.api.auth_bind_page(token)
+                self._send_raw(html, "text/html; charset=utf-8",
+                               extra_headers={"Cache-Control": "no-store"})
                 return
             if not self._check_auth():
                 self._send_json(err("unauthorized", code=401, protocol="v5"),
@@ -285,6 +293,23 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _send_raw(self, body: str, content_type: str,
+                  status: HTTPStatus = HTTPStatus.OK,
+                  extra_headers: Optional[dict] = None):
+        """发送裸响应（HTML 等非 JSON 信封）。"""
+        data = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        try:
+            self.wfile.write(data)
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
