@@ -1004,10 +1004,13 @@ def _cli_logout(args) -> int:
 def _cli_status(args) -> int:
     """查看登录态与生效 token 来源。"""
     info = _read_token_file()
-    if os.environ.get("CEREBRATE_SERVER_TOKEN"):
+    env = os.environ.get("CEREBRATE_SERVER_TOKEN", "").strip()
+    if env:
         print("token 来源: 环境变量 CEREBRATE_SERVER_TOKEN（优先）")
+    elif _ENV_FILE.get("CEREBRATE_SERVER_TOKEN", "").strip():
+        print(f"token 来源: 本地配置 {_MCP_ENV_FILE}")
     elif info.get("token"):
-        print(f"token 来源: 本地文件（已登录: {info.get('user_id', '?')}）")
+        print(f"token 来源: 登录持久化（已登录: {info.get('user_id', '?')}）")
     else:
         print("token 来源: 未配置（只读接口可用；写记忆需先登录）")
     print(f"服务地址: {_SERVER_URL}")

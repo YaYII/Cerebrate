@@ -156,6 +156,21 @@ class CliLoginTests(unittest.TestCase):
                 self.assertEqual(mcp._cli_status(mock.Mock()), 0)
             out.write.assert_called()
 
+    def test_status_reports_env_file_source(self):
+        with mock.patch.object(mcp, "_TOKEN_FILE", self.token_file), \
+                mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(
+                    mcp, "_ENV_FILE",
+                    {"CEREBRATE_SERVER_TOKEN": "envfile-tok"}), \
+                mock.patch.object(
+                    mcp, "_MCP_ENV_FILE", "/x/cerebrate.env"), \
+                mock.patch("sys.stdout") as out:
+            os.environ.pop("CEREBRATE_SERVER_TOKEN", None)
+            mcp._cli_status(mock.Mock())
+        # 输出应包含 env 文件来源说明
+        texts = "".join(str(c) for c in out.write.call_args_list)
+        self.assertIn("本地配置", texts)
+
 
 class RequestAuthHintTests(unittest.TestCase):
     """_request 对 401 响应附加登录提示。"""
