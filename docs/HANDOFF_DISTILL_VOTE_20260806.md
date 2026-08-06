@@ -383,3 +383,11 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第十一轮）
 - b4dc44b0557721af 技能: Cerebrate MCP 认证接入 — AI引导注册/登录 + 匿名register + /v1/auth/me（scope=project, cerebrate）
+
+## 第十一轮补充：演示发现并修复「静态 token 陈旧」bug（git 2fd3bfa）
+- **现象**：真实演示第 6 步 cerebrate_auth_status verify 返回 verified_user=null——
+  _request 用进程启动时的静态 _SERVER_TOKEN，登录后保存的 token 在**同一 MCP 进程内不生效**
+  （同事登录后，后续 search/propose 仍会 401）
+- **修复**：_request 每次请求时 `_load_effective_token()`（环境变量 > 本地文件），登录后立即生效，无需重启
+- **测试**：RequestDynamicTokenTests 2 例（文件 token 生效 / 环境变量优先级不变）
+- **重演示验证**：第 6 步 verified_user=demo-user, role=user ✅；演示用户已清理不留痕
