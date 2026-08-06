@@ -380,3 +380,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 2. 对话里说「我要注册 用户名=xxx」→ AI 展示 otpauth_uri → Authenticator 添加
 3. 把当前 6 位码告诉 AI → AI 登录 → 之后直接用，无需再授权
 4. 换机：重新登录一次即可（无需重新注册）
+
+## 虫群记忆索引（第十一轮）
+- b4dc44b0557721af 技能: Cerebrate MCP 认证接入 — AI引导注册/登录 + 匿名register + /v1/auth/me（scope=project, cerebrate）
