@@ -468,3 +468,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 约定（取代第七轮隔离约定）
 - 测试一律不得调用真实 LLM（conftest 强制）；新增测试若涉及 LLM 必须 mock，否则将被 conftest 禁用路径覆盖
+
+## 虫群记忆索引（第十三轮）
+- d332f9499dc8f771 教训: 测试烧钱根因 — config._load_dotenv写回LLM key + conftest根治（scope=project, cerebrate）
