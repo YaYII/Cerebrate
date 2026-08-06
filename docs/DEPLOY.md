@@ -16,7 +16,7 @@
 
 ```
 ┌─────────────────────────────┐        ┌──────────────────────────────┐
-│ 宿主机 / 局域网内的客户端    │        │ Docker 容器: cerebrate:v5     │
+│ 宿主机 / 局域网内的客户端    │        │ Docker 容器: cerebrate:5.0.1  │
 │                             │        │                              │
 │  cerebrate.py  (CLI)  ──────┼──HTTP──┼─▶ Brain Server :8765         │
 │  cerebrate/mcp.py (MCP) ────┤ +token │   BrainAPI + ChromaDB + BGE  │
