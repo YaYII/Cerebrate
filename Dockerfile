@@ -46,6 +46,12 @@ RUN groupadd --gid 1000 cerebrate \
 COPY cerebrate.py ./
 COPY cerebrate ./cerebrate
 COPY docker-entrypoint.sh /docker-entrypoint.sh
+
+# MCP 客户端分发包（供 /mcp/* 下载端点，容器内仅静态托管不运行）
+COPY mcp.js /app/mcp.js
+COPY VERSION /app/VERSION
+COPY Dockerfile.mcp /app/Dockerfile.mcp
+COPY scripts/install-mcp.sh /app/scripts/install-mcp.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # ── 容器运行时默认配置 ──

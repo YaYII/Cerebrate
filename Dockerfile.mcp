@@ -1,0 +1,5 @@
+# Cerebrate MCP 客户端（Node 版）— 有 docker 无需装 node/python
+FROM node:20-alpine
+WORKDIR /app
+COPY mcp.js /app/mcp.js
+ENTRYPOINT ["node", "/app/mcp.js"]

@@ -8,6 +8,7 @@ import hmac
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -101,6 +102,13 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                 html = self.api.auth_bind_page(token)
                 self._send_raw(html, "text/html; charset=utf-8",
                                extra_headers={"Cache-Control": "no-store"})
+                return
+            if method == "GET" and path.startswith("/mcp/"):
+                # MCP 客户端分发（同事下载，无需鉴权）：
+                #   /mcp/mcp.js        Node 版 MCP server
+                #   /mcp/install.sh    一键安装脚本
+                #   /mcp/VERSION       版本信息
+                self._serve_mcp_artifact(path)
                 return
             if not self._check_auth():
                 self._send_json(err("unauthorized", code=401, protocol="v5"),
@@ -368,6 +376,34 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def _serve_mcp_artifact(self, path: str):
+        """从项目根提供 MCP 客户端分发包（mcp.js / install.sh / VERSION）。"""
+        root = Path(__file__).resolve().parents[2]  # 容器内 /app
+        mapping = {
+            "/mcp/mcp.js": ("mcp.js", "text/javascript; charset=utf-8"),
+            "/mcp/install.sh": ("scripts/install-mcp.sh",
+                                "text/x-shellscript; charset=utf-8"),
+            "/mcp/Dockerfile.mcp": ("Dockerfile.mcp",
+                                    "text/plain; charset=utf-8"),
+            "/mcp/VERSION": ("VERSION", "text/plain; charset=utf-8"),
+        }
+        if path not in mapping:
+            self._send_raw(
+                "Cerebrate MCP 分发：\n"
+                "  /mcp/mcp.js       Node 版 MCP server\n"
+                "  /mcp/install.sh   一键安装脚本\n"
+                "  /mcp/VERSION      版本\n",
+                "text/plain; charset=utf-8")
+            return
+        rel, ctype = mapping[path]
+        try:
+            body = (root / rel).read_text(encoding="utf-8")
+        except OSError:
+            self._send_json(err("artifact not found", code=404,
+                                protocol="v5"), HTTPStatus.NOT_FOUND)
+            return
+        self._send_raw(body, ctype)
 
     _sse_semaphore = threading.BoundedSemaphore(5)  # 限制 SSE 并发连接数
     _sse_idle_timeout = 300  # 5 分钟无推送自动断开
