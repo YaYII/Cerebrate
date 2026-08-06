@@ -877,3 +877,40 @@ stdio sense 真实调用（1472 条记忆 healthy）
 | docs/DEPLOY.md | 服务端部署/升级/版本统一 |
 | docs/HANDOFF_DISTILL_VOTE_20260806.md | 全量交接记录 |
 | README.md（npm 包内） | 同事 npm 安装指引 |
+
+---
+
+# 追加（2026-08-06 第二十四轮）：Node 版本地代码分析 harvest + 超时验证 + 版本 5.0.2
+
+## 用户要求（2026-08-06）
+1. 超时的问题解决了吗（思考依赖 MCP）
+2. MCP 代码实例化功能是否可以使用
+
+## 调研发现（证据）
+- 超时历史已修复：服务"卡死"（第十七轮，预热+healthcheck 宽容）、LLM 蒸馏（nginx 900s）
+- **Node 版 mcp.js project_harvest 缺陷**：有 dir 时直接报"Node 版不支持本地 harvest"
+  → 代码实例化（harvest）在 npm 包（同事用的）里不可用！
+
+## 修复（git dabf1fb，v5.0.2 已发布 npm + 容器）
+- mcp.js 新增 **harvestProjectLocal()** 轻量零依赖解析器：
+  扫描目录（SKIP_DIRS/SKIP_FILES 与 Python 版一致）→ .py/.js/.ts/.java/.kt/.php
+  正则解析模块/类/函数/端点/数据模型 → 产出与 Python 版 code_harvest 兼容结构 →
+  push /v1/harvest/push（代码不离开本地，只推结构）
+- project_harvest case：有 dir 走本地分析；无 dir 读服务端结构
+- 版本统一 5.0.2：package.json / mcp.js / mcp_transport / mcp.py / VERSION / 镜像 tag
+
+## 验证（真实执行）
+| 项 | 结果 |
+|---|---|
+| sense 耗时（预热后） | **0.064s**（无超时）|
+| harvest 本地分析（Node 版） | ok，47 文件/47 模块/1 数据模型/47 端点，12.8s |
+| harvest 服务端读取（无 dir） | ok，stats 一致 |
+| 实体化 entity_extract | ok，0.12s，实体正确 |
+| 全局版（registry 5.0.2）harvest | ok（代码实例化可用）|
+| 版本一致 | 服务端 5.0.2 = 客户端 5.0.2 = 镜像 cerebrate:5.0.2 |
+
+## 说明
+- harvest 12.8s 本地分析（2000 文件上限内），Claude/Codex MCP 默认超时（60s+）内，无超时风险；
+  超大项目（>2000 文件）只扫前 2000，可在参数 limit 扩展
+- 服务端 MCP 端点（HTTP /v1/mcp）的 entity_extract 仍返回提示（本地 MCP 才有实体化，数据不离开本地）——
+  这是架构设计：实体化/代码分析必须在本地 MCP（npm 包）执行
