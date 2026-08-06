@@ -824,3 +824,30 @@ stdio sense 真实调用（1472 条记忆 healthy）
 
 ## 下一步建议
 - npm 包已是 5.0.1，无需重发；后续改版时 5 处版本号 + package.json + mcp.js 硬编码同步
+
+---
+
+# 追加（2026-08-06 第二十二轮）：系统镜像版本与 MCP 版本统一 5.0.1
+
+## 用户要求（2026-08-06）
+升级为 MCP 版本一样的版本号，统一一点。
+
+## 交付（git a83c9bb，已 push）
+- docker-compose.yml image: **cerebrate:v5 → cerebrate:5.0.1**
+- docs/DEPLOY.md 同步
+- 容器重建：镜像 cerebrate:5.0.1（旧 cerebrate:v5 已删除）
+- **协议标识 meta.protocol 保持 v5**（API 协议版本，测试断言依赖，不随 MCP 版本变更）
+
+## 版本全貌（当前完全一致）
+| 项 | 版本 |
+|---|---|
+| Docker 镜像 tag | cerebrate:5.0.1 |
+| 服务端 HTTP MCP 端点 | 5.0.1 |
+| /mcp/VERSION 文件 | cerebrate-mcp-v5.0.1 |
+| npm 包 / mcp.js / mcp.py | 5.0.1 |
+| 协议标识（meta.protocol） | v5（协议级，不变） |
+
+## 验证
+- 容器 healthy；MCP initialize（本地+公网）均 5.0.1
+- meta.protocol 仍 v5（无破坏）；sense ok healthy
+- /v1/status 无 token 401 是生产预期行为（需 Bearer）
