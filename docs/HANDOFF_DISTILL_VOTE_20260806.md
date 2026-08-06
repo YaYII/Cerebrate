@@ -140,3 +140,34 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 注意
 - 根目录 tools/（curate/migrate/evolve_full，已归档 docs/archive/）与 cerebrate/tools/（ingest/code_sync/project_profile 等包内工具）是两个不同目录，勿混淆
+
+---
+
+# 追加（2026-08-06 第四轮）：远程推送 + 工程完成里程碑
+
+## 已完成
+- git push origin master 成功：`0920245..f9a9995 master -> master`（5 个提交全推）
+- 本地 = 远程 = 镜像 = 容器，四者完全一致
+- 虫群里程碑记忆：34429f122521bc34（quality 1.0）
+
+## 本轮全部提交（已推远程）
+| 提交 | 内容 |
+|---|---|
+| d5d3e3e | 按需蒸馏+共识投票端到端 |
+| b10f62e | 蒸馏异步化（任务队列+TTL） |
+| 5938faa | 冗余清理（删 14 方法+归档 4 脚本，-190 行） |
+| 9abc7a4 | 交接文档更新 |
+| f9a9995 | deploy.sh 分支修复+镜像构建部署 |
+
+## 虫群记忆索引（本轮相关，共 6 条）
+- 34429f122521bc34 里程碑：完美化工程完成（quality 1.0）
+- 98fa93a7e87e57c0 蒸馏+共识投票技能（cerebrate）
+- d4bcdb9fc946a41d query_swarm index_only 性能教训（general）
+- 5b91411ab694aee5 冗余识别清理方法（general）
+- c6e70569923dade1 部署 docker compose build+up（cerebrate）
+- 78e5d540309cc13b 自愿奉献原则（general）
+
+## 最终状态
+- 服务在线（容器 healthy），蒸馏异步可用（提交→task_id→查询）
+- 全量测试 233/233
+- 部署正解：改代码 → 测试 → commit → `docker compose build && docker compose up -d` → push
