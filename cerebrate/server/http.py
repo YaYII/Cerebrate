@@ -61,12 +61,17 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str):
         try:
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            # 登录免认证：用户输入 TOTP 时尚未持有 token
+            if method == "POST" and path == "/v1/auth/login":
+                data = self._dispatch(method, path, parse_qs(parsed.query))
+                self._send_json(ok(data, protocol="v5"))
+                return
             if not self._check_auth():
                 self._send_json(err("unauthorized", code=401, protocol="v5"),
                                 HTTPStatus.UNAUTHORIZED)
                 return
-            parsed = urlparse(self.path)
-            path = parsed.path.rstrip("/") or "/"
             params = parse_qs(parsed.query)
             if path == "/v1/events/stream" and method == "GET":
                 self._handle_sse(params)
@@ -172,6 +177,12 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         if method == "POST" and path == "/v1/agents/register":
             return self.api.register_agent(payload)
+        if method == "POST" and path == "/v1/auth/register":
+            return self.api.register_user(payload)
+        if method == "POST" and path == "/v1/auth/login":
+            return self.api.login_user(payload)
+        if method == "GET" and path == "/v1/auth/users":
+            return self.api.auth_users()
         if method == "POST" and path == "/v1/query":
             return self.api.query(payload)
         if method == "POST" and path == "/v1/search":
@@ -218,12 +229,29 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         raise RuntimeError(f"unknown endpoint: {method} {path}")
 
     def _check_auth(self) -> bool:
-        """校验 Bearer token。config.server_token 为空时不鉴权（向后兼容本地开发）。"""
-        token = config.server_token
-        if not token:
-            return True
+        """校验 Bearer token（master token 或 user token）。
+
+        - master token（config.server_token）：管理员，user_id=None
+        - user token（登录获取）：确定 user_id（物理用户）
+        - config.server_token 为空时不鉴权（向后兼容本地开发）
+        通过后把身份写入 self.current_user（user_id 或 ""）。
+        """
+        self.current_user = ""
         header = self.headers.get("Authorization", "")
-        return hmac.compare_digest(header, f"Bearer {token}")
+        if not header.startswith("Bearer "):
+            master = config.server_token
+            return not master  # 无 master token 时放行（本地开发）
+        token = header[len("Bearer "):].strip()
+        # 先查 user token（TOTP 登录下发）
+        uid = self.api.auth.resolve(token)
+        if uid:
+            self.current_user = uid
+            return True
+        # 再查 master token
+        master = config.server_token
+        if master and hmac.compare_digest(token, master):
+            return True
+        return not master
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

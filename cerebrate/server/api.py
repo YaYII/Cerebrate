@@ -18,6 +18,7 @@ from cerebrate.brain.llm import CerebrateLLM
 from cerebrate.brain.events import EventLog
 from cerebrate.config import config
 from cerebrate.memory import EvolutionEngine, MemoryManager
+from cerebrate.server.auth import UserAuth
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,8 @@ class BrainAPI:
         self._distill_executor: Optional[ThreadPoolExecutor] = None
         # 蒸馏任务保留时长（秒）：完成后保留 1 小时供客户端查询，超时清理防内存泄漏
         self._distill_task_ttl = 3600.0
+        # 用户认证（TOTP 登录 + 长期 user token）
+        self.auth = UserAuth(config.auth_path)
 
     def _get_distill_executor(self) -> ThreadPoolExecutor:
         if self._distill_executor is None:
@@ -179,6 +182,22 @@ class BrainAPI:
                            {"agent_id": agent_id,
                             "physical_user": physical_user})
         return info
+
+    def register_user(self, payload: dict) -> dict:
+        """注册用户（TOTP）：返回 otpauth URI 供 Authenticator 添加。
+        username 即用户标识（物理用户概念）。"""
+        username = payload.get("username") or payload.get("agent_id") or ""
+        return self.auth.register(username)
+
+    def login_user(self, payload: dict) -> dict:
+        """用户登录：验证 TOTP → 返回长期 user token。"""
+        username = payload.get("username") or ""
+        code = payload.get("code") or payload.get("totp") or ""
+        return self.auth.login(username, code)
+
+    def auth_users(self) -> dict:
+        """列出已注册用户（管理员）。"""
+        return {"users": self.auth.list_users()}
 
     def query(self, payload: dict) -> dict:
         query = payload.get("query", "")

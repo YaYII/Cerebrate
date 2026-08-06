@@ -213,6 +213,7 @@ class CerebrateConfig:
         self.agents_path = self.memory_root / "agents"
         self.events_path = self.memory_root / "events"
         self.logs_path = self.memory_root / "logs"
+        self.auth_path = self.memory_root / "auth"
         self.chroma_path = self.memory_root / "chroma_data"
         self.docstore_path = self.memory_root / "docstore"
         self.fulltext_path = self.memory_root / "fulltext.sqlite3"
