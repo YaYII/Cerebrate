@@ -485,6 +485,44 @@ TOOLS = [
             "required": ["text"]
         }
     },
+    {
+        "name": "cerebrate_auth_status",
+        "description": "【认证引导】查看当前 MCP 登录态：token 来源（env=环境变量 / file=本地文件 / none=未登录）、user_id、可选网络校验（verify=true 调 /v1/auth/me 确认真实有效性）。\n会话开始若怀疑未登录，先调用本工具；已有 token 则直接使用，无需每次授权。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "verify": {"type": "boolean", "description": "是否联网校验 token 有效性", "default": False}
+            }
+        }
+    },
+    {
+        "name": "cerebrate_auth_register",
+        "description": "【认证引导·注册】新用户自助注册（服务端匿名可调）：username → 返回 otpauth_uri 与 secret。\n把 otpauth_uri 展示给用户：用 Authenticator 扫码（从 URI 生成）或手动输入密钥（32 位 Base32）。\n用户扫码/添加后，让用户把 Authenticator 当前 6 位码告诉你，你再调 cerebrate_auth_login 完成登录。\n用户名须 3-32 位小写字母/数字/下划线/连字符；重复注册返回 registered=false。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string", "description": "用户名（3-32 位小写字母/数字/_-）"}
+            },
+            "required": ["username"]
+        }
+    },
+    {
+        "name": "cerebrate_auth_login",
+        "description": "【认证引导·登录】用户名 + Authenticator 当前 6 位码 → 服务端验证 → 长期 user token 保存到本地（~/.cerebrate/token，chmod 600，唯一凭证）。\n之后 MCP 自动带 token，无需每次授权；换机后重新登录一次即可。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string", "description": "用户名"},
+                "code": {"type": "string", "description": "Authenticator 当前 6 位码（用户提供）"}
+            },
+            "required": ["username", "code"]
+        }
+    },
+    {
+        "name": "cerebrate_auth_logout",
+        "description": "【认证引导·登出】删除本地持久化 token（服务端 token 仍有效，下次登录复用）。",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
 ]
 
 # ── 工具调用实现 ────────────────────────────────────────────
@@ -774,6 +812,71 @@ def _handle_call(name: str, args: dict) -> dict:
                 top=int(args.get("top", 30)),
             )
             return {"status": "ok", "data": result}
+
+        elif name == "cerebrate_auth_status":
+            env_token = os.environ.get("CEREBRATE_SERVER_TOKEN", "").strip()
+            local = _read_token_file()
+            if env_token:
+                source, user_id, has_token = "env", "", True
+            elif local.get("token"):
+                source, user_id, has_token = (
+                    "file", local.get("user_id", ""), True)
+            else:
+                source, user_id, has_token = "none", "", False
+            verified_user = None
+            verified_role = None
+            if args.get("verify") and has_token:
+                me = _request("GET", "/v1/auth/me")
+                if me.get("status") == "ok":
+                    vdata = me.get("data", {})
+                    verified_user = vdata.get("user_id", "")
+                    verified_role = vdata.get("role", "")
+            return {"status": "ok", "data": {
+                "has_token": has_token,
+                "source": source,
+                "user_id": user_id,
+                "verified_user": verified_user,
+                "verified_role": verified_role,
+                "token_file": str(_TOKEN_FILE),
+            }}
+
+        elif name == "cerebrate_auth_register":
+            username = args.get("username", "").strip()
+            result = _request("POST", "/v1/auth/register", {
+                "username": username})
+            if result.get("status") != "ok":
+                return result
+            data = result.get("data", {})
+            if data.get("registered"):
+                data["hint"] = ("把 otpauth_uri 给用户：Authenticator 扫码"
+                                "（从 URI 生成二维码）或手动输入 secret 密钥；"
+                                "添加后请用户提供当前 6 位码再调 "
+                                "cerebrate_auth_login")
+            return {"status": "ok", "data": data}
+
+        elif name == "cerebrate_auth_login":
+            username = args.get("username", "").strip()
+            code = args.get("code", "").strip()
+            result = _request("POST", "/v1/auth/login", {
+                "username": username, "code": code})
+            if result.get("status") != "ok":
+                return result
+            data = result.get("data", {})
+            token = data.get("token", "")
+            user_id = data.get("user_id", username)
+            if token:
+                _save_token(token, user_id)
+            data["token_saved"] = bool(token)
+            data["token_file"] = str(_TOKEN_FILE)
+            data["hint"] = ("登录成功，token 已本地持久化（唯一凭证）；"
+                            "之后直接使用，无需每次授权")
+            return {"status": "ok", "data": data}
+
+        elif name == "cerebrate_auth_logout":
+            _clear_token()
+            return {"status": "ok",
+                    "data": {"logged_out": True,
+                             "message": "本地 token 已删除"}}
 
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}

@@ -63,8 +63,10 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
-            # 登录免认证：用户输入 TOTP 时尚未持有 token
-            if method == "POST" and path == "/v1/auth/login":
+            # 认证免认证：用户尚无 token 时自助注册/登录（注册生成 otpauth_uri，
+            # 不产生可用 token，篡改仍受 owner 模型约束）
+            if method == "POST" and path in ("/v1/auth/login",
+                                             "/v1/auth/register"):
                 data = self._dispatch(method, path, parse_qs(parsed.query))
                 self._send_json(ok(data, protocol="v5"))
                 return
@@ -181,6 +183,10 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.register_user(payload)
         if method == "POST" and path == "/v1/auth/login":
             return self.api.login_user(payload)
+        if method == "GET" and path == "/v1/auth/me":
+            uid = getattr(self, "current_user", "")
+            return {"user_id": uid,
+                    "role": "admin" if not uid else "user"}
         if method == "GET" and path == "/v1/auth/users":
             return self.api.auth_users()
         if method == "POST" and path == "/v1/query":

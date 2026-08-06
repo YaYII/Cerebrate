@@ -339,3 +339,44 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第十轮）
 - 523e2f03b9e018e9 技能: Cerebrate 第十轮 P1 — MCP登录流程 / 归档防删 / 实体本地MCP（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十一轮）：MCP 认证接入（AI 引导用户注册/登录）
+
+## 需求（用户确认的交互模型）
+用户在对话中把结果输入给 AI，AI 帮用户完成认证：
+1. AI 先调 cerebrate_auth_status → 已有 token 直接使用，不再授权
+2. 无 token → AI 问用户「注册还是登录」
+3. 注册：AI 调 cerebrate_auth_register 拿 otpauth_uri（每个用户独立绑定码）→ 用户 Authenticator 扫码/手动输密钥 → 用户把当前 6 位码告诉 AI
+4. AI 调 cerebrate_auth_login（用户名+码）→ token 存本地 → 之后自动带 token
+
+## 服务端（git 待提交）
+- **register 匿名化**：POST /v1/auth/register 加入免认证白名单（与 login 并列）——同事无 token 才能自助注册；
+  注册只生成 otpauth_uri 不产生可用 token，篡改仍受 owner 模型约束（只能改自己的记忆）
+- **GET /v1/auth/me**：校验 token 返回 {user_id, role}（user token→role=user；master token→role=admin），供 status 联网校验
+- **用户名格式校验**：auth.py 新增 `^[a-z0-9_-]{3,32}$`（防滥用抢占），非法拒绝
+
+## MCP 客户端（git 待提交）
+新增 4 个认证工具（工具总数 27→31）：
+- cerebrate_auth_status：token 来源（env/file/none）+ user_id + 可选 verify（联网调 /v1/auth/me 校验真实性 + role）
+- cerebrate_auth_register：username → otpauth_uri + secret + 扫码提示（hint）
+- cerebrate_auth_login：username + code → 验证 → token 存本地 ~/.cerebrate/token → token_saved + hint
+- cerebrate_auth_logout：清本地 token
+
+## 二维码方案（零依赖）
+- qrcode 库未装（不引入依赖）：工具返回 otpauth_uri + secret 文本
+- 用户两种方式：Authenticator「扫码」（从 otpauth URI 生成二维码）或「手动输入」32 位 Base32 密钥
+
+## 测试与验证
+- 新增 tests/test_mcp_auth_tools.py（9 例：status 三来源/verify/register/login 成功失败/logout）
+- test_auth.py 新增用户名格式校验（5 例非法 + 2 例合法）
+- 全量回归：**290 passed, 2 skipped**
+- 真实冒烟（容器）：匿名注册 smoke-user → 拿 otpauth_uri ✅；非法用户名被拒 ✅；TOTP 登录 → token ✅；
+  /v1/auth/me → user_id=smoke-user, role=user ✅；master token → role=admin ✅；冒烟用户已从 users.json 清理不留痕
+
+## 给同事的使用流程
+1. 装 Cerebrate MCP（本机），配置 CEREBRATE_SERVER_URL（公网/内网）
+2. 对话里说「我要注册 用户名=xxx」→ AI 展示 otpauth_uri → Authenticator 添加
+3. 把当前 6 位码告诉 AI → AI 登录 → 之后直接用，无需再授权
+4. 换机：重新登录一次即可（无需重新注册）

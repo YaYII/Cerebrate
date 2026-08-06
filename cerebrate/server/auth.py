@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import struct
 import threading
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _TOTP_STEP = 30
 _TOTP_DIGITS = 6
+_USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
 
 
 def generate_secret() -> str:
@@ -112,8 +114,9 @@ class UserAuth:
     def register(self, username: str) -> dict:
         """注册用户：返回 otpauth URI + secret（secret 仅此一次展示）。"""
         username = (username or "").strip()
-        if not username:
-            raise ValueError("username is required")
+        if not _USERNAME_RE.match(username):
+            raise ValueError(
+                "用户名须为 3-32 位小写字母/数字/下划线/连字符（防滥用）")
         with self._lock:
             user = self._users.get(username)
             if user:

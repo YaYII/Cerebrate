@@ -74,6 +74,18 @@ class UserAuthTests(unittest.TestCase):
         r2 = self.auth.register("alice")
         self.assertFalse(r2["registered"])
 
+    def test_register_username_format_validation(self):
+        """用户名须 3-32 位小写字母/数字/_-，防滥用抢占。"""
+        for bad in ("", "ab", "Bad Name", "中文名", "a" * 33,
+                    "has space", "UPPER"):
+            with self.assertRaises(ValueError):
+                self.auth.register(bad)
+        # 合法：小写字母/数字/下划线/连字符，3-32 位
+        r = self.auth.register("zhang-san_02")
+        self.assertTrue(r["registered"])
+        r2 = self.auth.register("a1-2_3")
+        self.assertTrue(r2["registered"])
+
     def test_login_success_and_token_reuse(self):
         reg = self.auth.register("alice")
         code = self._current_code(reg["secret"])
