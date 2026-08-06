@@ -525,4 +525,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - 状态：已注册（secret 存在）、未绑定（无登录 token）
 - 生成绑定链接（公网 ngrok）：https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/v1/auth/bind?token=...
 - 公网绑定页 200 含二维码 JS ✅；二维码 PNG 已生成
-- 待办：同事甲扫码 → 报 6 位码 → 登录 → 完成开通
+- ✅ **开通完成（2026-08-06）**：同事甲扫码报码 878962 → 登录 200 → /v1/auth/me role=user →
+  /v1/sense healthy（1459 条）→ tokens.json 已存同事甲 token（绑定成功）
+- 同事甲 user token 已记入 ~/.codex/private_notes.md（唯一凭证，转交同事甲本地保存）
