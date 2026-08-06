@@ -531,3 +531,38 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第十五轮）
 - 9b3f066c33ff7484 技能: Cerebrate rebind 重新绑定端点 + 同事甲真实开通全流程（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十六轮）：MCP 交付物（同事一键安装 + 功能文档）
+
+## 交付内容
+### 1. scripts/install-mcp.sh（一键安装，git bb59224）
+同事执行一条命令完成安装：
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/YaYII/Cerebrate/master/scripts/install-mcp.sh)" -- \
+  --url <脑虫地址> --token <user token>
+```
+功能：检测 Python 3.8+（纯标准库零依赖）→ clone/下载仓库 → 校验 mcp.py/entity.py →
+生成 cerebrate.env（URL+token，chmod 600）→ 自检 → 打印 4 客户端（Codex/Claude/Qoder/opencode）配置片段。
+
+### 2. cerebrate/mcp.py 增强
+- 支持从**安装目录 cerebrate.env** 读取 URL/token（环境变量优先，env 文件兜底）
+- 同事 MCP 配置只需指向脚本路径，**无需明文 token**（地址变化只改 env 文件）
+- `_cli_status` 显示准确 token 来源（环境变量/本地配置/登录持久化）
+
+### 3. docs/MCP_GUIDE.md（功能文档）
+- 33 个 MCP 工具分组：🟢读/日常 13 · 🟡写/协作 9 · 🔴管理 6（服务端 admin 保护 403）
+- 安装 / 配置 / 使用示例 / 认证权限 / FAQ
+
+## 验证
+- env 文件解析/优先级/兜底单测 + status 来源单测（15 例 test_mcp_login）
+- 全量回归 **308 passed**
+- 端到端：从 GitHub 重新 clone（含新代码）→ 安装脚本 → env 文件生效
+  （status 显示公网 URL，cerebrate_sense 用同事甲 token 公网读到 healthy/1460 条）✅
+- 修复：env 默认路径从 ~/.cerebrate-mcp 改为安装目录根（--dir 自定义目录也能读）
+
+## 给同事的开通三步
+1. 管理员：注册/rebind 生成账号 + 提供 URL 和 user token（如同事甲已开通）
+2. 同事：执行上面 curl 安装命令（填自己的 URL + token）
+3. 同事：粘贴脚本输出的配置片段到 AI 客户端 → 重启 → 对话先调 cerebrate_sense
