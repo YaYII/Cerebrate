@@ -223,3 +223,15 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - 查询优先自己的记忆（搜索加权）
 - MCP 客户端登录流程（mcp.py 集成 user token）
 - 归档防删（OriginLog 保留策略）
+
+---
+
+# 追加（2026-08-06 第七轮）：LLM 测试隔离约定 + 认证阶段2
+
+## LLM 测试隔离约定（省钱规则，git 5c780a7）
+- **依赖真实 LLM API 的测试**必须加：
+  `@unittest.skipUnless(os.environ.get("CEREBRATE_TEST_LLM") == "1", "需要真实 LLM API；设置 CEREBRATE_TEST_LLM=1 才运行（避免调用付费 API）")`
+- 默认跑测试 → 自动 skip（不花钱）；`CEREBRATE_TEST_LLM=1 python3 -m unittest ...` 才运行
+- 已隔离：test_chunking_upgrade.test_answer_api_available、test_structured_fields.test_title_compress_rule_fallback
+- **不隔离**：mock 掉 LLM 的测试（test_distill_async）、只调规则方法（_rule_*）的测试
+- 新增 LLM 依赖测试一律遵守此约定
