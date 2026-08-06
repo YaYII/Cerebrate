@@ -677,3 +677,52 @@ python3 -m cerebrate.mcp   # Python 版
 
 ## 虫群记忆索引（第十八轮）
 - 待提交：技能「Cerebrate MCP 标准接入（Streamable HTTP /v1/mcp）」scope=project cerebrate
+
+---
+
+# 追加（2026-08-06 第十九轮）：npm 包化 cerebrate-mcp（标准 npm 安装）
+
+## 用户要求（2026-08-06）
+把 MCP 推送到 npm 仓库，别人 `npm install`/`npx` 即完成安装，直接复制配置片段到工具即可用。
+
+## 交付（git ea81677，已 push）
+### 1. package.json（新）
+- name: **cerebrate-mcp**（全局名，registry 未占用），version 5.0.0
+- bin: `cerebrate-mcp` → mcp.js；零依赖（仅 Node 内置模块），engines node>=16
+- files: mcp.js + README.md（npm pack 实测 4 文件含 LICENSE）
+
+### 2. mcp.js 关键改造
+- **env 默认路径改为 `~/.cerebrate-mcp/cerebrate.env`**（原 SCRIPT_DIR/cerebrate.env；
+  npm 安装后脚本在 node_modules 缓存目录不可写；新路径与 install-mcp.sh INSTALL_DIR 一致，兼容）
+- **新增 `setup` 命令**：`cerebrate-mcp setup --url <url> --token <token>`（非交互）
+  或 `cerebrate-mcp setup`（交互）→ 写 env（chmod 600）→ 打印 Claude Code/Codex/stdio
+  三套配置片段，复制即用
+
+### 3. README.md（新）
+安装（npm i -g cerebrate-mcp / npx -y cerebrate-mcp）、setup、三客户端接入、
+配置优先级（环境变量 > ~/.cerebrate-mcp/cerebrate.env > 默认）、CLI、安全
+
+## 验证（真实执行）
+- `npm pack`：4 文件（LICENSE/README/mcp.js/package.json），12.1 kB ✅
+- 临时 prefix 全局安装：`npm install -g --prefix $TMP ./tgz` → bin 生成 ✅
+- `cerebrate-mcp setup --url --token`：写 env + 打印三套配置 ✅
+- stdio：initialize OK + sense 真实调用（1471 条记忆 healthy）✅
+- 注意：本机 shell 有 CEREBRATE_SERVER_URL=127.0.0.1:8765 环境变量（优先于 env 文件），
+  这是设计优先级（环境变量 > env > 默认），非 bug
+
+## 发布步骤（需要 npm 账号，未登录）
+```bash
+npm login          # 或 npm adduser；需要用户自己的 npm 账号
+npm publish        # 在 Cerebrate 项目根执行，发布 cerebrate-mcp@5.0.0
+```
+发布后同事用法：
+```bash
+npm install -g cerebrate-mcp
+cerebrate-mcp setup --url https://<域名>/cerebrate --token <user token>
+# 复制输出的配置片段到 AI 客户端
+```
+
+## 遗留/注意
+- 发布需用户 npm 账号（本机未登录，无凭据，不能代办发布）
+- 首次发布后版本升级：改 package.json version → npm publish
+- ngrok 域名变化时同事只需重跑 setup --url 更新 env
