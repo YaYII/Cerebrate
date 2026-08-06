@@ -13,6 +13,7 @@
 #   - 生成 ~/.cerebrate-mcp/cerebrate.env（URL + token，chmod 600）
 #   - 打印各客户端（Codex/Claude Code/Qoder/opencode）配置片段
 #   - 无 node 时回退 Python 模式（clone 仓库）；Docker 见末尾说明
+#   - 直接本机安装（MCP 需要本地实体化 + 用户代码库分析，不推荐容器化）
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -179,15 +180,5 @@ claude mcp add cerebrate -e "${MCP_RUN[0]}" -- "${MCP_RUN[1]}"
   - 地址变化只需改 $ENV_FILE 里的 CEREBRATE_SERVER_URL
   - 重启 AI 客户端后，对话中先调用 cerebrate_sense 即可使用
 
-【Docker 方式（有 docker 不想装 node/python 时）】
-  1. 获取镜像（管理员已构建时）：
-     docker pull ghcr.io/yayii/cerebrate-mcp:latest
-  2. 或本地构建（需 docker + 网络拉基础镜像）：
-     curl -fsSL $SERVER_URL/mcp/Dockerfile.mcp -o Dockerfile.mcp
-     curl -fsSL $SERVER_URL/mcp/mcp.js -o mcp.js
-     docker build -f Dockerfile.mcp -t cerebrate-mcp .
-  3. 运行（MCP 配置 command=docker, args=["run","--rm","-i","cerebrate-mcp"]）：
-     docker run --rm -i -e CEREBRATE_SERVER_URL=$SERVER_URL \\
-       -e CEREBRATE_SERVER_TOKEN=$TOKEN cerebrate-mcp
 ============================================================
 EOF

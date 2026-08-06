@@ -14,18 +14,18 @@ Cerebrate 是团队共享的 AI 记忆中枢（服务端由管理员部署）。
 - **协作**：项目业务画像、多人工作声明、记忆投票
 - **认证**：你的身份由「用户名 + Authenticator 动态码」绑定，token 本地保存
 
-## 2. 一键安装
+## 2. 一键安装（本机直接安装，Node 首选）
 
 ```bash
 # 从管理员获取：脑虫地址（URL）+ 你的 user token
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/YaYII/Cerebrate/master/scripts/install-mcp.sh)" -- \
+bash -c "$(curl -fsSL https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/mcp/install.sh)" -- \
   --url https://finale-earthworm-iciness.ngrok-free.dev/cerebrate \
   --token <你的token>
 ```
 
-脚本会：克隆代码到 `~/.cerebrate-mcp/` → 生成配置 `cerebrate.env`（chmod 600）→ 自检 → 打印各客户端配置片段。
+脚本会：检测 **Node.js**（nodejs 一定有，零依赖）→ 从脑虫服务下载 `mcp.js` → 生成配置 `cerebrate.env`（chmod 600）→ 自检 → 打印各客户端配置片段。无 node 时回退 Python 模式。
 
-> 没有 git 也可以（自动下载压缩包）。之后地址变化只需改 `~/.cerebrate-mcp/cerebrate.env`。
+> **为什么本机直接安装**：MCP 包含本地实体化抽取与用户代码库分析（harvest）能力，需要访问本机文件系统，容器化会隔离这些能力。地址变化只需改 `~/.cerebrate-mcp/cerebrate.env`。
 
 ## 3. 配置到你的 AI 客户端（二选一）
 

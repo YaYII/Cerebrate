@@ -496,6 +496,20 @@ def serve(host: str = "", port: int = 0, quiet: bool = False):
     except Exception:
         pass  # 调度器非关键路径，启动失败不影响主服务
 
+    # ── 预热 sense 缓存 ──
+    # 首次 sense 需冷加载 embedding/consensus（~30s）；后台预热填 _sense_cache，
+    # 避免 healthcheck 与首个请求并发触发初始化导致锁竞争（表现为服务"卡死"）。
+    def _warmup_sense(api):
+        import time as _time
+        _time.sleep(5)
+        try:
+            api.sense()
+        except Exception:
+            pass
+
+    threading.Thread(target=_warmup_sense, args=(server.api,),
+                     daemon=True, name="cerebrate-warmup").start()
+
     # 忽略 SIGPIPE，防止客户端断连时进程退出
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     try:

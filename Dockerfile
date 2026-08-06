@@ -68,7 +68,7 @@ EXPOSE 8765
 VOLUME ["/data"]
 
 # slim 镜像无 curl，用 python urllib 带 token 探活 /v1/sense
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD python3 -c "import os,urllib.request as u; t=os.environ.get('CEREBRATE_SERVER_TOKEN',''); h={'Authorization':'Bearer '+t} if t else {}; u.urlopen(u.Request('http://127.0.0.1:8765/v1/sense',headers=h),timeout=4)" || exit 1
+HEALTHCHECK --interval=30s --timeout=60s --start-period=150s --retries=3 \
+    CMD python3 -c "import os,urllib.request as u; t=os.environ.get('CEREBRATE_SERVER_TOKEN',''); h={'Authorization':'Bearer '+t} if t else {}; u.urlopen(u.Request('http://127.0.0.1:8765/v1/sense',headers=h),timeout=55)" || exit 1
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
