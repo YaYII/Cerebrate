@@ -569,3 +569,41 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/YaYII/Cerebrate/master/s
 
 ## 虫群记忆索引（第十六轮）
 - b311c061995c4a70 技能: Cerebrate MCP 交付 — 同事一键安装脚本 + 功能文档 + env文件配置（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十七轮）：Node版MCP直接安装 + 服务"卡死"根因修复
+
+## 用户方向（2026-08-06）
+- **不要 docker 容器化安装**——MCP 需要本地实体化抽取 + 用户代码库分析（harvest）能力，必须访问本机文件系统
+- **Node.js 一定有**（python 不一定装）→ Node 版 MCP 直接本机安装
+- 下载走**公网域名**（https://...ngrok-free.dev/cerebrate/mcp/mcp.js），不经 GitHub
+
+## 交付（git 822ed89）
+### 1. mcp.js（Node 版 MCP server，零依赖，node>=16）
+- 33 个工具完整移植（sense/search/propose/entity_extract/auth_* 等）
+- 本地实体抽取（规则移植自 entity.py）+ 认证 CLI（login/logout/status）
+- 配置：环境变量 > 安装目录 cerebrate.env > 默认
+- 验证：MCP stdio initialize/tools-list(33)/sense 真实调用通过
+
+### 2. 公网下载端点（服务端）
+- GET /mcp/mcp.js、/mcp/install.sh、/mcp/Dockerfile.mcp、/mcp/VERSION（免认证）
+- Dockerfile 新增 COPY mcp.js/VERSION/Dockerfile.mcp/install.sh（容器内静态托管）
+
+### 3. install-mcp.sh（Node 优先直接安装）
+- 检测 node → 从 $URL/mcp/mcp.js 下载 → node --check 校验 → 生成 cerebrate.env → 自检 → 打印 4 客户端配置片段
+- 无 node 回退 Python 模式；Docker 方式已从推荐中移除
+
+## 服务"卡死"根因与修复（重要运维经验）
+**现象**：多次 rebuild/restart 后容器 unhealthy、/v1/sense 60-180s 超时、CPU 250%+
+**排查**：空库 sense 1.2s（代码正常）→ get_all_stats 2.6s（数据非卡点）→ 完整 sense 31.1s（新进程首次冷加载完成、第二次 0s 缓存）→ 定位为**首次 sense 冷加载（embedding/consensus ~31s）被 healthcheck(4s) 与并发请求同时触发 → 初始化锁竞争 → 表现卡死**
+**修复**：
+- serve() 后台线程预热 api.sense()（填 _sense_cache，避免并发触发初始化）
+- Dockerfile HEALTHCHECK：timeout 5s→60s、start-period 60s→150s、内部 timeout 4→55s
+- 验证：预热后 sense **0.043s**、公网 healthy、下载端点 OK
+
+## 遗留/注意
+- 首次启动仍需 ~90-150s 预热（模型+共识冷加载），期间 healthcheck starting（不再 unhealthy）
+- verify_loop 首轮仍会跑（interval 只影响后续）；容器内无宿主机代码仓，画像校验意义有限（.env 已设 interval=99999，不进 git）
+- 同事开通命令（Node 直接安装）：
+  bash -c "$(curl -fsSL https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/mcp/install.sh)" -- --url https://finale-earthworm-iciness.ngrok-free.dev/cerebrate --token <token>
