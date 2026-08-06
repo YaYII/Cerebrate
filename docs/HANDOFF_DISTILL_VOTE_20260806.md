@@ -116,3 +116,27 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 ## 遗留
 - 蒸馏仍 2-5 分钟（异步已解阻塞，产物质量待观察）
 - 容器与 git 一致靠 docker cp（无镜像构建流程，deploy.sh 未集成）
+
+---
+
+# 追加（2026-08-06 第三轮）：deploy.sh 镜像构建集成（消除 docker cp 隐患）
+
+## 问题
+容器代码此前靠 docker cp 同步，recreate 会丢；deploy.sh 本已支持 `docker compose up -d --build`
+（Dockerfile COPY 当前 git 代码），但平时改代码走了 docker cp 快路径，从未真正构建镜像 → 容器与 git 不一致隐患。
+
+## 修复
+- deploy.sh 分支 bug：`git pull --ff-only origin main` → `origin master`（实际远程分支是 master，main 会拉取失败）
+- 执行 `docker compose build`（缓存命中 4s）+ `docker compose up -d`（recreate 用新镜像）
+
+## 验证
+- 容器内代码 = git：distill 异步化存在（distill/distill_status）、死代码已删（suggest_tags/encode_document=0）、归档生效
+- 冒烟：sense 200 / search 200 / 蒸馏异步提交 queued
+- 容器 healthy
+
+## 部署流程（此后正确姿势）
+改代码 → 测试 → git commit → `docker compose build && docker compose up -d`（或 ./scripts/deploy.sh --no-pull）
+不再需要 docker cp！recreate 也不会丢代码。
+
+## 注意
+- 根目录 tools/（curate/migrate/evolve_full，已归档 docs/archive/）与 cerebrate/tools/（ingest/code_sync/project_profile 等包内工具）是两个不同目录，勿混淆

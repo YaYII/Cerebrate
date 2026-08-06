@@ -42,7 +42,7 @@ command -v python3 >/dev/null || { echo "错误: 需要 python3" >&2; exit 1; }
 # ── 1. 拉取最新代码（可选） ──
 if [ "$PULL" = "1" ]; then
   step "1/7 git pull"
-  git pull --ff-only origin main
+  git pull --ff-only origin master
 fi
 
 # ── 2. node CLI 构建（宿主机客户端，dist 被 gitignore） ──
