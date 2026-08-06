@@ -81,3 +81,38 @@ docker cp cerebrate/server/http.py cerebrate:/app/cerebrate/server/http.py
 docker cp cerebrate/client/cli.py cerebrate:/app/cerebrate/client/cli.py
 docker restart cerebrate
 ```
+
+---
+
+# 追加（2026-08-06 第二轮）：蒸馏异步化 + 冗余清理
+
+## 已完成
+
+### 蒸馏异步化（git b10f62e）
+- POST /v1/distill 改为异步提交，立即返回 task_id（原同步 2-5 分钟阻塞）
+- GET /v1/distill/{task_id} 查询 queued/running/done/error
+- 串行执行器（单 worker）：并发蒸馏曾导致存储层锁死（容器 CPU 380%、新请求全卡）
+- 任务 TTL 清理（1h）：修复内存无限增长（内存态，重启重提）
+- CLI distill 默认轮询等待，--async 只提交
+- 测试 tests/test_distill_async.py 8/8
+- test_http_brain_server.py 加 CEREBRATE_DOCKER_SKIP_CHECK=1（Docker 容器运行时测试可起独立服务端）
+- 真实验证：Flowable 5 条 → d7e485b65edabb87（nutrient）；异步提交 11s 返回
+
+### 冗余清理（git 5938faa，-190 行）
+A 级死代码 14 个方法删除（核心+测试 0 引用，全量回归 233/233 OK）：
+  llm.py(suggest_tags/_llm_suggest_tags/detect_conflicts)、swarm.py(list_tags)、
+  manager.py(get_swarm_stats/get_swarm_categories)、evolution.py(get_history)、
+  docstore.py(find_by_title/list_by_type)、mind.py(set_focus/report_action/suggest_improvement)、
+  decision.py(quick_query)、embedding.py(encode_document)
+B 级历史脚本归档 docs/archive/（保留可追溯）：
+  tools/curate.py（被 curate_v3.py 替代）、migrate_docstore.py/v2（迁移完成）、evolve_full.py
+
+## 关键经验（冗余识别方法）
+- api.py 死方法检查：grep api def vs http self.api 调用差集 + 手动验证
+- 模块方法死代码检查：正则扫描 + 全项目引用计数（含 tests/tools）
+- 注意连带：删 suggest_tags 连带 _llm_suggest_tags；保留 C 级（delete_memory/get_content/get_metadata/get_available_ids，测试引用）
+- 容器同步：11 个改动文件需 docker cp + restart（recreate 会丢）
+
+## 遗留
+- 蒸馏仍 2-5 分钟（异步已解阻塞，产物质量待观察）
+- 容器与 git 一致靠 docker cp（无镜像构建流程，deploy.sh 未集成）
