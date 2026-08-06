@@ -446,7 +446,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.0.0" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.0.1" },
       } });
     } else if (method === "ping") {
       send({ jsonrpc: "2.0", id, result: {} });
@@ -498,6 +498,21 @@ function writeEnvConfig(url, token) {
 
 function cli(argv) {
   const cmd = argv[2];
+  if (cmd === "--version" || cmd === "-v") {
+    // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
+    // 同目录不一定有 package.json，不能 require 它）
+    console.log("5.0.1");
+    return;
+  }
+  if (cmd === "--help" || cmd === "-h") {
+    console.log("Cerebrate MCP v5 (Node) — 用法:");
+    console.log("  cerebrate-mcp                 # 作为 MCP server（stdio）运行");
+    console.log("  cerebrate-mcp setup           # 首次配置（URL + token，自动打印各客户端配置）");
+    console.log("  cerebrate-mcp login           # 用户名 + Authenticator 码登录");
+    console.log("  cerebrate-mcp logout|status   # 登出 / 查看状态");
+    console.log("  cerebrate-mcp --version       # 版本");
+    return;
+  }
   if (cmd === "setup") {
     let urlArg = "", tokenArg = "";
     for (let i = 3; i < argv.length; i++) {
@@ -555,11 +570,12 @@ function cli(argv) {
     console.log("  node mcp.js setup           # 首次配置（URL + token，自动打印各客户端配置）");
     console.log("  node mcp.js login           # 用户名 + Authenticator 码登录");
     console.log("  node mcp.js logout|status   # 登出 / 查看状态");
+    console.log("  node mcp.js --version       # 版本");
   }
 }
 
 if (require.main === module) {
-  if (process.argv.length > 2 && ["setup", "login", "logout", "status"].includes(process.argv[2])) {
+  if (process.argv.length > 2 && ["setup", "login", "logout", "status", "--version", "-v", "--help", "-h"].includes(process.argv[2])) {
     cli(process.argv);
   } else {
     runMcp();
