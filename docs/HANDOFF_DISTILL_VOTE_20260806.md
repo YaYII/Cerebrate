@@ -228,6 +228,8 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 # 追加（2026-08-06 第七轮）：LLM 测试隔离约定 + 认证阶段2
 
+> 更正（2026-08-06 第十三轮）：隔离约定已被「删除 LLM 用例 + conftest 禁用」取代，见第十三轮。
+
 ## LLM 测试隔离约定（省钱规则，git 5c780a7）
 - **依赖真实 LLM API 的测试**必须加：
   `@unittest.skipUnless(os.environ.get("CEREBRATE_TEST_LLM") == "1", "需要真实 LLM API；设置 CEREBRATE_TEST_LLM=1 才运行（避免调用付费 API）")`
@@ -433,3 +435,36 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第十二轮）
 - a35de3d73a1cd0fd 技能: Cerebrate 网页二维码绑定页 — bind_url 客户端零依赖扫码绑定（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十三轮）：删除 LLM 测试用例 + conftest 根治（零付费）
+
+## 背景（用户反馈：每次测试都花钱）
+用户要求删除所有使用 LLM 的测试用例，避免测试消耗 DeepSeek 费用。
+
+## 证据：花钱根因（比 2 个 skip 用例严重得多）
+- `cerebrate/config.py` 模块级 `_load_dotenv()` 在 import 时把 `.env` 的
+  `DEEPSEEK_API_KEY` 写回 os.environ（`if key not in os.environ` 不覆盖）
+- 测试中 **48 处 propose_memory 未显式 validate=False（默认 True）** →
+  每次测试都会调 `CerebrateLLM().validate_memory()` → 真实 DeepSeek API → 烧钱
+- 结论：只要 cerebrate.config 被 import（任何测试方式），.env 的 key 都会被加载
+
+## 处理（git 待提交）
+### 1. 删除 2 个真实 LLM 用例（按用户要求）
+- tests/test_chunking_upgrade.py `test_answer_api_available`（api.answer 调真实 LLM）
+- tests/test_structured_fields.py `test_title_compress_rule_fallback`（CerebrateLLM().compress_title）
+- 两个用例连同 `@skipUnless(CEREBRATE_TEST_LLM)` 标记一并删除；不再有 CEREBRATE_TEST_LLM 引用
+
+### 2. conftest 根治（tests/conftest.py 新增）
+- 先 `import cerebrate.config` 触发 _load_dotenv（.env 写回仅此一次）
+- 再清除 `ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY`
+- 此后任何测试路径 CerebrateLLM.is_available() = False → 规则保底 → 零付费
+- **保留** mock 掉 LLM 的测试（test_distill_async，patch CerebrateLLM，不花钱、是蒸馏核心回归）
+
+## 验证
+- 探针测试：注入假 key 后 is_available=False 断言通过（pytest 加载 conftest 生效）
+- 全量回归：**295 passed, 0 skipped**（297−2 删除；假 key 注入下跑通 = 无真实调用）
+
+## 约定（取代第七轮隔离约定）
+- 测试一律不得调用真实 LLM（conftest 强制）；新增测试若涉及 LLM 必须 mock，否则将被 conftest 禁用路径覆盖

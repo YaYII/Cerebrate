@@ -112,19 +112,6 @@ class StructuredFieldsTests(unittest.TestCase):
         self.assertEqual(mem["observation_type"], "decision")
         self.assertIn("design", mem["concepts"])
 
-    @unittest.skipUnless(os.environ.get("CEREBRATE_TEST_LLM") == "1",
-                         "需要真实 LLM API；设置 CEREBRATE_TEST_LLM=1 才运行（避免调用付费 API）")
-    def test_title_compress_rule_fallback(self):
-        from cerebrate.brain.llm import CerebrateLLM
-        llm = CerebrateLLM()
-        # 无 API key 环境走规则保底：空标题从内容推导
-        title = llm.compress_title("", "第一行就是标题来源内容")
-        self.assertTrue(title)
-        # 过长标题截断
-        long_title = "这是一个非常非常长的标题用来测试截断逻辑" * 5
-        compressed = llm.compress_title(long_title)
-        self.assertLessEqual(len(compressed), 61)
-
     def test_explicit_observation_type_override(self):
         self._share("显式指定类型", "显式 observation_type 应覆盖规则推导",
                     category="coding", tags=["x"], observation_type="refactor")

@@ -732,28 +732,6 @@ class ContextExpansionTests(unittest.TestCase):
         expanded = self.swarm.expand_context(entry)
         self.assertEqual(expanded["_expanded_context"], "短文档")
 
-    @unittest.skipUnless(os.environ.get("CEREBRATE_TEST_LLM") == "1",
-                         "需要真实 LLM API；设置 CEREBRATE_TEST_LLM=1 才运行（避免调用付费 API）")
-    def test_answer_api_available(self):
-        from cerebrate.server.api import BrainAPI
-        api = BrainAPI()
-        api.register_agent({"agent_id": "answer-test", "physical_user": "tester"})
-        api.propose_memory({
-            "title": "测试文档",
-            "content": "这是测试文档的内容。描述了 API 的调用方式。",
-            "category": "coding",
-            "tags": ["test"],
-            "agent_id": "answer-test",
-        })
-        result = api.answer({
-            "query": "API 调用",
-            "agent_id": "answer-test",
-        })
-        self.assertIn("query", result)
-        self.assertIn("answer", result)
-        self.assertIn("sources", result)
-
-
 class MetaStoreTests(unittest.TestCase):
     """测试 MetaStore（无 PostgreSQL 时的降级行为）"""
 
