@@ -100,12 +100,17 @@ _SERVER_TOKEN = _load_effective_token()
 
 
 def _request(method: str, path: str, body: dict = None) -> dict:
-    """向脑虫 Brain Server 发起 HTTP 请求，返回 v5 协议 JSON 信封。"""
+    """向脑虫 Brain Server 发起 HTTP 请求，返回 v5 协议 JSON 信封。
+
+    token 每次请求时动态解析（_load_effective_token）：登录后保存的 token
+    在同一 MCP 进程内立即生效，无需重启（修复静态 _SERVER_TOKEN 陈旧问题）。
+    """
     full_url = _SERVER_URL.rstrip("/") + path
     data = None
     headers = {"Content-Type": "application/json"}
-    if _SERVER_TOKEN:
-        headers["Authorization"] = f"Bearer {_SERVER_TOKEN}"
+    token = _load_effective_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(

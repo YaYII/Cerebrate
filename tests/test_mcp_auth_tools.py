@@ -125,5 +125,69 @@ class AuthLoginToolTests(unittest.TestCase):
         self.assertEqual(mcp._read_token_file(), {})
 
 
+class RequestDynamicTokenTests(unittest.TestCase):
+    """登录后同一进程内 _request 立即带 token（修复静态 token 陈旧）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.token_file = Path(self.tmp.name) / "token"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_request_uses_file_token_after_login(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["auth"] = req.get_header("Authorization")
+
+            class Resp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def read(self):
+                    return b'{"status":"ok","data":{}}'
+            return Resp()
+
+        with mock.patch.object(mcp, "_TOKEN_FILE", self.token_file), \
+                mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(
+                    mcp.urllib.request, "urlopen", side_effect=fake_urlopen):
+            os.environ.pop("CEREBRATE_SERVER_TOKEN", None)
+            mcp._save_token("file-token", "alice")
+            mcp._request("GET", "/v1/auth/me")
+        self.assertEqual(captured["auth"], "Bearer file-token")
+
+    def test_request_env_priority_still_holds(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["auth"] = req.get_header("Authorization")
+
+            class Resp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def read(self):
+                    return b'{"status":"ok","data":{}}'
+            return Resp()
+
+        with mock.patch.object(mcp, "_TOKEN_FILE", self.token_file), \
+                mock.patch.dict(
+                    os.environ,
+                    {"CEREBRATE_SERVER_TOKEN": "env-token"}), \
+                mock.patch.object(
+                    mcp.urllib.request, "urlopen", side_effect=fake_urlopen):
+            mcp._save_token("file-token", "alice")
+            mcp._request("GET", "/v1/auth/me")
+        self.assertEqual(captured["auth"], "Bearer env-token")
+
+
 if __name__ == "__main__":
     unittest.main()
