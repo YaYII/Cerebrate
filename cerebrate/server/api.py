@@ -2148,6 +2148,163 @@ class BrainAPI:
         return {"distilled": True, "doc_id": doc_id, "title": title,
                 "source_count": len(full_memories), "confidence": confidence}
 
+    def distill_and_vote(self, payload: dict) -> dict:
+        """按需蒸馏 + 自动投票（端到端）。
+
+        把相似记忆蒸馏为一个细节完整的新记忆/技能候选（营养池），自动发起支持投票，
+        返回共识快照；信息不足以形成完整技能时跳过（LLM skip 判断）。
+
+        payload:
+          topic      必填，蒸馏主题
+          limit      相似记忆检索上限（默认 20）
+          vote       是否自动发起投票（默认 true）
+          agent      发起投票的 agent（默认 cerebrate-evolution）
+          force      已有同主题蒸馏技能时是否强制重新蒸馏（默认 false）
+          scope      检索范围 all|general|project（默认 all，跨项目找相似）
+          project_id 蒸馏技能归属项目（缺省=通用技能 scope=general）
+        """
+        topic = payload.get("topic", "").strip()
+        if not topic:
+            raise ValueError("topic is required")
+        limit = int(payload.get("limit", 20) or 20)
+        vote = payload.get("vote", True)
+        agent = payload.get("agent") or "cerebrate-evolution"
+        force = payload.get("force", False)
+        scope = payload.get("scope") or "all"
+        project_id = payload.get("project_id") or payload.get("project", "")
+
+        # 1. 查重：同主题已存在活跃蒸馏技能 → 不重复蒸馏，可对其投票
+        if not force:
+            try:
+                existing = self.mm.query_swarm(
+                    f"distilled skill {topic}", category="distilled_skill",
+                    project_id=None, scope="all", limit=10, index_only=True)
+            except Exception:
+                existing = []
+            # 标题级查重：只有「标题包含主题关键词」的蒸馏技能才算同主题。
+            # 防止大而全的综合知识库（tags 含一切、语义相似度对任意主题都高）误拦截新蒸馏。
+            import re as _re
+            tokens = [t for t in _re.split(r"[\s,，、/]+", topic) if len(t) >= 2]
+            for ex in existing:
+                ex_title = ex.get("title", "")
+                if not ex_title:
+                    continue
+                if any(tok.lower() in ex_title.lower() for tok in tokens):
+                    ex_id = ex.get("memory_id", "")
+                    ex_mem = self.mm.get_swarm_memory(ex_id) if ex_id else None
+                    if ex_mem and ex_mem.get("life_stage") not in {"archived", "quarantined"}:
+                        snap = self.consensus_snapshot(ex_id, apply=False)
+                        return {
+                            "distilled": False,
+                            "reason": f"已存在同主题蒸馏技能（{ex_mem.get('title', ex_id)}），未重复蒸馏；可对其投票。",
+                            "memory_id": ex_id,
+                            "consensus": snap,
+                        }
+                    break
+
+        # 2. 搜索相似记忆（默认跨项目全量，index_only 只查索引元数据，快）
+        memories = self.mm.query_swarm(
+            topic, limit=limit, scope=scope, index_only=True)
+        if len(memories) < 2:
+            return {"distilled": False,
+                    "reason": f"相似记忆不足（当前{len(memories)}条，至少需要2条）。请先积累更多相关经验后再蒸馏。"}
+
+        # 3. 补充完整数据
+        full_memories = []
+        for m in memories:
+            mem = self.mm.get_swarm_memory(m.get("memory_id", ""))
+            if mem:
+                full_memories.append(mem)
+        if len(full_memories) < 2:
+            return {"distilled": False, "reason": "无法加载完整记忆数据"}
+
+        # 4. LLM 蒸馏（skip=当前信息不足以形成完整技能）
+        llm = CerebrateLLM()
+        if not llm.is_available():
+            return {"distilled": False, "reason": "LLM 不可用"}
+        doc = llm.distill_knowledge(full_memories, topic)
+        if not doc or doc.get("skip"):
+            reason = doc.get("reason", "数据不足") if doc else "LLM 蒸馏失败"
+            return {"distilled": False,
+                    "reason": f"当前信息不足以形成完整技能：{reason}。"}
+
+        # 5. 构建完整文档（论文级四层架构 + 原始数据附录，信息零丢失）
+        meta = doc.get("meta", {})
+        title = meta.get("title", f"[蒸馏技能] {topic}")
+        confidence = meta.get("confidence", 0.85)
+        content = EvolutionEngine._build_knowledge_document(doc, topic)
+        content += "\n\n---\n" + EvolutionEngine._build_source_appendix(full_memories)
+
+        # 6. 血缘：supersedes=源记忆；origin_ids=全部原始来源；tags 合并
+        supersedes_ids = []
+        all_origin_ids: set[str] = set()
+        all_tags = {"distilled_skill", topic}
+        total_reuse = 0
+        for m in full_memories:
+            mid = m.get("memory_id", "")
+            supersedes_ids.append(mid)
+            all_origin_ids.add(mid)
+            oids_raw = m.get("origin_ids") or []
+            if isinstance(oids_raw, str):
+                oids = [o.strip() for o in oids_raw.split(",") if o.strip()]
+            else:
+                oids = [str(o) for o in oids_raw if str(o).strip()]
+            all_origin_ids.update(oids)
+            rt = m.get("tags", "")
+            if isinstance(rt, str):
+                all_tags.update(t for t in rt.split(",") if t)
+            total_reuse += int(m.get("reuse_count", 0) or 0)
+        all_origin_ids.discard("")
+        evidence = (f"按需蒸馏: {len(full_memories)}条相似记忆整合, 总复用{total_reuse}次, "
+                    f"LLM四层知识架构, 原始数据附录保留(信息零丢失)")
+
+        # 7. 候选入营养池（life_stage=nutrient，等共识投票晋升）
+        memory_id = self.mm.swarm.share(
+            title=title, content=content,
+            category="distilled_skill",
+            tags=list(all_tags),
+            source_agent="cerebrate-evolution",
+            problem_solved=full_memories[0].get("problem_solved", ""),
+            solution=full_memories[0].get("solution", ""),
+            outcome="success",
+            project_id=project_id,
+            scope="general" if not project_id else "",
+            life_stage="nutrient",
+            confidence=confidence,
+            evidence=evidence,
+            supersedes=supersedes_ids,
+            origin_ids=list(all_origin_ids),
+        )
+        self.events.append("knowledge.distilled", "on-demand",
+                           {"memory_id": memory_id, "topic": topic,
+                            "source_count": len(full_memories),
+                            "life_stage": "nutrient", "vote": bool(vote)})
+
+        result = {
+            "distilled": True,
+            "memory_id": memory_id,
+            "title": title,
+            "source_count": len(full_memories),
+            "confidence": confidence,
+            "life_stage": "nutrient",
+            "supersedes": supersedes_ids,
+        }
+        # 8. 自动发起支持投票；共识达成则自动晋升 verified_skill
+        if vote:
+            ev = self.consensus_vote({
+                "memory_id": memory_id,
+                "agent": agent,
+                "vote": "support",
+                "evidence": evidence,
+                "confidence": 0.9,
+            })
+            snap = ev.get("consensus", {})
+            result["consensus"] = snap
+            result["life_stage"] = snap.get("applied_life_stage", "nutrient")
+        else:
+            result["consensus"] = self.consensus_snapshot(memory_id, apply=False)
+        return result
+
     def list_knowledge_topics(self) -> dict:
         """列出知识库所有主题。"""
         return {"topics": self.mm.knowledge.list_topics(),

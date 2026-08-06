@@ -139,6 +139,9 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/v1/knowledge/distill":
             payload = self._read_json()
             return self.api.distill_knowledge_on_demand(payload)
+        if method == "POST" and path == "/v1/distill":
+            payload = self._read_json()
+            return self.api.distill_and_vote(payload)
         if method == "POST" and path == "/v1/project/context":
             payload = self._read_json()
             return self.api.project_context(payload)

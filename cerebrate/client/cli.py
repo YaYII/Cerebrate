@@ -284,6 +284,18 @@ def cmd_vote(args):
     }))
 
 
+def cmd_distill(args):
+    output(client_request(args.url, "POST", "/v1/distill", {
+        "topic": args.topic,
+        "limit": args.limit,
+        "vote": not args.no_vote,
+        "agent": args.agent_id or args.id or "cli",
+        "force": args.force,
+        "scope": args.scope,
+        "project_id": args.project or "",
+    }))
+
+
 def cmd_use_start(args):
     output(client_request(args.url, "POST", "/v1/usages/start", {
         "memory_id": args.memory_id,
@@ -542,6 +554,19 @@ def main(argv=None):
     p.add_argument("--evidence", default="")
     p.add_argument("--confidence", type=float, default=1.0)
     p.set_defaults(func=cmd_vote)
+
+    # distill 按需蒸馏 + 自动投票
+    p = sub.add_parser("distill", help="按需蒸馏相似记忆为技能候选并自动发起投票")
+    p.add_argument("--topic", required=True, help="蒸馏主题（必填）")
+    p.add_argument("--limit", type=int, default=20, help="相似记忆检索上限（默认 20）")
+    p.add_argument("--no-vote", action="store_true", help="不自动发起投票，仅生成候选")
+    p.add_argument("--id", default="cli")
+    p.add_argument("--agent-id", default="")
+    p.add_argument("--force", action="store_true", help="已有同主题蒸馏技能时强制重新蒸馏")
+    p.add_argument("--scope", default="all", choices=["all", "general", "project"],
+                   help="检索范围（默认 all 跨项目找相似）")
+    p.add_argument("--project", default="", help="蒸馏技能归属项目（缺省=通用技能）")
+    p.set_defaults(func=cmd_distill)
 
     # use start / use finish
     p = sub.add_parser("use", help="记忆复用追踪")
