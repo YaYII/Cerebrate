@@ -15,6 +15,9 @@ from urllib.parse import parse_qs, urlparse
 from cerebrate.config import config
 from cerebrate.protocol import err, ok
 from cerebrate.server.api import BrainAPI
+from cerebrate.server.mcp_transport import (
+    handle_mcp_rpc, _rpc_error,
+)
 
 
 # ── 管理端点（admin-only）──────────────────────────────
@@ -110,6 +113,13 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                 #   /mcp/VERSION       版本信息
                 self._serve_mcp_artifact(path)
                 return
+            if path == "/v1/mcp":
+                # MCP Streamable HTTP 端点：自行解析身份，不强制 401
+                # （允许匿名调用自助注册/登录工具；工具级权限由
+                #  mcp_transport._auth_gate 把关：写工具需登录、管理工具仅 admin）。
+                self._parse_mcp_auth()
+                self._handle_mcp(method)
+                return
             if not self._check_auth():
                 self._send_json(err("unauthorized", code=401, protocol="v5"),
                                 HTTPStatus.UNAUTHORIZED)
@@ -138,6 +148,93 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             self._send_json(err(str(e), code=500, protocol="v5",
                                 exception=e.__class__.__name__),
                             HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _parse_mcp_auth(self):
+        """解析 MCP 请求身份（与 _check_auth 一致，但允许匿名继续）。
+
+        - Bearer user token → current_user=uid, is_admin=False
+        - Bearer master token → current_user="", is_admin=True
+        - 无 token 且无 master（本地开发）→ current_user="", is_admin=True
+        - 无 token / 无效 token（生产有 master）→ current_user="", is_admin=False（匿名）
+        工具级权限由 mcp_transport._auth_gate 把关（写需登录、管理仅 admin）。
+        """
+        self.current_user = ""
+        self.is_admin = False
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            master = config.server_token
+            self.is_admin = not master
+            return
+        token = header[len("Bearer "):].strip()
+        uid = self.api.auth.resolve(token)
+        if uid:
+            self.current_user = uid
+            self.is_admin = False
+            return
+        master = config.server_token
+        if master and hmac.compare_digest(token, master):
+            self.is_admin = True
+            return
+        # 无效 token → 匿名（不强制 401，工具层按需拒绝）
+        self.is_admin = False
+
+    def _handle_mcp(self, method: str):
+        """处理 MCP Streamable HTTP 端点（POST /v1/mcp）。
+
+        规范（2025-03-26）：
+          - POST：JSON-RPC 消息（支持单对象与批量数组）
+          - GET：405（服务端不实现主动 SSE，规范允许）
+          - 纯通知（无 id / 无响应）→ 202 Accepted
+          - 鉴权由调用方 _check_auth() 完成（Bearer token → current_user）
+        """
+        if method != "POST":
+            self.send_error(HTTPStatus.METHOD_NOT_ALLOWED,
+                            "MCP endpoint requires POST")
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8") if length else ""
+            if not raw.strip():
+                body = []
+            else:
+                body = json.loads(raw)
+        except (ValueError, json.JSONDecodeError):
+            self._send_mcp_json(_rpc_error(-32700,
+                                           "Parse error: invalid JSON", None))
+            return
+
+        messages = body if isinstance(body, list) else [body]
+        responses = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                responses.append(_rpc_error(-32600, "Invalid Request", None))
+                continue
+            resp = handle_mcp_rpc(
+                msg, self.api,
+                getattr(self, "current_user", ""),
+                getattr(self, "is_admin", False))
+            if resp is not None:
+                responses.append(resp)
+
+        if not responses:
+            # 纯通知（notifications/*）→ 202 Accepted，无响应体
+            self.send_response(HTTPStatus.ACCEPTED)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        payload = responses[0] if not isinstance(body, list) else responses
+        accept = self.headers.get("Accept", "")
+        if "text/event-stream" in accept and "application/json" not in accept:
+            # 客户端只接受 SSE：以 SSE 帧包装 JSON（简单流式，兼容规范）
+            frame = (f"data: {json.dumps(payload, ensure_ascii=False)}\n\n")
+            self._send_raw(frame, "text/event-stream; charset=utf-8")
+            return
+        self._send_mcp_json(payload)
+
+    def _send_mcp_json(self, payload):
+        self._send_raw(json.dumps(payload, ensure_ascii=False),
+                       "application/json; charset=utf-8")
 
     def _dispatch(self, method: str, path: str, params: dict) -> dict:
         if method == "GET" and path == "/v1/sense":
