@@ -167,6 +167,8 @@ class HttpBrainServerTests(unittest.TestCase):
         self.env["CEREBRATE_MEMORY_MIN_TOKENS"] = "0"  # 测试用短内容，不做长度限制
         self.env["CEREBRATE_SERVER_TOKEN"] = ""
         self.env["PYTHONPYCACHEPREFIX"] = str(Path(self.tmp.name) / "pycache")
+        # Docker 容器运行时跳过「防重复启动」检查，允许测试本地起独立服务端
+        self.env["CEREBRATE_DOCKER_SKIP_CHECK"] = "1"
         self.proc = subprocess.Popen(
             [
                 sys.executable,

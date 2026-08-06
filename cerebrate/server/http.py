@@ -99,6 +99,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return {"events": self.api.events.read_after(cursor, limit)}
         if method == "GET" and path.startswith("/v1/consensus/"):
             return self.api.consensus_snapshot(path.rsplit("/", 1)[-1])
+        if method == "GET" and path.startswith("/v1/distill/"):
+            return self.api.distill_status(path.rsplit("/", 1)[-1])
         if method == "GET" and path.startswith("/v1/origins/"):
             return self.api.get_origin(path.rsplit("/", 1)[-1])
         if method == "GET" and path.startswith("/v1/memories/"):
@@ -141,7 +143,7 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.distill_knowledge_on_demand(payload)
         if method == "POST" and path == "/v1/distill":
             payload = self._read_json()
-            return self.api.distill_and_vote(payload)
+            return self.api.distill(payload)
         if method == "POST" and path == "/v1/project/context":
             payload = self._read_json()
             return self.api.project_context(payload)

@@ -5,6 +5,9 @@ memory, appends durable events, and controls memory promotion.
 """
 
 import logging
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -46,6 +49,29 @@ class BrainAPI:
         self._doctrines_cache: Optional[dict] = None
         self._doctrines_cache_ts: float = 0.0
         self._doctrines_ttl: float = 10.0
+        # 蒸馏异步任务队列：串行执行器（单 worker，避免并发蒸馏争抢 LLM/存储锁），
+        # 任务状态存内存（任务生命周期短，重启重提即可）。
+        self._distill_tasks: dict[str, dict] = {}
+        self._distill_lock = threading.Lock()
+        self._distill_executor: Optional[ThreadPoolExecutor] = None
+        # 蒸馏任务保留时长（秒）：完成后保留 1 小时供客户端查询，超时清理防内存泄漏
+        self._distill_task_ttl = 3600.0
+
+    def _get_distill_executor(self) -> ThreadPoolExecutor:
+        if self._distill_executor is None:
+            self._distill_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="cerebrate-distill")
+        return self._distill_executor
+
+    def _cleanup_distill_tasks(self):
+        """清理已完成/失败且超过 TTL 的蒸馏任务，防止内存无限增长。"""
+        now = time.monotonic()
+        with self._distill_lock:
+            stale = [tid for tid, t in self._distill_tasks.items()
+                     if t["status"] in ("done", "error")
+                     and now - t["ts"] > self._distill_task_ttl]
+            for tid in stale:
+                del self._distill_tasks[tid]
 
     def sense(self) -> dict:
         now = time.monotonic()
@@ -2148,8 +2174,74 @@ class BrainAPI:
         return {"distilled": True, "doc_id": doc_id, "title": title,
                 "source_count": len(full_memories), "confidence": confidence}
 
-    def distill_and_vote(self, payload: dict) -> dict:
-        """按需蒸馏 + 自动投票（端到端）。
+    def distill(self, payload: dict) -> dict:
+        """按需蒸馏（异步）：提交任务，立即返回 task_id。
+
+        蒸馏耗时数分钟（LLM 链式整合），HTTP 同步会阻塞客户端。
+        改为异步：POST 只入队，GET /v1/distill/{task_id} 查询进度与结果。
+        串行执行器（单 worker）保证同一时刻只有一个蒸馏任务，避免并发争抢 LLM/存储锁。
+        """
+        topic = payload.get("topic", "").strip()
+        if not topic:
+            raise ValueError("topic is required")
+        task_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        task = {
+            "task_id": task_id,
+            "topic": topic,
+            "status": "queued",
+            "payload": dict(payload),
+            "result": None,
+            "error": None,
+            "ts": time.monotonic(),
+            "created": now,
+            "updated": now,
+        }
+        with self._distill_lock:
+            self._distill_tasks[task_id] = task
+        self._cleanup_distill_tasks()
+        self._get_distill_executor().submit(self._run_distill_task, task)
+        return {"task_id": task_id, "topic": topic, "status": "queued"}
+
+    def distill_status(self, task_id: str) -> dict:
+        """查询蒸馏任务状态；完成后返回完整结果。"""
+        self._cleanup_distill_tasks()
+        with self._distill_lock:
+            task = self._distill_tasks.get(task_id)
+        if not task:
+            raise KeyError(f"distill task not found: {task_id}")
+        result = {
+            "task_id": task_id,
+            "topic": task["topic"],
+            "status": task["status"],
+            "created": task["created"],
+            "updated": task["updated"],
+        }
+        if task["result"] is not None:
+            result["result"] = task["result"]
+        if task["error"] is not None:
+            result["error"] = task["error"]
+        return result
+
+    def _run_distill_task(self, task: dict):
+        """后台执行蒸馏任务并写回状态（串行执行器调用）。"""
+        with self._distill_lock:
+            task["status"] = "running"
+            task["updated"] = datetime.now(timezone.utc).isoformat()
+        try:
+            result = self._run_distill(task["payload"])
+            with self._distill_lock:
+                task["result"] = result
+                task["status"] = "done"
+                task["updated"] = datetime.now(timezone.utc).isoformat()
+        except Exception as e:
+            with self._distill_lock:
+                task["error"] = str(e)
+                task["status"] = "error"
+                task["updated"] = datetime.now(timezone.utc).isoformat()
+
+    def _run_distill(self, payload: dict) -> dict:
+        """按需蒸馏 + 自动投票（执行体，供后台任务与测试直接调用）。
 
         把相似记忆蒸馏为一个细节完整的新记忆/技能候选（营养池），自动发起支持投票，
         返回共识快照；信息不足以形成完整技能时跳过（LLM skip 判断）。

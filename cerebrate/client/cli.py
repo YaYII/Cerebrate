@@ -285,7 +285,7 @@ def cmd_vote(args):
 
 
 def cmd_distill(args):
-    output(client_request(args.url, "POST", "/v1/distill", {
+    resp = client_request(args.url, "POST", "/v1/distill", {
         "topic": args.topic,
         "limit": args.limit,
         "vote": not args.no_vote,
@@ -293,7 +293,28 @@ def cmd_distill(args):
         "force": args.force,
         "scope": args.scope,
         "project_id": args.project or "",
-    }))
+    })
+    task_id = (resp.get("data") or {}).get("task_id")
+    if not task_id:
+        output(resp)
+        return
+    if args.async_run:
+        output(resp)
+        return
+    # 默认轮询等待蒸馏完成（LLM 链式整合需数分钟）
+    import time
+    deadline = time.time() + (args.timeout or 900)
+    while time.time() < deadline:
+        status = client_request(args.url, "GET", f"/v1/distill/{task_id}")
+        data = status.get("data") or {}
+        st = data.get("status", "")
+        if st in ("done", "error"):
+            output(status)
+            return
+        time.sleep(5)
+    output({"status": "ok", "data": {
+        "task_id": task_id, "status": "timeout",
+        "message": f"蒸馏仍在进行，请稍后查询 GET /v1/distill/{task_id}"}})
 
 
 def cmd_use_start(args):
@@ -560,6 +581,10 @@ def main(argv=None):
     p.add_argument("--topic", required=True, help="蒸馏主题（必填）")
     p.add_argument("--limit", type=int, default=20, help="相似记忆检索上限（默认 20）")
     p.add_argument("--no-vote", action="store_true", help="不自动发起投票，仅生成候选")
+    p.add_argument("--async-run", dest="async_run", action="store_true",
+                   help="只提交任务并返回 task_id，不等待完成")
+    p.add_argument("--timeout", type=int, default=900,
+                   help="等待蒸馏完成的最大秒数（默认 900）")
     p.add_argument("--id", default="cli")
     p.add_argument("--agent-id", default="")
     p.add_argument("--force", action="store_true", help="已有同主题蒸馏技能时强制重新蒸馏")
