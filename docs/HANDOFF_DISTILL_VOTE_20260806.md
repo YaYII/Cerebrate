@@ -471,3 +471,33 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第十三轮）
 - d332f9499dc8f771 教训: 测试烧钱根因 — config._load_dotenv写回LLM key + conftest根治（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十四轮）：管理员角色隔离（修复权限 BUG）
+
+## 背景
+完整模拟「注册→绑定→登录→授权」流程发现 2 个真实权限 BUG（用户确认修复）：
+- **C1 隐私**：普通 user token 可 GET /v1/auth/users 列出全部用户
+- **C2 严重**：普通 user token 可 POST /v1/soul/set 改写虫群灵魂（doctrine）——
+  注释写明「服务端专属通道」但 http 层只校验「有无 token」，无 admin/user 角色隔离。
+  模拟中真实覆盖了灵魂（内容变「测试占位」），已从 docs/ENGINEERING_SOUL.md 恢复。
+
+## 修复（git 待提交）：http.py 管理员角色隔离
+- **管理端点集合** `_ADMIN_ENDPOINTS`（黑名单式）：auth/users、soul/set、knowledge(写)、
+  knowledge/distill、distill、fulltext/rebuild、memories/dedup-check、evolve、answer、
+  code/sync、harvest/push、project/harvest、project/branch-diff、ingest、batch/process、
+  origins/cleanup、logs(GET) —— 普通 user token 调用返回 **403**
+- **`_check_auth` 新增 `self.is_admin`**：master token → admin；本地开发无鉴权模式 → admin（不破坏开发）；
+  user token → 非 admin
+- **profile save/attach 特判**：project/profile action=save/attach 需 admin；read/draft/list 任意登录（不破坏团队读画像）
+- `_handle` 增加 `PermissionError → 403` 分支
+- **约定**：未来新增管理/花钱/全局写端点必须加入 _ADMIN_ENDPOINTS，防止权限旁路
+
+## 验证
+- 新增 tests/test_http_permissions.py（起真实 HTTP server）：无 token 401 / user token 读 200 /
+  9 个管理端点 403 / propose 200（写保留）/ master token 200 / profile save 403 + read 允许 —— 6/6
+- 全量回归：**301 passed, 0 skipped**（295+6）
+- 真实容器验证：user token 调 auth/users/soul/set/distill/evolve/answer/logs 全部 **403** ✅；
+  sense 200 ✅；master token auth/users/soul/set 200 ✅；propose 长内容 200 ✅
+- 灵魂已恢复（含「铁律」「工程化思维」，souls=1）；测试用户已清理（现存 as-workstation01、同事甲）

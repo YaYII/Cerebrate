@@ -16,6 +16,29 @@ from cerebrate.protocol import err, ok
 from cerebrate.server.api import BrainAPI
 
 
+# ── 管理端点（admin-only）──────────────────────────────
+# 普通 user token 调用返回 403；master token（或本地开发无鉴权模式）放行。
+# 新增管理/花钱/全局写端点时必须加入此集合，防止权限旁路。
+_ADMIN_ENDPOINTS = {
+    ("GET", "/v1/auth/users"),
+    ("POST", "/v1/soul/set"),
+    ("POST", "/v1/knowledge"),
+    ("POST", "/v1/knowledge/distill"),
+    ("POST", "/v1/distill"),
+    ("POST", "/v1/fulltext/rebuild"),
+    ("POST", "/v1/memories/dedup-check"),
+    ("POST", "/v1/evolve"),
+    ("POST", "/v1/answer"),
+    ("POST", "/v1/code/sync"),
+    ("POST", "/v1/harvest/push"),
+    ("POST", "/v1/project/harvest"),
+    ("POST", "/v1/project/branch-diff"),
+    ("POST", "/v1/ingest"),
+    ("POST", "/v1/batch/process"),
+    ("POST", "/v1/origins/cleanup"),
+}
+
+
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     """限制并发处理线程数，防高并发线程爆炸（阶段 1 扩展）。
 
@@ -82,6 +105,11 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(err("unauthorized", code=401, protocol="v5"),
                                 HTTPStatus.UNAUTHORIZED)
                 return
+            # 管理端点权限隔离：普通用户调用管理/花钱/全局写端点 → 403
+            if self._endpoint_requires_admin(method, path) and not self._is_admin():
+                self._send_json(err("admin required", code=403, protocol="v5"),
+                                HTTPStatus.FORBIDDEN)
+                return
             params = parse_qs(parsed.query)
             if path == "/v1/events/stream" and method == "GET":
                 self._handle_sse(params)
@@ -91,6 +119,9 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         except KeyError as e:
             self._send_json(err(str(e), code=404, protocol="v5"),
                             HTTPStatus.NOT_FOUND)
+        except PermissionError as e:
+            self._send_json(err(str(e), code=403, protocol="v5"),
+                            HTTPStatus.FORBIDDEN)
         except ValueError as e:
             self._send_json(err(str(e), code=400, protocol="v5"),
                             HTTPStatus.BAD_REQUEST)
@@ -164,6 +195,10 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.project_context(payload)
         if method == "POST" and path == "/v1/project/profile":
             payload = self._read_json()
+            action = payload.get("action", "read")
+            if action in ("save", "attach") and not self._is_admin():
+                raise PermissionError(
+                    "admin required for project profile save/attach")
             return self.api.project_profile(payload)
         if method == "POST" and path == "/v1/project/navigate":
             payload = self._read_json()
@@ -248,12 +283,15 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         - master token（config.server_token）：管理员，user_id=None
         - user token（登录获取）：确定 user_id（物理用户）
         - config.server_token 为空时不鉴权（向后兼容本地开发）
-        通过后把身份写入 self.current_user（user_id 或 ""）。
+        通过后把身份写入 self.current_user（user_id 或 ""），
+        并把 is_admin 置位（master token / 本地开发无鉴权模式）。
         """
         self.current_user = ""
+        self.is_admin = False
         header = self.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             master = config.server_token
+            self.is_admin = not master  # 本地开发无 master → 视为管理员
             return not master  # 无 master token 时放行（本地开发）
         token = header[len("Bearer "):].strip()
         # 先查 user token（TOTP 登录下发）
@@ -264,8 +302,22 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         # 再查 master token
         master = config.server_token
         if master and hmac.compare_digest(token, master):
+            self.is_admin = True
             return True
         return not master
+
+    def _is_admin(self) -> bool:
+        """当前请求是否为管理员（master token / 本地开发无鉴权模式）。"""
+        return getattr(self, "is_admin", False)
+
+    @staticmethod
+    def _endpoint_requires_admin(method: str, path: str) -> bool:
+        """该 (method, path) 是否属于管理端点（普通用户须 403）。"""
+        if (method, path) in _ADMIN_ENDPOINTS:
+            return True
+        if method == "GET" and path.startswith("/v1/logs"):
+            return True
+        return False
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
