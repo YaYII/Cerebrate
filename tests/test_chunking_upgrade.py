@@ -8,6 +8,7 @@
   5. 端到端记忆管线 — 存储/检索/更新/删除
 """
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -731,6 +732,8 @@ class ContextExpansionTests(unittest.TestCase):
         expanded = self.swarm.expand_context(entry)
         self.assertEqual(expanded["_expanded_context"], "短文档")
 
+    @unittest.skipUnless(os.environ.get("CEREBRATE_TEST_LLM") == "1",
+                         "需要真实 LLM API；设置 CEREBRATE_TEST_LLM=1 才运行（避免调用付费 API）")
     def test_answer_api_available(self):
         from cerebrate.server.api import BrainAPI
         api = BrainAPI()

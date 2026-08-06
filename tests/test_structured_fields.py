@@ -7,6 +7,7 @@
   - 索引层展示 observation_type + concepts，让 agent 只看标题/类型即可判断
   - LLM 语义压缩标题：规则保底（截断），LLM 可用时增强
 """
+import os
 import sys
 import tempfile
 import unittest
@@ -111,6 +112,8 @@ class StructuredFieldsTests(unittest.TestCase):
         self.assertEqual(mem["observation_type"], "decision")
         self.assertIn("design", mem["concepts"])
 
+    @unittest.skipUnless(os.environ.get("CEREBRATE_TEST_LLM") == "1",
+                         "需要真实 LLM API；设置 CEREBRATE_TEST_LLM=1 才运行（避免调用付费 API）")
     def test_title_compress_rule_fallback(self):
         from cerebrate.brain.llm import CerebrateLLM
         llm = CerebrateLLM()
