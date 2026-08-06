@@ -758,3 +758,31 @@ stdio sense 真实调用（1472 条记忆 healthy）
 
 ## 虫群记忆索引（第十九轮补充）
 - 待提交：技能「Cerebrate MCP npm 发布」（含 npm 10 登录/2FA/发布踩坑）
+
+---
+
+# 追加（2026-08-06 第二十轮）：v5.0.1 发布 + 安装命令实测 + 标准 CLI 修复
+
+## 用户要求（2026-08-06）
+自己实测安装命令是否可用。
+
+## 实测结果（全部通过）
+1. `npx -y cerebrate-mcp`（免安装）：initialize + tools/list 正常 ✅
+2. `npm install -g cerebrate-mcp`：bin 生成于 node 全局路径 ✅
+3. `cerebrate-mcp setup --url --token`：写 env + 打印配置片段 ✅
+4. stdio sense 真实调用：1474 条记忆 healthy ✅
+
+## 修复（git 09c41d7，v5.0.1 已发布）
+- **`cerebrate-mcp --version`/`--help` 无输出缺陷**：原 CLI 未处理这两个参数，
+  直接进入 stdio 模式卡住 → 修复为输出版本/用法（硬编码版本号，兼容公网单独下载 mcp.js 无 package.json 场景）
+- initialize serverInfo 同步 5.0.1
+
+## npm 发布与缓存坑（新增）
+- `npm publish` 成功但 `npm install -g <pkg>@latest` 报 ETARGET "No matching version found"：
+  npm 本地缓存旧 registry 元数据 → **`npm cache clean --force` 后重装即可**
+- registry 根路径 CDN 可能短暂返回旧版本，以 `curl <pkg> | dist-tags.latest` 为准
+
+## 发布记录
+- cerebrate-mcp@5.0.0（2026-08-06 首发）
+- cerebrate-mcp@5.0.1（2026-08-06，--version/--help 修复）
+- 发布命令：cd 项目根 && npm publish（~/.npmrc 已配 token）
