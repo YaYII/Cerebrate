@@ -69,6 +69,51 @@ class TokenPersistenceTests(unittest.TestCase):
                 self.assertEqual(mcp._load_effective_token(), "")
 
 
+class EnvFileConfigTests(unittest.TestCase):
+    """本地配置 env 文件（install-mcp.sh 生成）读取。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_env_file_parsing(self):
+        env_path = Path(self.tmp.name) / "cerebrate.env"
+        env_path.write_text(
+            "# 注释行\n"
+            "CEREBRATE_SERVER_URL=\"https://x.example.com/cerebrate\"\n"
+            "CEREBRATE_SERVER_TOKEN='envfile-tok'\n\n",
+            encoding="utf-8")
+        with mock.patch.object(mcp, "_MCP_ENV_FILE", str(env_path)):
+            d = mcp._load_env_file()
+        self.assertEqual(d["CEREBRATE_SERVER_URL"],
+                         "https://x.example.com/cerebrate")
+        self.assertEqual(d["CEREBRATE_SERVER_TOKEN"], "envfile-tok")
+
+    def test_env_file_missing_returns_empty(self):
+        with mock.patch.object(
+                mcp, "_MCP_ENV_FILE", "/nonexistent/cerebrate.env"):
+            self.assertEqual(mcp._load_env_file(), {})
+
+    def test_effective_token_env_file_fallback(self):
+        with mock.patch.object(
+                mcp, "_ENV_FILE",
+                {"CEREBRATE_SERVER_TOKEN": "envfile-tok"}), \
+                mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CEREBRATE_SERVER_TOKEN", None)
+            self.assertEqual(mcp._load_effective_token(), "envfile-tok")
+
+    def test_effective_token_env_overrides_env_file(self):
+        with mock.patch.object(
+                mcp, "_ENV_FILE",
+                {"CEREBRATE_SERVER_TOKEN": "envfile-tok"}), \
+                mock.patch.dict(
+                    os.environ,
+                    {"CEREBRATE_SERVER_TOKEN": "env-tok"}):
+            self.assertEqual(mcp._load_effective_token(), "env-tok")
+
+
 class CliLoginTests(unittest.TestCase):
     """login/logout/status CLI 行为。"""
 

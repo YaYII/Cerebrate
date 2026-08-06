@@ -42,8 +42,35 @@ try:
 except Exception:
     _PHYSICAL_USER = "unknown"
 
-_SERVER_URL = os.environ.get(
-    "CEREBRATE_SERVER_URL", "") or "http://127.0.0.1:8765"
+# ── 本地配置 env 文件（install-mcp.sh 生成于安装目录根，chmod 600）──
+# 环境变量优先，env 文件兜底 → 同事 MCP 配置只需指向脚本，无需明文 token。
+_MCP_ENV_FILE = os.environ.get("CEREBRATE_MCP_ENV", "").strip() or str(
+    Path(_PROJECT_ROOT) / "cerebrate.env")
+
+
+def _load_env_file() -> dict:
+    """读取 MCP 本地配置 env 文件（KEY=VALUE，# 注释，支持引号）。"""
+    try:
+        path = Path(_MCP_ENV_FILE)
+        if path.exists():
+            out = {}
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                out[key.strip()] = val.strip().strip('"').strip("'")
+            return out
+    except Exception:
+        pass
+    return {}
+
+
+_ENV_FILE = _load_env_file()
+_SERVER_URL = (
+    os.environ.get("CEREBRATE_SERVER_URL", "").strip()
+    or _ENV_FILE.get("CEREBRATE_SERVER_URL", "").strip()
+    or "http://127.0.0.1:8765")
 
 # ── 本地持久化（认证阶段3 + 实体本地 MCP）─────────────────
 _ENV_TOKEN_FILE = os.environ.get("CEREBRATE_TOKEN_FILE", "").strip()
@@ -89,10 +116,13 @@ def _clear_token() -> None:
 
 
 def _load_effective_token() -> str:
-    """优先环境变量 CEREBRATE_SERVER_TOKEN，其次本地持久化 token。"""
+    """优先环境变量，其次本地 env 文件，最后登录持久化 token。"""
     env = os.environ.get("CEREBRATE_SERVER_TOKEN", "").strip()
     if env:
         return env
+    env_file_token = _ENV_FILE.get("CEREBRATE_SERVER_TOKEN", "").strip()
+    if env_file_token:
+        return env_file_token
     return _read_token_file().get("token", "")
 
 
