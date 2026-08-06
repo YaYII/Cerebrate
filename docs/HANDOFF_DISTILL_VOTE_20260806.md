@@ -195,3 +195,31 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - ngrok 免费版域名随机，重启会变（status 查看新 URL）；付费可固定域名
 - 其他项目扩展：改 nginx.conf 加 location /<项目>/，重启网关
 - 蒸馏长请求：proxy_read_timeout 900s 必须（nginx 默认 60s 会断）
+
+---
+
+# 追加（2026-08-06 第六轮）：用户认证体系 v1（TOTP 登录 + user token）
+
+## 需求（用户确定）
+- 不用设备绑定（换设备无法用），改用 Authenticator（TOTP）登录绑定"人"
+- 登录后获取 token，token 长期有效，用户自己保存 = 唯一凭证
+- 读共享；写/改记忆需 token 确定身份；查询优先自己的记忆
+
+## 已完成（git b571fcf）
+- cerebrate/server/auth.py：RFC 6238 TOTP（标准库零依赖）+ UserAuth（注册/登录/token 管理，JSON 持久化）
+- API: POST /v1/auth/register（需 master token，管理员建用户）/ POST /v1/auth/login（匿名，TOTP 验证）
+- 鉴权：master token（管理员，user_id=None）+ user token（物理用户）
+- 验证：RFC 6238 标准向量通过；真实闭环（注册→TOTP登录→user token→读共享200）；无效 token 401
+- 测试 tests/test_auth.py 10/10 + 回归 26/26
+
+## 使用（给同事开通）
+1. 管理员：POST /v1/auth/register {"username":"同事名"} → 拿到 otpauth_uri
+2. 把 otpauth_uri 给同事加入 Authenticator（扫码）
+3. 同事：POST /v1/auth/login {"username","code"} → 拿到 token（永久，自己保存）
+4. 请求带 Authorization: Bearer <user token>
+
+## 待办（下一阶段）
+- 记忆 owner 字段 + 权限校验（只能改自己的记忆、可投票他人、读共享）
+- 查询优先自己的记忆（搜索加权）
+- MCP 客户端登录流程（mcp.py 集成 user token）
+- 归档防删（OriginLog 保留策略）
