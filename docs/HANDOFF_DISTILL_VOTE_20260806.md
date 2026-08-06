@@ -607,3 +607,73 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/YaYII/Cerebrate/master/s
 - verify_loop 首轮仍会跑（interval 只影响后续）；容器内无宿主机代码仓，画像校验意义有限（.env 已设 interval=99999，不进 git）
 - 同事开通命令（Node 直接安装）：
   bash -c "$(curl -fsSL https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/mcp/install.sh)" -- --url https://finale-earthworm-iciness.ngrok-free.dev/cerebrate --token <token>
+
+---
+
+# 追加（2026-08-06 第十八轮）：服务端标准 MCP Streamable HTTP 端点 /v1/mcp
+
+## 用户要求（2026-08-06）
+- **按 MCP 生态标准规范接入**，不能自造非标准安装功能
+- 标准 = Streamable HTTP（2025-03-26 规范）：单一 POST/GET 端点、JSON-RPC、
+  `claude mcp add --transport http <name> <url>` / Codex config.toml `url =`
+
+## 交付（git fa065a0，已 push）
+### 1. cerebrate/server/mcp_transport.py（新，标准 MCP 端点实现）
+- `handle_mcp_rpc()`：initialize / ping / tools/list / tools/call（通知返回 None）
+- 29 个工具 JSON Schema（与 mcp.py/mcp.js 对齐，含 auth_login 新增）
+- `_invoke_tool()`：参数转换 + 统一信封（成功包 `{status:ok,data}`，与 mcp.py 走 REST 的信封一致）
+- 权限把关 `_auth_gate()`：管理工具仅 master（auth_rebind/knowledge_store/ingest/project_harvest/batch_process）；写工具需登录（propose/remember/vote/use_start/use_finish/entity_extract）；project_work claim/release 需登录（list 放行）
+- 实体工具（entity_extract）在 HTTP 远程端点返回错误提示（本地 MCP 才有，数据不离开本地）
+
+### 2. cerebrate/server/http.py 接入
+- `/v1/mcp` 分支：**自行解析身份，不强制 401**（允许匿名调用自助注册/登录工具）
+  - `_parse_mcp_auth()`：Bearer user token → current_user；master → is_admin；无 token（本地无 master）→ admin；无 token（生产）→ 匿名
+- POST：读 JSON-RPC（支持单对象/批量数组）→ 通知 202、响应 JSON
+- GET：405（规范允许）；Accept 只收 text/event-stream 时回 SSE 帧
+- 关键设计修正：摘要草稿曾写「免认证白名单」→ 已否决（管理工具会裸奔）；改为身份解析 + 工具级权限把关
+
+### 3. tests/test_mcp_http_transport.py（16 用例）
+- initialize/ping/tools-list/sense 匿名、propose 匿名 403 / user 200
+- auth_register/auth_login 匿名自助、管理工具匿名/user 403 / master 200
+- 通知 202、批量数组、未知方法 -32601、GET 405、解析错误 -32700
+
+## 验证（全部真实执行）
+- 全量回归 **325 passed**（新增 16 例）
+- 容器重建 + 预热后 curl：sense 匿名 200（1469 条记忆）、auth_register 匿名注册 ✅、
+  propose 匿名 403 ✅、auth_rebind master 200 / 匿名 403 ✅、通知 202 ✅、批量 ✅、GET 405 ✅
+- 公网 ngrok `/cerebrate/v1/mcp` ping 200 ✅
+- **标准接入决定性验证**：`claude mcp add --transport http cerebrate-test <公网>/cerebrate/v1/mcp --header "Authorization: Bearer <同事甲token>"` → `claude mcp get` 显示 **✔ Connected** ✅（验证后已移除测试配置）
+- user token 完整链路：register → TOTP login → token → propose 写记忆 ✅
+- master propose 失败原因与 REST 一致（`physical_user is required`，master 是系统级凭证非个人用户，写记忆须 user token）—— 行为一致性确认，非 bug
+
+## 标准接入方式（同事/自己）
+### Claude Code（HTTP，零安装，推荐）
+```bash
+claude mcp add --transport http cerebrate https://<域名>/cerebrate/v1/mcp \
+  --header "Authorization: Bearer <你的user token>"
+```
+### Codex（config.toml）
+```toml
+[mcp_servers.cerebrate]
+url = "https://<域名>/cerebrate/v1/mcp"
+# token 走环境变量 CEREBRATE_SERVER_TOKEN（或客户端支持的 env）
+```
+### 本地 stdio（Qoder/opencode/Trae 若只支持 stdio）
+```bash
+node mcp.js                # Node 版（下载自 <域名>/mcp/mcp.js）
+python3 -m cerebrate.mcp   # Python 版
+```
+（本地 stdio 保留实体化 + harvest 能力；HTTP 端点无实体/无本地代码分析）
+
+## 关键决策与理由
+1. **HTTP 端点必须认证**：否决「免认证白名单」——管理工具（注册/rebind/ingest/knowledge_store）会裸奔；但也不走 `_check_auth()`（无 token 直接 401 会挡住自助注册/登录）→ 自解析身份 + 工具级 `_auth_gate`
+2. **统一信封**：API 层返回裸 data，MCP 端点统一包 `{status,data}`（对齐 mcp.py 走 REST 的信封），客户端看到的 text 一致
+3. **master ≠ 个人用户**：master 写记忆被拒（physical_user required）与 REST 一致，是既有安全模型，非回归
+
+## 遗留/下一步
+- npm 包化 mcp.js（package.json + bin/）尚未做——若同事需要 `npx @yayii/cerebrate-mcp` 标准 stdio 接入，下一步做
+- ngrok 域名随机重启会变；接入命令中的域名需更新（或用固定域名）
+- `/v1/mcp` 生产可加 Origin 校验（当前无 CORS，仅同源/无浏览器场景，风险低）
+
+## 虫群记忆索引（第十八轮）
+- 待提交：技能「Cerebrate MCP 标准接入（Streamable HTTP /v1/mcp）」scope=project cerebrate
