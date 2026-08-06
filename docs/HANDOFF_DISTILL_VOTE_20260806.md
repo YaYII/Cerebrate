@@ -235,3 +235,23 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - 已隔离：test_chunking_upgrade.test_answer_api_available、test_structured_fields.test_title_compress_rule_fallback
 - **不隔离**：mock 掉 LLM 的测试（test_distill_async）、只调规则方法（_rule_*）的测试
 - 新增 LLM 依赖测试一律遵守此约定
+
+---
+
+# 追加（2026-08-06 第八轮）：认证阶段2 — owner 身份优先 + 查询优先自己
+
+## 完成（git 4a446a3）
+1. **owner 身份优先**：propose 时以服务端认证的 _current_user 为准（防伪造 physical_user），未登录回退客户端自报，无身份拒绝写入
+2. **查询优先自己**：search/query 把自己的记忆排前（physical_user==user 提前），读共享不变
+3. **FTS owner 支持**：memories_meta/knowledge_meta 加 physical_user 列（建表+幂等迁移+写入+三处 SELECT）
+4. **幂等迁移**：并发初始化重复 ALTER 报 duplicate column → catch 忽略（FTS5 初始化不再降级）
+5. **投票放开**：可对他人记忆投票
+
+## 验证
+- 单测 tests/test_auth_permissions.py 5/5（身份优先/回退/无身份拒绝/优先自己/投票他人）
+- 真实：user token 写入 → physical_user=as-workstation01 ✅；fts 搜到 + owner 正确
+- 回归 51/51（skipped=1 LLM 隔离）
+
+## 说明
+- 旧记忆 physical_user 多为历史 agent 名（yangying 等），不强制归属（共享可读，owner 为空不参与"优先自己"）
+- 查询优先自己只影响排序，不改变读权限（读仍共享）
