@@ -214,18 +214,30 @@ class OriginLog:
 
     def cleanup_expired(self, days: int = 365,
                         backup_dir: str = "/data/origin_backups") -> dict:
-        """清理超过保留期的原始记忆：先备份再删除。
+        """清理超过保留期的原始记忆：先备份再删除（防删策略）。
 
         备份失败则中止删除，保护数据安全。
+        days <= 0 表示不清理（默认防删：原始记忆永久保留归档，
+        符合「任何记忆都有原始记忆的归档，防止被删除」）。
 
         Args:
-            days: 保留天数（最小 1 天）
+            days: 保留天数；<=0 表示永不删除（仅跳过，不删任何记录）
             backup_dir: 备份目录
 
         Returns:
             操作结果统计
         """
-        days = max(days, 1)  # 最少保留 1 天，防止误删全部
+        if days is None or days <= 0:
+            # 防删：原始归档永久保留，不清理（显式手动清理仍可传正数天数）
+            return {
+                "total_expired": 0,
+                "backed_up": 0,
+                "deleted": 0,
+                "backup_file": "",
+                "skipped": True,
+                "message": "原始记忆保留策略为永久保留（CEREBRATE_ORIGIN_RETENTION_DAYS<=0），跳过清理",
+            }
+        days = max(days, 1)  # 正数时最少保留 1 天，防止误删全部
         old = self.get_old_origins(days)
         old_ids = [r["origin_id"] for r in old]
         result = {

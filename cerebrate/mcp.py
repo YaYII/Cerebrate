@@ -6,11 +6,23 @@ Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务
 而非本地实例化 BrainAPI。连接地址与鉴权令牌通过环境变量配置：
   CEREBRATE_SERVER_URL   — 脑虫服务地址，默认 http://127.0.0.1:8765
   CEREBRATE_SERVER_TOKEN — Bearer 鉴权令牌，留空则不鉴权
+  CEREBRATE_TOKEN_FILE   — 本地持久化 token 文件路径（默认 ~/.cerebrate/token）
+  CEREBRATE_ENTITY_STORE — 本地实体图谱文件路径（默认 ~/.cerebrate/entities.json）
+
+认证（阶段3）：同事先执行一次 `python3 -m cerebrate.mcp login`（用户名 + Authenticator
+TOTP 6 位码），token 保存到本地文件（chmod 600，唯一凭证，长期有效）；之后 MCP 自动使用。
+优先级：环境变量 CEREBRATE_SERVER_TOKEN > 本地 token 文件。logout/status 查看登录态。
+
+实体（本地 MCP 决策 2026-08-06）：实体抽取/衍生在本地执行（cerebrate_entity_extract），
+实体数据不离开本地，服务端只接收实体名/标签等轻量结构作为记忆 tags/索引增强。
 """
 import sys
 import os
 import json
 import getpass
+import argparse
+from datetime import datetime, timezone
+from pathlib import Path
 import urllib.request
 import urllib.error
 
@@ -32,7 +44,59 @@ except Exception:
 
 _SERVER_URL = os.environ.get(
     "CEREBRATE_SERVER_URL", "") or "http://127.0.0.1:8765"
-_SERVER_TOKEN = os.environ.get("CEREBRATE_SERVER_TOKEN", "")
+
+# ── 本地持久化（认证阶段3 + 实体本地 MCP）─────────────────
+_ENV_TOKEN_FILE = os.environ.get("CEREBRATE_TOKEN_FILE", "").strip()
+_TOKEN_FILE = Path(_ENV_TOKEN_FILE) if _ENV_TOKEN_FILE else (
+    Path.home() / ".cerebrate" / "token")
+_ENV_ENTITY_STORE = os.environ.get("CEREBRATE_ENTITY_STORE", "").strip()
+_ENTITY_STORE = Path(_ENV_ENTITY_STORE) if _ENV_ENTITY_STORE else (
+    Path.home() / ".cerebrate" / "entities.json")
+
+
+def _read_token_file() -> dict:
+    """读取本地持久化 token（JSON: {token, user_id, saved_at}）。"""
+    try:
+        if _TOKEN_FILE.exists():
+            return json.loads(_TOKEN_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_token(token: str, user_id: str = "") -> None:
+    """持久化 token 到本地文件（chmod 600，仅本用户可读）。"""
+    _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "token": token,
+        "user_id": user_id,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _TOKEN_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        _TOKEN_FILE.chmod(0o600)
+    except Exception:
+        pass
+
+
+def _clear_token() -> None:
+    try:
+        if _TOKEN_FILE.exists():
+            _TOKEN_FILE.unlink()
+    except Exception:
+        pass
+
+
+def _load_effective_token() -> str:
+    """优先环境变量 CEREBRATE_SERVER_TOKEN，其次本地持久化 token。"""
+    env = os.environ.get("CEREBRATE_SERVER_TOKEN", "").strip()
+    if env:
+        return env
+    return _read_token_file().get("token", "")
+
+
+_SERVER_TOKEN = _load_effective_token()
 
 
 def _request(method: str, path: str, body: dict = None) -> dict:
@@ -52,9 +116,15 @@ def _request(method: str, path: str, body: dict = None) -> dict:
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8") if e.fp else "{}"
         try:
-            return json.loads(err_body)
+            parsed = json.loads(err_body)
         except json.JSONDecodeError:
-            return {"status": "error", "error": {"code": e.code, "message": err_body}}
+            parsed = {"status": "error",
+                      "error": {"code": e.code, "message": err_body}}
+        if e.code == 401 and not parsed.get("error", {}).get("hint"):
+            hint = ("未认证：请先运行 `python3 -m cerebrate.mcp login` 登录"
+                    "（或设置 CEREBRATE_SERVER_TOKEN）")
+            parsed.setdefault("error", {})["hint"] = hint
+        return parsed
     except urllib.error.URLError as e:
         return {"status": "error", "error": {"code": 503, "message": f"无法连接脑虫服务 {full_url}: {e.reason}"}}
 
@@ -161,7 +231,8 @@ TOOLS = [
                 "supersedes": {"type": "string", "description": "血缘关系：逗号分隔的被取代记忆ID列表，声明当前记忆基于哪些旧记忆"},
                 "observation_type": {"type": "string", "description": "观察类型（可选，缺省按 category 自动推导）: bugfix/decision/refactor/discovery/optimization/how-it-works/gotcha/problem-solution", "default": ""},
                 "facts": {"type": "string", "description": "逗号分隔的事实清单（可选，缺省从 solution/problem 规则提取）", "default": ""},
-                "concepts": {"type": "string", "description": "逗号分隔的概念标签（可选，缺省从 tags/category/标题 规则提取）", "default": ""}
+                "concepts": {"type": "string", "description": "逗号分隔的概念标签（可选，缺省从 tags/category/标题 规则提取）", "default": ""},
+                "auto_entities": {"type": "boolean", "description": "本地实体化衍生：自动把文本中抽出的实体名并入 tags（轻量结构，服务端不存实体数据）", "default": True}
             },
             "required": ["title", "content", "tags", "problem", "solution"]
         }
@@ -401,6 +472,19 @@ TOOLS = [
             "required": ["title", "content"]
         }
     },
+    {
+        "name": "cerebrate_entity_extract",
+        "description": "【本地实体化衍生】在本地抽取文本中的实体（命令/技术/项目/术语/联系方式），零 LLM 零成本。\n实体数据不离开本地（架构红线）；可选持久化到本地实体图谱（~/.cerebrate/entities.json）。\n服务端只接收实体名/标签等轻量结构（propose 时 auto_entities 自动把实体名并入 tags）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要抽取实体的文本（如一段对话/记忆内容）"},
+                "persist": {"type": "boolean", "description": "是否合并到本地实体图谱", "default": True},
+                "top": {"type": "number", "description": "返回前 N 个实体（按出现次数降序）", "default": 30}
+            },
+            "required": ["text"]
+        }
+    },
 ]
 
 # ── 工具调用实现 ────────────────────────────────────────────
@@ -457,11 +541,26 @@ def _handle_call(name: str, args: dict) -> dict:
             })
 
         elif name == "cerebrate_propose":
+            tags_raw = args.get("tags", "")
+            tags = [t.strip() for t in tags_raw.split(",")
+                    if t.strip()] if tags_raw else []
+            # 本地实体化衍生：把文本中抽出的实体名并入 tags（轻量结构，服务端不存实体数据）
+            if args.get("auto_entities", True):
+                try:
+                    from cerebrate.entity import extract_entities
+                    _text = f"{args.get('title', '')}\n{args.get('content', '')}"
+                    for ent in extract_entities(_text)[:30]:
+                        name = ent["name"].strip()
+                        if (name and len(name) <= 30 and name.lower()
+                                not in {t.lower() for t in tags}):
+                            tags.append(name)
+                except Exception:
+                    pass  # 本地实体抽取失败不阻塞 propose
             return _request("POST", "/v1/memories/propose", {
                 "title": args["title"],
                 "content": args["content"],
                 "category": args.get("category", "general"),
-                "tags": args["tags"],
+                "tags": ",".join(tags[:20]),
                 "agent_id": args.get("agent_id", "codex"),
                 "problem": args.get("problem", ""),
                 "solution": args.get("solution", ""),
@@ -666,6 +765,16 @@ def _handle_call(name: str, args: dict) -> dict:
                 "project_id": args.get("project", ""),
             })
 
+        elif name == "cerebrate_entity_extract":
+            from cerebrate.entity import extract_and_update
+            result = extract_and_update(
+                args.get("text", ""),
+                store_path=_ENTITY_STORE,
+                persist=args.get("persist", True),
+                top=int(args.get("top", 30)),
+            )
+            return {"status": "ok", "data": result}
+
         else:
             return {"status": "error", "error": {"code": -1, "message": f"未知工具: {name}"}}
 
@@ -682,7 +791,89 @@ def _send(msg: dict):
     sys.stdout.flush()
 
 
+# ── 客户端 CLI（认证阶段3：login / logout / status）─────────
+
+
+def _cli_login(args) -> int:
+    """用户名 + Authenticator TOTP 码登录，token 持久化到本地。"""
+    username = (args.username or "").strip()
+    if not username:
+        username = input("用户名: ").strip()
+    code = (args.code or "").strip()
+    if not code:
+        # TOTP 码虽非密码，仍用 getpass 防止肩窥
+        code = getpass.getpass("Authenticator 6 位码: ").strip()
+    result = _request("POST", "/v1/auth/login", {
+        "username": username, "code": code})
+    if result.get("status") != "ok":
+        print(f"登录失败: {result.get('error', {}).get('message', result)}")
+        return 1
+    data = result.get("data", {})
+    token = data.get("token", "")
+    user_id = data.get("user_id", username)
+    if not token:
+        print("登录失败: 服务端未返回 token")
+        return 1
+    _save_token(token, user_id)
+    print(f"登录成功: {user_id}")
+    print(f"token 已保存: {_TOKEN_FILE}（chmod 600，唯一凭证，长期有效）")
+    print("提示: 妥善保存 token；换机后运行本命令重新登录即可（无需重新注册）")
+    return 0
+
+
+def _cli_logout(args) -> int:
+    """删除本地持久化 token（服务端 token 仍有效，下次登录复用）。"""
+    if _read_token_file().get("token"):
+        _clear_token()
+        print("已退出登录（本地 token 已删除）")
+    else:
+        print("当前未登录（本地无 token）")
+    return 0
+
+
+def _cli_status(args) -> int:
+    """查看登录态与生效 token 来源。"""
+    info = _read_token_file()
+    if os.environ.get("CEREBRATE_SERVER_TOKEN"):
+        print("token 来源: 环境变量 CEREBRATE_SERVER_TOKEN（优先）")
+    elif info.get("token"):
+        print(f"token 来源: 本地文件（已登录: {info.get('user_id', '?')}）")
+    else:
+        print("token 来源: 未配置（只读接口可用；写记忆需先登录）")
+    print(f"服务地址: {_SERVER_URL}")
+    print(f"token 文件: {_TOKEN_FILE}")
+    print(f"实体图谱: {_ENTITY_STORE}")
+    return 0
+
+
+def _run_cli(argv: list) -> int:
+    parser = argparse.ArgumentParser(
+        prog="cerebrate-mcp",
+        description="Cerebrate MCP 客户端工具（登录/登出/状态）")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_login = sub.add_parser("login", help="用户名 + TOTP 码登录")
+    p_login.add_argument("--username", default="",
+                         help="脑虫用户名（管理员已注册）")
+    p_login.add_argument("--code", default="",
+                         help="Authenticator 6 位码（不传则交互输入）")
+
+    sub.add_parser("logout", help="删除本地 token")
+    sub.add_parser("status", help="查看登录态")
+
+    args = parser.parse_args(argv)
+    if args.command == "login":
+        return _cli_login(args)
+    if args.command == "logout":
+        return _cli_logout(args)
+    return _cli_status(args)
+
+
 def main():
+    # 客户端 CLI 分发：python3 -m cerebrate.mcp login|logout|status
+    if len(sys.argv) > 1 and sys.argv[1] in ("login", "logout", "status"):
+        sys.exit(_run_cli(sys.argv[1:]))
+
     # MCP server 不得在收到 initialize 前主动发消息，握手由客户端发起。
     for line in sys.stdin:
         line = line.strip()

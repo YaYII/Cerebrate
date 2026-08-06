@@ -73,6 +73,11 @@ class CerebrateConfig:
     evolution_interval_hours: int = field(default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_INTERVAL", "24")))
     decay_half_life_days: float = field(default_factory=lambda: float(os.environ.get("CEREBRATE_DECAY_HALF_LIFE", "30")))
 
+    # 原始记忆归档保留（防删策略）：<=0 = 永不删除（默认，符合「任何记忆都有原始归档，防止被删除」）
+    origin_retention_days: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_ORIGIN_RETENTION_DAYS", "0"))
+    )
+
     # 虫群配置
     swarm_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_SWARM_ENABLED", "true").lower() == "true")
     default_language: str = field(default_factory=lambda: os.environ.get("CEREBRATE_LANGUAGE", "简体中文"))

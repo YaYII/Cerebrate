@@ -115,15 +115,20 @@ class CerebrateScheduler:
     # ── 清理调度 ─────────────────────────────────────────
 
     def _cleanup_loop(self):
-        """原始记忆清理主循环：每天检查一次。"""
+        """原始记忆清理主循环：每天检查一次（保留策略可配置，默认永久保留不清理）。"""
         # 首次启动延迟 60 秒，避免与服务初始化冲突
         self._stop_event.wait(60)
 
         while not self._stop_event.is_set():
             try:
-                result = self._api.cleanup_expired_origins(days=365)
+                from cerebrate.config import config
+                result = self._api.cleanup_expired_origins(
+                    days=config.origin_retention_days)
                 deleted = result.get("deleted", 0)
-                if deleted > 0:
+                if result.get("skipped"):
+                    logger.debug("原始记忆清理: %s",
+                                 result.get("message", "已跳过（永久保留策略）"))
+                elif deleted > 0:
                     logger.info("原始记忆清理完成: 过期=%d 备份=%d 删除=%d 文件=%s",
                                 result.get("total_expired", 0),
                                 result.get("backed_up", 0),

@@ -293,3 +293,46 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第九轮）
 - 130caa89b34ffc53 Mem0 借鉴决策：实体链接走本地 MCP（服务端不存实体）（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十轮）：认证阶段3 + 归档防删 + 实体本地 MCP + 容器一致性
+
+按未完成工作清单推进 P1（用户：按照计划进行处理，记得自己测试）。
+
+## 1. 认证阶段3：MCP 客户端登录流程（git 待提交）
+- **CLI**：`python3 -m cerebrate.mcp login|logout|status`
+  - login：用户名 + Authenticator TOTP 码（交互输入）→ POST /v1/auth/login → token 存本地
+  - logout：删本地 token；status：查看登录态与 token 来源
+- **本地 token 持久化**：`~/.cerebrate/token`（JSON，chmod 600，含 user_id）；`CEREBRATE_TOKEN_FILE` 可覆盖路径
+- **生效优先级**：环境变量 CEREBRATE_SERVER_TOKEN > 本地 token 文件（现状不变，兼容旧配置）
+- **401 提示**：_request 对 401 响应附加「请先 python3 -m cerebrate.mcp login 登录」hint
+- **同事开通流程**：管理员 register（发 otpauth_uri）→ 同事加 Authenticator → 同事 login 一次 → 之后 MCP 自动带 token
+
+## 2. 归档防删：OriginLog 保留策略（git 待提交）
+- `CEREBRATE_ORIGIN_RETENTION_DAYS` 默认 **0 = 永不删除**（符合「任何记忆都有原始归档，防止被删除」）
+- `origin.cleanup_expired`：days<=0 → 直接跳过（skipped=True，不删任何记录）
+- `scheduler._cleanup_loop`：改读 config.origin_retention_days（不再硬编码 365）
+- **纵深防御**：http 层手动端点 /v1/origins/cleanup 仍保留 180 天最低保留 + 先备份再删除（显式管理动作可做，自动清理默认关）
+
+## 3. 实体本地 MCP（Mem0 借鉴决策落地）
+- **新模块 `cerebrate/entity.py`**：纯规则实体抽取（零 LLM、零付费）——技术关键词/驼峰/下划线/URL/邮箱/引号术语/已知图谱识别
+- **本地实体图谱**：`~/.cerebrate/entities.json`（实体名→{type,count,first_seen,last_seen}，原子写，cap 2000）
+- **MCP 工具 `cerebrate_entity_extract`**：本地抽取 + 可选持久化，实体数据不离开本地（架构红线）
+- **propose 集成**：`auto_entities`（默认 True）把文本中抽出的实体名并入 tags（≤20），服务端只收实体名/标签轻量结构
+- **修复真实 bug**：已知图谱识别与关键词规则重复计数 → known 命中且 seen 已有则跳过（真实复测 docker 1+1=2 正确）
+
+## 4. 容器一致性验证
+- `docker compose build && docker compose up -d`（正解流程），容器 healthy
+- 容器内代码验证：entity.py 计数修复 / config retention / mcp _cli_login 全部存在
+- 真实冒烟：sense healthy（1450 条，deepseek-v4-flash）✅；CLI 真实登录（as-workstation01）✅；logout ✅；防删 skip ✅
+
+## 5. 测试
+- 新增 3 个测试文件：test_mcp_login（10）、test_entity_extract（18）、test_origin_retention（6），共 34 例
+- 全量回归：**280 passed, 2 skipped**（skipped=LLM 隔离，省钱规则）
+
+## 6. 遗留 / 注意
+- `tests/prod_test.py`（生产冒烟脚本，自带启动服务端）认证后未带 token 会 401——不在常规单测内，需手动跑时补 Authorization
+- 实体抽取当前为规则级；后续可选 LLM 实体抽取增强（需 CEREBRATE_TEST_LLM 约定）
+- Mem0 其余借鉴（时序推理/多信号融合）仍搁置（P3）
+- 本次新增代码文件：cerebrate/entity.py；改动：mcp.py / config.py / origin.py / scheduler.py / tests/*
