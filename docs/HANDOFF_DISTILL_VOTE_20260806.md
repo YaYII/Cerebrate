@@ -786,3 +786,41 @@ stdio sense 真实调用（1472 条记忆 healthy）
 - cerebrate-mcp@5.0.0（2026-08-06 首发）
 - cerebrate-mcp@5.0.1（2026-08-06，--version/--help 修复）
 - 发布命令：cd 项目根 && npm publish（~/.npmrc 已配 token）
+
+---
+
+# 追加（2026-08-06 第二十一轮）：脑虫与 MCP 版本号统一 5.0.1 + 安装后链接脑虫全链路测试
+
+## 用户要求（2026-08-06）
+1. 脑虫的版本号和 MCP 的版本号保持一致
+2. 测试刚安装的 MCP 链接脑虫是否正常使用，发现问题就修复
+
+## 版本统一（git fbbf877，已 push）
+发现不一致：VERSION 文件/服务端 mcp_transport/mcp.py 仍是 5.0.0，npm 包已是 5.0.1。
+统一 5 处为 **5.0.1**：
+- VERSION 文件：cerebrate-mcp-v5.0.1（/mcp/VERSION 下载端点）
+- cerebrate/server/mcp_transport.py SERVER_INFO → 5.0.1（HTTP MCP 端点）
+- cerebrate/mcp.py serverInfo → 5.0.1（Python stdio 客户端）
+- mcp.js / package.json（已 5.0.1，无需改）
+
+## 安装后链接脑虫全链路测试（全局安装的 cerebrate-mcp 5.0.1）
+| 测试 | 结果 |
+|---|---|
+| cerebrate-mcp --version | 5.0.1 ✅ |
+| initialize（本地 stdio） | serverInfo 5.0.1 ✅ |
+| sense（本地 stdio） | ok，1475 条记忆 healthy ✅ |
+| search（本地 stdio） | ok，命中已有记忆 ✅ |
+| propose 写入（本地 stdio） | ok，memory_id 178f8225516fecd8 ✅ |
+| HTTP /v1/mcp initialize（本地） | 5.0.1 ✅ |
+| HTTP /v1/mcp initialize（公网） | 5.0.1 ✅ |
+| /mcp/VERSION 下载 | cerebrate-mcp-v5.0.1 ✅ |
+| 公网 stdio（全局 MCP + 公网 URL） | initialize 5.0.1 + sense 1477 条 ✅ |
+
+注意：search "npm publish 2FA" count=0 是关键词未命中（向量/FTS 无匹配），换通用词 "Cerebrate MCP 标准接入" count=2 命中——链路正常，非缺陷。
+
+## 修复项
+- 版本号不一致（5 处统一 5.0.1）
+- （此前已修）--version/--help 标准 CLI 参数（v5.0.1 发布）
+
+## 下一步建议
+- npm 包已是 5.0.1，无需重发；后续改版时 5 处版本号 + package.json + mcp.js 硬编码同步
