@@ -430,3 +430,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 2. 用户点开链接 → 网页显示二维码 → 手机 Authenticator 扫码绑定
 3. 用户把当前 6 位码告诉 AI → AI 登录 → token 本地保存
 4. 之后直接用，无需再授权；换机重新登录一次
+
+## 虫群记忆索引（第十二轮）
+- a35de3d73a1cd0fd 技能: Cerebrate 网页二维码绑定页 — bind_url 客户端零依赖扫码绑定（scope=project, cerebrate）
