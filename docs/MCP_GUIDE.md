@@ -1,7 +1,7 @@
 # Cerebrate MCP 使用指南（同事接入版）
 
 > 脑虫记忆系统 MCP 客户端：把团队记忆接入你的 AI 助手（Codex / Claude Code / Qoder / opencode）。
-> 安装只需 Python 3.8+（纯标准库，无需 pip 依赖），一条命令完成。
+> 当前版本 **cerebrate-mcp 5.0.1**（npm 标准安装，Node 16+，零依赖）。
 
 ---
 
@@ -18,27 +18,30 @@ Cerebrate 是团队共享的 AI 记忆中枢（服务端由管理员部署）。
 
 ```bash
 # 从管理员获取：脑虫地址（URL）+ 你的 user token
-bash -c "$(curl -fsSL https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/mcp/install.sh)" -- \
-  --url https://finale-earthworm-iciness.ngrok-free.dev/cerebrate \
-  --token <你的token>
+npm install -g cerebrate-mcp
+
+# 一条命令完成配置（自动写 ~/.cerebrate-mcp/cerebrate.env，chmod 600）
+cerebrate-mcp setup --url https://<脑虫域名>/cerebrate --token <你的token>
 ```
 
-脚本会：检测 **Node.js**（nodejs 一定有，零依赖）→ 从脑虫服务下载 `mcp.js` → 生成配置 `cerebrate.env`（chmod 600）→ 自检 → 打印各客户端配置片段。无 node 时回退 Python 模式。
+`setup` 执行后自动：
+1. 写入 `~/.cerebrate-mcp/cerebrate.env`（URL + token，仅本用户可读）
+2. 打印 Claude Code / Codex / stdio 三套配置片段，**复制粘贴即可使用**
 
-> **为什么本机直接安装**：MCP 包含本地实体化抽取与用户代码库分析（harvest）能力，需要访问本机文件系统，容器化会隔离这些能力。地址变化只需改 `~/.cerebrate-mcp/cerebrate.env`。
+> **为什么本机直接安装**：MCP 包含本地实体化抽取与用户代码库分析（harvest）能力，需要访问本机文件系统，容器化会隔离这些能力。地址变化只需重跑 `cerebrate-mcp setup --url <新地址>`。
 
 ## 3. 配置到你的 AI 客户端（二选一）
 
-安装脚本最后会打印对应片段，粘贴即可：
+`setup` 最后会打印对应片段，粘贴即可：
 
 | 客户端 | 位置 |
 |---|---|
-| Codex | `~/.codex/config.toml` 的 `[mcp_servers]` 下 |
-| Claude Code | `claude mcp add cerebrate -e python3 -- <mcp.py路径>` |
-| Qoder | `~/.qoder/settings.json` 的 `mcpServers` |
-| opencode | `opencode.json` 的 `mcp` |
+| Codex | `~/.codex/config.toml` 的 `[mcp_servers.cerebrate] url = "https://<域名>/cerebrate/v1/mcp"` |
+| Claude Code | `claude mcp add --transport http cerebrate https://<域名>/cerebrate/v1/mcp --header "Authorization: Bearer <token>"`（推荐，零本地服务） |
+| Qoder | stdio：命令 `npx -y cerebrate-mcp`，env 走 `CEREBRATE_SERVER_URL` / `CEREBRATE_SERVER_TOKEN` |
+| opencode | 同上（stdio） |
 
-配置里**只需要脚本路径**——URL 和 token 自动从 `cerebrate.env` 读取，无需明文写进客户端。
+stdio 客户端（Qoder / opencode / Trae）也可直接用 `npx -y cerebrate-mcp` 运行，无需全局安装。
 
 ## 4. 开始使用
 

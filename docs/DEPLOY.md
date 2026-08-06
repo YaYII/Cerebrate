@@ -30,12 +30,26 @@
 
 ## 一、构建并启动
 
+> 当前镜像 tag：**cerebrate:5.0.1**（与 MCP 版本 cerebrate-mcp 5.0.1 统一；
+> 协议标识 `meta.protocol` 保持 v5 不变）。
+
 ```bash
 cp .env.example .env
 # 编辑 .env：
 #   CEREBRATE_SERVER_TOKEN=<openssl rand -hex 32 生成的强随机值>
 #   ANTHROPIC_API_KEY=sk-ant-...   # 可选，启用 LLM 免疫系统；不填则降级
 docker compose up -d --build
+```
+
+版本升级（镜像 tag 变更，如 5.0.1 → 5.1.0）：
+```bash
+# 1. 修改 docker-compose.yml 的 image: cerebrate:<新版本>
+# 2. 同步版本号（5 处）：VERSION 文件 / mcp_transport.py SERVER_INFO /
+#    mcp.py serverInfo / mcp.js（两处硬编码）/ package.json
+# 3. 重建并升级
+docker compose build && docker compose up -d
+# 4. 清理旧镜像
+docker rmi cerebrate:<旧版本>
 ```
 
 查看启动日志，确认服务就绪且使用 BGE 而非 hash 回退：
