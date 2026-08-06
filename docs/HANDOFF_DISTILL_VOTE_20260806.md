@@ -171,3 +171,27 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - 服务在线（容器 healthy），蒸馏异步可用（提交→task_id→查询）
 - 全量测试 233/233
 - 部署正解：改代码 → 测试 → commit → `docker compose build && docker compose up -d` → push
+
+---
+
+# 追加（2026-08-06 第五轮）：公网网关（Nginx 路径路由 + ngrok 穿透）
+
+## 架构
+公网用户 → ngrok 隧道 → 本地 Nginx 网关容器(80) → /cerebrate/ → Cerebrate(8765)
+
+## 文件
+- docker/nginx-gateway/nginx.conf：反向代理配置（/cerebrate/ 剥离前缀转发 cerebrate:8765，proxy_read_timeout 900s 适配蒸馏）
+- scripts/tunnel-gateway.sh：start/stop/status 一键管理
+
+## 使用
+```bash
+./scripts/tunnel-gateway.sh start    # 启动网关+隧道，打印公网 URL
+./scripts/tunnel-gateway.sh status   # 查当前 URL
+```
+当前公网: https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/v1/sense
+
+## 关键点
+- Nginx 容器 join cerebrate_default 网络，用容器名 cerebrate:8765 访问（无需改 Cerebrate 端口映射）
+- ngrok 免费版域名随机，重启会变（status 查看新 URL）；付费可固定域名
+- 其他项目扩展：改 nginx.conf 加 location /<项目>/，重启网关
+- 蒸馏长请求：proxy_read_timeout 900s 必须（nginx 默认 60s 会断）
