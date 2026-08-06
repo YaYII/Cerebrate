@@ -524,6 +524,17 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_auth_rebind",
+        "description": "【认证引导·管理员】为已注册用户重新生成绑定链接（bind_url 网页二维码）。\n仅 master token 可调（普通用户被服务端 403）。用于：注册后链接过期 / 换设备重新绑定。\n返回 bind_url 后发给用户：浏览器打开 → Authenticator 扫码 → 报 6 位码 → cerebrate_auth_login。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string", "description": "已注册用户名"}
+            },
+            "required": ["username"]
+        }
+    },
+    {
         "name": "cerebrate_auth_logout",
         "description": "【认证引导·登出】删除本地持久化 token（服务端 token 仍有效，下次登录复用）。",
         "inputSchema": {"type": "object", "properties": {}}
@@ -880,6 +891,22 @@ def _handle_call(name: str, args: dict) -> dict:
             data["token_file"] = str(_TOKEN_FILE)
             data["hint"] = ("登录成功，token 已本地持久化（唯一凭证）；"
                             "之后直接使用，无需每次授权")
+            return {"status": "ok", "data": data}
+
+        elif name == "cerebrate_auth_rebind":
+            username = args.get("username", "").strip()
+            result = _request("POST", "/v1/auth/rebind", {
+                "username": username})
+            if result.get("status") != "ok":
+                return result
+            data = result.get("data", {})
+            if data.get("bind_token"):
+                data["bind_url"] = (
+                    f"{_SERVER_URL.rstrip('/')}/v1/auth/bind"
+                    f"?token={data['bind_token']}")
+                data["hint"] = ("把 bind_url 发给用户：浏览器打开 → "
+                                "Authenticator 扫码 → 报 6 位码 → "
+                                "cerebrate_auth_login")
             return {"status": "ok", "data": data}
 
         elif name == "cerebrate_auth_logout":

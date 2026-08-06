@@ -21,6 +21,7 @@ from cerebrate.server.api import BrainAPI
 # 新增管理/花钱/全局写端点时必须加入此集合，防止权限旁路。
 _ADMIN_ENDPOINTS = {
     ("GET", "/v1/auth/users"),
+    ("POST", "/v1/auth/rebind"),
     ("POST", "/v1/soul/set"),
     ("POST", "/v1/knowledge"),
     ("POST", "/v1/knowledge/distill"),
@@ -232,6 +233,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                     "role": "admin" if not uid else "user"}
         if method == "GET" and path == "/v1/auth/users":
             return self.api.auth_users()
+        if method == "POST" and path == "/v1/auth/rebind":
+            return self.api.rebind_user(payload)
         if method == "POST" and path == "/v1/query":
             return self.api.query(payload)
         if method == "POST" and path == "/v1/search":

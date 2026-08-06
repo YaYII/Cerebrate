@@ -237,6 +237,13 @@ def cmd_register(args):
     }))
 
 
+def cmd_auth_rebind(args):
+    """管理员：为已注册用户重新生成绑定链接（需 master token）。"""
+    output(client_request(args.url, "POST", "/v1/auth/rebind", {
+        "username": args.username,
+    }))
+
+
 def cmd_events(args):
     output(client_request(args.url, "GET",
                           f"/v1/events?cursor={args.cursor}&limit={args.limit}"))
@@ -542,6 +549,12 @@ def main(argv=None):
     p.add_argument("--type", default="cli")
     p.add_argument("--capabilities", default="")
     p.set_defaults(func=cmd_register)
+
+    p = sub.add_parser(
+        "auth-rebind",
+        help="管理员：为已注册用户重新生成绑定链接（需 CEREBRATE_SERVER_TOKEN=master）")
+    p.add_argument("username", help="已注册用户名")
+    p.set_defaults(func=cmd_auth_rebind)
 
     p = sub.add_parser("events", help="读取事件日志")
     p.add_argument("--cursor", type=int, default=0)

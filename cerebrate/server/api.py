@@ -237,6 +237,22 @@ class BrainAPI:
         code = payload.get("code") or payload.get("totp") or ""
         return self.auth.login(username, code)
 
+    def rebind_user(self, payload: dict) -> dict:
+        """管理员为已注册用户重新生成绑定链接（bind_token，30 分钟有效）。
+
+        用于：注册后未及时扫码链接过期 / 换设备重新绑定。
+        不重置 TOTP secret（secret 与绑定会话解耦；重置属另需的安全操作）。
+        """
+        username = (payload.get("username") or "").strip()
+        if not username:
+            raise ValueError("username is required")
+        bind_token = self.auth.create_bind_session(username)
+        return {
+            "username": username,
+            "bind_token": bind_token,
+            "message": "绑定链接已生成（30 分钟内有效），尽快让用户扫码绑定",
+        }
+
     def auth_users(self) -> dict:
         """列出已注册用户（管理员）。"""
         return {"users": self.auth.list_users()}

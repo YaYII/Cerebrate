@@ -149,6 +149,26 @@ class HttpPermissionTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(r["status"], "ok")
 
+    def test_rebind_admin_only(self):
+        # 管理员：为已注册用户重新生成绑定链接
+        self._register_login("rebind-user")
+        status, r = self._req(
+            "POST", "/v1/auth/rebind", {"username": "rebind-user"},
+            token=MASTER)
+        self.assertEqual(status, 200)
+        self.assertTrue(r["data"]["bind_token"])
+        # 普通用户：403
+        tok = self._register_login("rebind-guard")
+        status, _ = self._req(
+            "POST", "/v1/auth/rebind", {"username": "rebind-user"},
+            token=tok)
+        self.assertEqual(status, 403)
+        # 未注册用户：400
+        status, _ = self._req(
+            "POST", "/v1/auth/rebind", {"username": "nobody"},
+            token=MASTER)
+        self.assertEqual(status, 400)
+
     def test_profile_save_requires_admin_but_read_allowed(self):
         tok = self._register_login("profile-user")
         # save（覆盖画像）需 admin

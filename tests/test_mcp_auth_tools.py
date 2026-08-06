@@ -141,6 +141,30 @@ class AuthLoginToolTests(unittest.TestCase):
         self.assertEqual(mcp._read_token_file(), {})
 
 
+class AuthRebindToolTests(unittest.TestCase):
+    def test_rebind_returns_bind_url(self):
+        ok = {"status": "ok", "data": {
+            "username": "bob", "bind_token": "rebind-tok",
+            "message": "绑定链接已生成"}}
+        with mock.patch.object(mcp, "_request", return_value=ok), \
+                mock.patch.object(mcp, "_SERVER_URL",
+                                  "https://cerebrate.example.com/cerebrate"):
+            r = mcp._handle_call("cerebrate_auth_rebind",
+                                 {"username": "bob"})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(
+            r["data"]["bind_url"],
+            "https://cerebrate.example.com/cerebrate/v1/auth/bind?token=rebind-tok")
+
+    def test_rebind_failure_passthrough(self):
+        fail = {"status": "error",
+                "error": {"code": 403, "message": "admin required"}}
+        with mock.patch.object(mcp, "_request", return_value=fail):
+            r = mcp._handle_call("cerebrate_auth_rebind",
+                                 {"username": "bob"})
+        self.assertEqual(r["status"], "error")
+
+
 class RequestDynamicTokenTests(unittest.TestCase):
     """登录后同一进程内 _request 立即带 token（修复静态 token 陈旧）。"""
 

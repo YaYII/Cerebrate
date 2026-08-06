@@ -504,3 +504,25 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 
 ## 虫群记忆索引（第十四轮）
 - a314b891e70928b3 技能: Cerebrate 管理员角色隔离 — 管理端点 user token 403（修复权限BUG）（scope=project, cerebrate）
+
+---
+
+# 追加（2026-08-06 第十五轮）：重新绑定端点 rebind + 同事甲开通
+
+## 背景
+实际给「同事甲」开通时发现：他注册后从未绑定，注册时 bind_token 早已过期（30min TTL），
+而 register 对已存在用户返回 registered=false 且不生成 bind_token → **重新绑定死锁**。
+
+## 实现（git 待提交）
+- **服务端** `POST /v1/auth/rebind`（admin-only，加入 _ADMIN_ENDPOINTS）：
+  api.rebind_user 为已注册用户重新生成 bind_token（30min 有效），不重置 TOTP secret
+- **CLI**：`python3 cerebrate.py auth-rebind <username>`（需 CEREBRATE_SERVER_TOKEN=master）
+- **MCP**：cerebrate_auth_rebind（管理员用，普通用户被服务端 403 保护）
+- **测试**：test_http_permissions 新增 rebind（admin 200 / user 403 / 未注册 400）；
+  test_mcp_auth_tools 新增 rebind handler 2 例
+
+## 同事甲开通记录（真实）
+- 状态：已注册（secret 存在）、未绑定（无登录 token）
+- 生成绑定链接（公网 ngrok）：https://finale-earthworm-iciness.ngrok-free.dev/cerebrate/v1/auth/bind?token=...
+- 公网绑定页 200 含二维码 JS ✅；二维码 PNG 已生成
+- 待办：同事甲扫码 → 报 6 位码 → 登录 → 完成开通
