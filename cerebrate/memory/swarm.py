@@ -329,7 +329,7 @@ class SwarmMemory:
                              scope=scope, project_id=project_id,
                              created=now, updated=now,
                              observation_type=observation_type,
-                             life_stage=life_stage)
+                             physical_user=physical_user, life_stage=life_stage)
             # 同步元数据到 PostgreSQL
             self._sync_meta(memory_id, title=title, category=category,
                             tags=tags, source_agent=source_agent,
@@ -438,7 +438,7 @@ class SwarmMemory:
                          scope=scope, project_id=project_id,
                          created=now, updated=now,
                          observation_type=observation_type,
-                         life_stage=life_stage)
+                         physical_user=physical_user, life_stage=life_stage)
         # 同步元数据到 PostgreSQL
         self._sync_meta(memory_id, title=title, category=category,
                         tags=tags, source_agent=source_agent,
@@ -708,7 +708,8 @@ class SwarmMemory:
     def _fts_upsert(self, memory_id: str, *, title: str, content: str,
                     tags: str, category: str, scope: str, project_id: str,
                     created: str, updated: str,
-                    observation_type: str = "", life_stage: str = "memory") -> bool:
+                    observation_type: str = "", physical_user: str = "",
+                    life_stage: str = "memory") -> bool:
         """双写 FTS5（失败静默降级，不影响主写入路径）。"""
         fts = self._get_fulltext()
         if not fts or not fts.available:
@@ -718,7 +719,7 @@ class SwarmMemory:
             category=category, scope=scope, project_id=project_id,
             created=created, updated=updated,
             observation_type=observation_type or observation_type_for(category),
-            life_stage=life_stage)
+            physical_user=physical_user, life_stage=life_stage)
 
     def fulltext_query(self, query_text: str, limit: int = 20,
                        project_id: Optional[str] = None,
@@ -776,6 +777,7 @@ class SwarmMemory:
                     created=meta.get("created", ""),
                     updated=meta.get("updated", ""),
                     observation_type=meta.get("observation_type", ""),
+                    physical_user=meta.get("physical_user", ""),
                     life_stage=meta.get("life_stage", "memory"))
                 if ok:
                     indexed += 1
@@ -1023,6 +1025,7 @@ class SwarmMemory:
             "concepts": e.get("concepts", [])[:8],
             "project_id": e.get("project_id", ""),
             "source_agent": e.get("source_agent", ""),
+            "physical_user": e.get("physical_user", ""),
             "reuse_count": e.get("reuse_count", 0),
             "success_count": e.get("success_count", 0),
             "outcome": e.get("outcome", ""),
@@ -1537,6 +1540,7 @@ class SwarmMemory:
                     created=meta.get("created", ""),
                     updated=meta.get("updated", ""),
                     observation_type=meta.get("observation_type", ""),
+                    physical_user=meta.get("physical_user", ""),
                     life_stage=life_stage)
             except Exception:
                 pass

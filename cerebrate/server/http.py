@@ -256,11 +256,20 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length == 0:
-            return {}
+            return self._with_user({})
         raw = self.rfile.read(length).decode("utf-8")
         if not raw.strip():
-            return {}
-        return json.loads(raw)
+            return self._with_user({})
+        return self._with_user(json.loads(raw))
+
+    def _with_user(self, payload: dict) -> dict:
+        """把服务端认证的 user_id 注入 POST payload（_current_user）。
+        API 层以此为唯一可信身份（优先于客户端自报的 physical_user，防伪造）。"""
+        if isinstance(payload, dict):
+            uid = getattr(self, "current_user", "")
+            if uid:
+                payload["_current_user"] = uid
+        return payload
 
     def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

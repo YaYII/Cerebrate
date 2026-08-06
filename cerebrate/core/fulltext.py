@@ -82,6 +82,7 @@ class FullTextIndex:
                     category TEXT, scope TEXT, project_id TEXT,
                     created TEXT, updated TEXT,
                     observation_type TEXT,
+                    physical_user TEXT,
                     life_stage TEXT
                 )
                 """.format(meta=self._meta_table)
@@ -93,14 +94,16 @@ class FullTextIndex:
             # 迁移：旧表无 observation_type 列时补充（CREATE IF NOT EXISTS 不会加列）
             cols = [r[1] for r in conn.execute(
                 "PRAGMA table_info({meta})".format(meta=self._meta_table)).fetchall()]
-            if "observation_type" not in cols:
-                conn.execute(
-                    "ALTER TABLE {meta} ADD COLUMN observation_type TEXT".format(
-                        meta=self._meta_table))
-            if "life_stage" not in cols:
-                conn.execute(
-                    "ALTER TABLE {meta} ADD COLUMN life_stage TEXT".format(
-                        meta=self._meta_table))
+            # 幂等迁移：并发初始化时列可能已被其他实例添加，重复 ALTER 会报
+            # duplicate column，这里捕获忽略（保证任何并发下不炸）
+            for _col in ("observation_type", "physical_user", "life_stage"):
+                if _col not in cols:
+                    try:
+                        conn.execute(
+                            "ALTER TABLE {meta} ADD COLUMN {col} TEXT".format(
+                                meta=self._meta_table, col=_col))
+                    except sqlite3.OperationalError:
+                        pass
             conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -111,7 +114,8 @@ class FullTextIndex:
     def upsert(self, doc_id: str, *, title: str = "", content: str = "",
                tags: str = "", category: str = "", scope: str = "general",
                project_id: str = "", created: str = "", updated: str = "",
-               observation_type: str = "", life_stage: str = "memory") -> bool:
+               observation_type: str = "", physical_user: str = "",
+               life_stage: str = "memory") -> bool:
         """写入/更新一条记忆的全文索引。"""
         if not self._ready or not doc_id:
             return False
@@ -126,19 +130,20 @@ class FullTextIndex:
                     (title, content, tags, category, scope, project_id, doc_id))
                 conn.execute(
                     """
-                    INSERT INTO {meta}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type, life_stage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO {meta}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type, physical_user, life_stage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(doc_id) DO UPDATE SET
                         title=excluded.title, content=excluded.content,
                         tags=excluded.tags, category=excluded.category,
                         scope=excluded.scope, project_id=excluded.project_id,
                         created=excluded.created, updated=excluded.updated,
                         observation_type=excluded.observation_type,
+                        physical_user=excluded.physical_user,
                         life_stage=excluded.life_stage
                     """.format(meta=self._meta_table),
                     (doc_id, title, content, tags, category, scope,
                      project_id, created, updated, observation_type,
-                     life_stage))
+                     physical_user, life_stage))
                 conn.commit()
             return True
         except Exception as e:
@@ -211,6 +216,7 @@ class FullTextIndex:
                     sql = (
                         "SELECT f.doc_id, m.title, m.category, m.scope, "
                         "m.project_id, m.created, m.observation_type, "
+                        "m.physical_user, "
                         "length(m.content) AS content_len, "
                         "snippet({fts}, 1, '[', ']', '…', 12) AS snippet "
                         "FROM {fts} f "
@@ -227,7 +233,7 @@ class FullTextIndex:
                 if len(rows) < limit:
                     sql = (
                         "SELECT doc_id, title, category, scope, project_id, created, "
-                        "observation_type, "
+                        "observation_type, physical_user, "
                         "length(content) AS content_len, '' AS snippet "
                         "FROM {meta} "
                         "WHERE (title LIKE ? OR content LIKE ?)" +
@@ -256,6 +262,7 @@ class FullTextIndex:
                         "project_id": r["project_id"],
                         "created": r["created"],
                         "observation_type": r["observation_type"] or "",
+                        "physical_user": r["physical_user"] or "",
                         "token_estimate": max(1, int((r["content_len"] or 0) // 4)),
                         "source": "fulltext",
                         "snippet": r["snippet"] or "",
@@ -293,7 +300,7 @@ class FullTextIndex:
             with self._conn() as conn:
                 rows = conn.execute(
                     "SELECT doc_id, title, category, scope, project_id, created, "
-                    "observation_type, length(content) AS content_len "
+                    "observation_type, physical_user, length(content) AS content_len "
                     "FROM {meta} m WHERE 1=1".format(meta=self._meta_table)
                     + scope_cond + " ORDER BY created DESC LIMIT ?",
                     (limit,)).fetchall()

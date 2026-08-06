@@ -32,6 +32,16 @@ class BrainAPI:
 
     CLIENT_LIFE_STAGES = {"nutrient", "memory"}
 
+    @staticmethod
+    def _prioritize_own(items: list[dict], user: str) -> list[dict]:
+        """查询优先自己的记忆：owner==user 的条目排到前面（保持原相对顺序）。
+        避免被其他人的记忆影响，同时保留共享读取。"""
+        if not user or not items:
+            return items
+        mine = [r for r in items if (r.get("physical_user") or "").strip() == user]
+        others = [r for r in items if (r.get("physical_user") or "").strip() != user]
+        return mine + others
+
     def __init__(self, manager: Optional[MemoryManager] = None,
                  events: Optional[EventLog] = None):
         self.mm = manager or get_manager()
@@ -225,6 +235,8 @@ class BrainAPI:
         if best:
             all_matches.append(best)
         all_matches.extend(related)
+        # 查询优先自己的记忆（服务端认证身份）
+        all_matches = self._prioritize_own(all_matches, payload.get("_current_user", ""))
         recommendation = "new_experience"
         task = None
         if best:
@@ -347,6 +359,8 @@ class BrainAPI:
         else:
             index = vec_results
 
+        # 查询优先自己的记忆（服务端认证身份）
+        index = self._prioritize_own(index, payload.get("_current_user", ""))
         self.events.append("memory.searched", agent_id,
                            {"query": query, "matches": len(index)},
                            project_id or "")
@@ -864,8 +878,12 @@ class BrainAPI:
 
         source_agent = payload.get("agent") or payload.get(
             "agent_id") or "unknown"
-        # ── 安全溯源：从 agent 注册表获取物理用户身份 ──
-        physical_user = payload.get("physical_user") or self.mm.agents.get_physical_user(source_agent) or ""
+        # ── 安全溯源：owner 以服务端认证身份为准（_current_user 由 HTTP 鉴权注入，
+        #    防客户端伪造 physical_user）；未登录时回退到客户端自报（旧客户端兼容）──
+        physical_user = (payload.get("_current_user") or ""
+                         or payload.get("physical_user")
+                         or self.mm.agents.get_physical_user(source_agent)
+                         or "")
         if not physical_user:
             raise ValueError("physical_user is required for security traceability; memory write rejected")
         # ── 血缘关系：处理 supersedes 参数（字符串或列表） ──
