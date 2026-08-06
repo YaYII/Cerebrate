@@ -15,7 +15,7 @@ import json
 from cerebrate.protocol import ok
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
-SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.0.1"}
+SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.0.2"}
 
 
 # ── 工具定义（JSON Schema，与 mcp.py / mcp.js 一致）─────────

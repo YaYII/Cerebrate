@@ -20,6 +20,7 @@ const http = require("http");
 const https = require("https");
 const crypto = require("crypto");
 const readline = require("readline");
+const child_process = require("child_process");
 
 // ── 配置 ────────────────────────────────────────────────────
 // npm 全局/npx 安装后脚本位于 node_modules 缓存目录（不可写），
@@ -198,6 +199,196 @@ function extractEntities(text, known) {
   return Array.from(seen.values()).sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
 }
 
+// ── 本地代码分析（harvest，零依赖轻量解析器）────────────────
+// 产出结构与 Python 版 code_harvest.harvest_project 兼容；
+// 代码不离开本地，只把结构 push 给脑虫（业务画像真实骨架）。
+const HARVEST_SKIP_DIRS = new Set([
+  ".git", "__pycache__", ".venv", "venv", "node_modules", "vendor",
+  "dist", "build", ".codex", ".qoder", ".claude", "data", "profiles",
+  "harvest", "context", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+  "tests", "test", "docs_build",
+]);
+const HARVEST_SKIP_FILES = new Set([
+  "__init__.py", "setup.py", "conftest.py",
+  ".env", ".env.example", ".env.local",
+]);
+
+function harvestGitBranch(root) {
+  try {
+    const out = child_process
+      .execSync("git rev-parse --abbrev-ref HEAD", {
+        cwd: root, encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+      })
+      .trim();
+    return (out && out !== "HEAD" ? out : "master").replace(/[^0-9a-zA-Z._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "default";
+  } catch (e) {
+    return "default";
+  }
+}
+
+function parsePythonFile(text, fileRel) {
+  const classes = [], functions = [], endpoints = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const cm = line.match(/^\s*class\s+(\w+)/);
+    if (cm) {
+      const prev = (lines[i - 1] || "").trim();
+      const isData = /@dataclass/.test(prev);
+      classes.push({ name: cm[1], kind: isData ? "data_model" : "class", fields: [], file: fileRel, doc: "" });
+      continue;
+    }
+    const dm = line.match(/^\s*(?:async\s+)?def\s+(\w+)\s*\(/);
+    if (dm) {
+      functions.push({ name: dm[1], file: fileRel, doc: "" });
+      continue;
+    }
+    // 端点：@app.route("@app.get("/x") 等装饰器（下一行是 def 时）
+    const ed = line.match(/^\s*@[\w.]+\.(route|get|post|put|delete|patch)\(\s*["']([^"']+)["']/);
+    if (ed) {
+      const next = (lines[i + 1] || "").match(/^\s*(?:async\s+)?def\s+(\w+)/);
+      const method = ed[1].toUpperCase();
+      endpoints.push({ method: method === "ROUTE" ? "ANY" : method, path: ed[2], handler: next ? next[1] : "handler", file: fileRel });
+    }
+  }
+  // Cerebrate http.py 风格: if method == "POST" and path == "/v1/xxx":
+  for (const m of text.matchAll(/path\s*==\s*["'](\/v\d\/[^"']+)["']/g)) {
+    endpoints.push({ method: "HTTP", path: m[1], handler: "dispatch", file: fileRel });
+  }
+  return { classes: classes.slice(0, 80), functions: functions.slice(0, 80), endpoints: endpoints.slice(0, 50) };
+}
+
+function parseGenericFile(text, fileRel) {
+  const classes = [], functions = [], endpoints = [];
+  for (const m of text.matchAll(/^\s*(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/gm)) {
+    classes.push({ name: m[1], kind: "class", fields: [], file: fileRel, doc: "" });
+  }
+  for (const m of text.matchAll(/^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm)) {
+    functions.push({ name: m[1], file: fileRel, doc: "" });
+  }
+  // JS/Express 风格端点: app.get("/x", ...) / router.post
+  for (const m of text.matchAll(/(?:app|router|route)\.(get|post|put|delete|patch)\(\s*["']([^"']+)["']/g)) {
+    endpoints.push({ method: m[1].toUpperCase(), path: m[2], handler: "handler", file: fileRel });
+  }
+  return { classes: classes.slice(0, 80), functions: functions.slice(0, 80), endpoints: endpoints.slice(0, 50) };
+}
+
+function parseJavaFile(text, fileRel) {
+  const classes = [], functions = [], endpoints = [];
+  for (const m of text.matchAll(/(?:public\s+|private\s+|protected\s+)?(?:abstract\s+)?(?:class|interface|enum|record)\s+(\w+)/g)) {
+    classes.push({ name: m[1], kind: "class", fields: [], file: fileRel, doc: "" });
+  }
+  for (const m of text.matchAll(/(?:public|private|protected)\s+(?:static\s+)?[\w<>\[\],\s]+\s+(\w+)\s*\(/g)) {
+    functions.push({ name: m[1], file: fileRel, doc: "" });
+  }
+  for (const m of text.matchAll(/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\(\s*["']([^"']+)["']/g)) {
+    endpoints.push({ method: "HTTP", path: m[1], handler: "spring-mapping", file: fileRel });
+  }
+  return { classes: classes.slice(0, 80), functions: functions.slice(0, 80), endpoints: endpoints.slice(0, 50) };
+}
+
+function parsePhpFile(text, fileRel) {
+  const classes = [], functions = [], endpoints = [];
+  for (const m of text.matchAll(/^\s*class\s+(\w+)/gm)) {
+    classes.push({ name: m[1], kind: "class", fields: [], file: fileRel, doc: "" });
+  }
+  for (const m of text.matchAll(/^\s*function\s+(\w+)\s*\(/gm)) {
+    functions.push({ name: m[1], file: fileRel, doc: "" });
+  }
+  return { classes: classes.slice(0, 80), functions: functions.slice(0, 80), endpoints: endpoints.slice(0, 50) };
+}
+
+function parseTextFile(fileRel) {
+  return { classes: [], functions: [], endpoints: [], title: fileRel.split("/").pop() };
+}
+
+function harvestProjectLocal(rootArg, projectId, exts) {
+  const root = path.resolve(rootArg);
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    throw new Error("目录不存在: " + root);
+  }
+  const modules = [], dataModels = [], endpoints = [];
+  let fileCount = 0;
+  const extSet = exts && exts.length ? new Set(exts.map((e) => (e.startsWith(".") ? e : "." + e))) : null;
+
+  const walk = (dir, depth) => {
+    if (depth > 12) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+      return;
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      const rel = path.relative(root, full).split(path.sep);
+      if (ent.isDirectory()) {
+        if (HARVEST_SKIP_DIRS.has(ent.name) || rel.some((p) => HARVEST_SKIP_DIRS.has(p))) continue;
+        walk(full, depth + 1);
+      } else if (ent.isFile()) {
+        if (HARVEST_SKIP_FILES.has(ent.name)) continue;
+        if (extSet && !extSet.has(path.extname(ent.name))) continue;
+        if (fileCount >= 2000) return;
+        fileCount++;
+        const fileRel = rel.join("/");
+        let info = null;
+        try {
+          const raw = fs.readFileSync(full);
+          if (raw.includes(0)) continue; // 二进制跳过
+          const text = raw.toString("utf8").slice(0, 200000);
+          const ext = path.extname(ent.name).toLowerCase();
+          if (ext === ".py") info = parsePythonFile(text, fileRel);
+          else if (ext === ".js" || ext === ".ts" || ext === ".jsx" || ext === ".tsx") info = parseGenericFile(text, fileRel);
+          else if (ext === ".java" || ext === ".kt") info = parseJavaFile(text, fileRel);
+          else if (ext === ".php") info = parsePhpFile(text, fileRel);
+          else info = parseTextFile(fileRel);
+        } catch (e) {
+          continue;
+        }
+        if (!info) continue;
+        modules.push({
+          path: fileRel,
+          module: path.basename(ent.name, path.extname(ent.name)),
+          classes: info.classes.map((c) => c.name),
+          functions: info.functions.map((f) => f.name),
+        });
+        for (const c of info.classes) {
+          if (c.kind === "data_model") {
+            dataModels.push({ name: c.name, fields: c.fields, file: c.file });
+          }
+        }
+        for (const ep of info.endpoints) endpoints.push(ep);
+      }
+    }
+  };
+  walk(root, 0);
+
+  // 端点去重
+  const seen = new Set();
+  const uniqEndpoints = endpoints.filter((ep) => {
+    const key = ep.method + ep.path;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    project_id: projectId,
+    root,
+    harvested_at: new Date().toISOString(),
+    files_scanned: fileCount,
+    modules,
+    data_models: dataModels,
+    endpoints: uniqEndpoints.slice(0, 300),
+    stats: {
+      files: fileCount,
+      modules: modules.length,
+      data_models: dataModels.length,
+      endpoints: uniqEndpoints.length,
+    },
+  };
+}
+
 // ── 工具定义（33 个，与 Python 版一致）──────────────────────
 const TOOLS = [
   { name: "cerebrate_sense", description: "【会话开始必须调用】感知虫群脑状态，返回健康状态、记忆总数、代理数、warnings。", inputSchema: { type: "object", properties: {} } },
@@ -347,7 +538,19 @@ async function handleCall(name, args) {
         if (!args.dir) return await httpRequest("POST", "/v1/project/harvest", {
           project: args.project || "", dir: "",
         }, effectiveToken());
-        return { status: "error", error: { code: 400, message: "Node 版不支持本地 harvest（请用 Python 版或 Docker 版）" } };
+        try {
+          const harvest = harvestProjectLocal(
+            args.dir, args.project || "",
+            Array.isArray(args.exts) ? args.exts : null);
+          return await httpRequest("POST", "/v1/harvest/push", {
+            project: args.project || "",
+            branch: harvestGitBranch(path.resolve(args.dir)),
+            harvest,
+            auto_profile: true,
+          }, effectiveToken());
+        } catch (e) {
+          return { status: "error", error: { code: 400, message: "harvest 失败: " + (e.message || e) } };
+        }
       }
       case "cerebrate_project_work": return await httpRequest("POST", "/v1/project/work", {
         project: args.project || "", action: args.action || "list", branch: args.branch || "",
@@ -446,7 +649,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.0.1" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.0.2" },
       } });
     } else if (method === "ping") {
       send({ jsonrpc: "2.0", id, result: {} });
@@ -501,7 +704,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.0.1");
+    console.log("5.0.2");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
