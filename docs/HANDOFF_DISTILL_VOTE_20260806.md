@@ -501,3 +501,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - 真实容器验证：user token 调 auth/users/soul/set/distill/evolve/answer/logs 全部 **403** ✅；
   sense 200 ✅；master token auth/users/soul/set 200 ✅；propose 长内容 200 ✅
 - 灵魂已恢复（含「铁律」「工程化思维」，souls=1）；测试用户已清理（现存 as-workstation01、同事甲）
+
+## 虫群记忆索引（第十四轮）
+- a314b891e70928b3 技能: Cerebrate 管理员角色隔离 — 管理端点 user token 403（修复权限BUG）（scope=project, cerebrate）
