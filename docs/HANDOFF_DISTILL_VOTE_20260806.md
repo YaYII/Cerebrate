@@ -851,3 +851,29 @@ stdio sense 真实调用（1472 条记忆 healthy）
 - 容器 healthy；MCP initialize（本地+公网）均 5.0.1
 - meta.protocol 仍 v5（无破坏）；sense ok healthy
 - /v1/status 无 token 401 是生产预期行为（需 Bearer）
+
+---
+
+# 追加（2026-08-06 第二十三轮）：操作手册更新（npm 标准安装 + 版本升级流程）
+
+## 用户要求（2026-08-06）
+1. 确认是否同步到远程服务
+2. 操作手册是否写清楚
+
+## 核实结果
+- 远程同步确认：本地 master = 远程 origin/master（f45728c 已同步，工作区干净）
+- **发现操作手册落后**：MCP_GUIDE.md 仍写旧一键安装（curl + install.sh）、Python 依赖描述；
+  DEPLOY.md 构建段未标注镜像 tag 与版本升级流程
+
+## 交付（git f2ae5a1，已 push）
+- docs/MCP_GUIDE.md（同事操作手册）：一键安装改为 **npm install -g cerebrate-mcp + cerebrate-mcp setup**；
+  客户端配置改为 HTTP 标准接入（claude mcp add --transport http）+ stdio npx；标注版本 5.0.1
+- docs/DEPLOY.md：构建段标注镜像 tag cerebrate:5.0.1、协议 v5 不变说明、版本升级流程（5 处同步清单）
+
+## 操作手册索引（给同事/下一个 AI）
+| 文档 | 用途 |
+|---|---|
+| docs/MCP_GUIDE.md | 同事安装/配置 MCP（npm + setup）|
+| docs/DEPLOY.md | 服务端部署/升级/版本统一 |
+| docs/HANDOFF_DISTILL_VOTE_20260806.md | 全量交接记录 |
+| README.md（npm 包内） | 同事 npm 安装指引 |
