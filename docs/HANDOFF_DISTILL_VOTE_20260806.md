@@ -528,3 +528,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - ✅ **开通完成（2026-08-06）**：同事甲扫码报码 878962 → 登录 200 → /v1/auth/me role=user →
   /v1/sense healthy（1459 条）→ tokens.json 已存同事甲 token（绑定成功）
 - 同事甲 user token 已记入 ~/.codex/private_notes.md（唯一凭证，转交同事甲本地保存）
+
+## 虫群记忆索引（第十五轮）
+- 9b3f066c33ff7484 技能: Cerebrate rebind 重新绑定端点 + 同事甲真实开通全流程（scope=project, cerebrate）
