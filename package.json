@@ -1,0 +1,32 @@
+{
+  "name": "cerebrate-mcp",
+  "version": "5.0.0",
+  "description": "Cerebrate 脑虫记忆系统 MCP Server (Node.js) — 团队长期记忆 + 业务画像 + 本地实体化，零依赖",
+  "main": "mcp.js",
+  "bin": {
+    "cerebrate-mcp": "mcp.js"
+  },
+  "files": [
+    "mcp.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "cerebrate",
+    "swarm",
+    "knowledge",
+    "ai",
+    "llm",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YaYII/Cerebrate.git"
+  },
+  "author": "YaYII"
+}

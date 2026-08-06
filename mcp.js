@@ -22,9 +22,12 @@ const crypto = require("crypto");
 const readline = require("readline");
 
 // ── 配置 ────────────────────────────────────────────────────
-const SCRIPT_DIR = __dirname;
+// npm 全局/npx 安装后脚本位于 node_modules 缓存目录（不可写），
+// env 配置文件统一放到用户主目录 ~/.cerebrate-mcp/cerebrate.env
+// （与 install-mcp.sh 的 INSTALL_DIR 一致；CEREBRATE_MCP_ENV 可覆盖）。
 const MCP_ENV_FILE =
-  process.env.CEREBRATE_MCP_ENV || path.join(SCRIPT_DIR, "cerebrate.env");
+  process.env.CEREBRATE_MCP_ENV ||
+  path.join(os.homedir(), ".cerebrate-mcp", "cerebrate.env");
 
 function loadEnvFile() {
   try {
@@ -462,10 +465,69 @@ function runMcp() {
   });
 }
 
-// ── CLI（login / logout / status）──────────────────────────
+// ── CLI（setup / login / logout / status）──────────────────
+
+function writeEnvConfig(url, token) {
+  const dir = path.dirname(MCP_ENV_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  const lines = [
+    "# Cerebrate MCP 本地配置（setup 生成，chmod 600）",
+    "# 格式: KEY=VALUE；环境变量优先于此文件",
+    "CEREBRATE_SERVER_URL=" + url,
+  ];
+  if (token) lines.push("CEREBRATE_SERVER_TOKEN=" + token);
+  fs.writeFileSync(MCP_ENV_FILE, lines.join("\n") + "\n", "utf8");
+  try { fs.chmodSync(MCP_ENV_FILE, 0o600); } catch (e) {}
+  console.log("\n✓ 已保存配置: " + MCP_ENV_FILE);
+  console.log("  服务地址: " + url);
+  console.log("  token: " + (token ? "已配置" : "未配置（只读接口可用）") + "\n");
+  console.log("── 复制下面对应客户端的配置到你的工具 ──");
+  console.log("\n【Claude Code】（HTTP 标准接入，推荐）");
+  console.log(`claude mcp add --transport http cerebrate ${url}/v1/mcp \\`);
+  console.log(`  --header "Authorization: Bearer ${token || "<你的token>"}"`);
+  console.log("\n【Codex】（config.toml）");
+  console.log(`[mcp_servers.cerebrate]`);
+  console.log(`url = "${url}/v1/mcp"`);
+  if (token) console.log(`# token 走环境变量 CEREBRATE_SERVER_TOKEN=${token}`);
+  console.log("\n【stdio 客户端（Qoder/opencode/Trae）】");
+  console.log("命令: npx -y cerebrate-mcp");
+  if (token) console.log("环境变量: CEREBRATE_SERVER_URL=" + url);
+  console.log("           CEREBRATE_SERVER_TOKEN=" + (token || "<你的token>"));
+  console.log("\n完成后重启 AI 客户端，对话先调用 cerebrate_sense 即可。");
+}
+
 function cli(argv) {
   const cmd = argv[2];
-  if (cmd === "login") {
+  if (cmd === "setup") {
+    let urlArg = "", tokenArg = "";
+    for (let i = 3; i < argv.length; i++) {
+      if (argv[i] === "--url") urlArg = argv[++i] || "";
+      if (argv[i] === "--token") tokenArg = argv[++i] || "";
+    }
+    if (urlArg) {
+      // 非交互：setup --url <url> [--token <token>]（脚本/CI 友好）
+      writeEnvConfig(urlArg.replace(/\/+$/, ""), tokenArg);
+      return;
+    }
+    // 交互引导：URL + token → 写 ~/.cerebrate-mcp/cerebrate.env → 打印配置片段
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    const ask = (q, def) =>
+      new Promise((res) => rl.question(q + (def ? ` [${def}]` : "") + ": ", res));
+    (async () => {
+      const urlRaw = (await ask("脑虫服务地址 (URL)")).trim();
+      const url = (urlRaw || ENV_FILE.CEREBRATE_SERVER_URL || "").replace(/\/+$/, "");
+      const token = (await ask("你的 user token（唯一凭证；留空=只读）")).trim();
+      if (!url) {
+        console.log("✗ 未提供服务地址，退出");
+        process.exit(1);
+      }
+      writeEnvConfig(url, token);
+      rl.close();
+    })();
+  } else if (cmd === "login") {
     let username = "", code = "";
     for (let i = 3; i < argv.length; i++) {
       if (argv[i] === "--username") username = argv[++i] || "";
@@ -490,13 +552,14 @@ function cli(argv) {
   } else {
     console.log("Cerebrate MCP v5 (Node) — 用法:");
     console.log("  node mcp.js                 # 作为 MCP server（stdio）运行");
+    console.log("  node mcp.js setup           # 首次配置（URL + token，自动打印各客户端配置）");
     console.log("  node mcp.js login           # 用户名 + Authenticator 码登录");
     console.log("  node mcp.js logout|status   # 登出 / 查看状态");
   }
 }
 
 if (require.main === module) {
-  if (process.argv.length > 2 && ["login", "logout", "status"].includes(process.argv[2])) {
+  if (process.argv.length > 2 && ["setup", "login", "logout", "status"].includes(process.argv[2])) {
     cli(process.argv);
   } else {
     runMcp();
