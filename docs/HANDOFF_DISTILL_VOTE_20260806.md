@@ -336,3 +336,6 @@ B 级历史脚本归档 docs/archive/（保留可追溯）：
 - 实体抽取当前为规则级；后续可选 LLM 实体抽取增强（需 CEREBRATE_TEST_LLM 约定）
 - Mem0 其余借鉴（时序推理/多信号融合）仍搁置（P3）
 - 本次新增代码文件：cerebrate/entity.py；改动：mcp.py / config.py / origin.py / scheduler.py / tests/*
+
+## 虫群记忆索引（第十轮）
+- 523e2f03b9e018e9 技能: Cerebrate 第十轮 P1 — MCP登录流程 / 归档防删 / 实体本地MCP（scope=project, cerebrate）
