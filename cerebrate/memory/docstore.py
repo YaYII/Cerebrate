@@ -326,21 +326,6 @@ class DocumentStore:
                         ids.add(fname[:-5])
         return sorted(ids)
 
-    def find_by_title(self, title_keyword: str) -> list[dict]:
-        keyword = title_keyword.lower()
-        results = []
-        for slug, entry in self._title_index.items():
-            if keyword in entry.get("title", "").lower() or keyword in slug:
-                results.append(entry)
-        return results
-
-    def list_by_type(self, doc_type: str) -> list[dict]:
-        """列出指定类型的所有条目。"""
-        return [
-            v for v in self._title_index.values()
-            if v.get("type") == doc_type
-        ]
-
     # ═══════════════════════════════════════════════
     # 内部方法
     # ═══════════════════════════════════════════════

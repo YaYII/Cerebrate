@@ -151,17 +151,6 @@ class CerebrateMind:
         self.state["confidence"] = min(1.0, self.state["confidence"] + 0.02)
         self._save_state()
 
-    def set_focus(self, topic: str):
-        self.state["focus"] = topic
-        self.state["mood"] = "learning"
-        self._save_state()
-
-    def report_action(self, action: str):
-        self.state["last_action"] = action
-        self.state["mood"] = "ready"
-        self._save_state()
-
-
 class Metacognition:
     """元认知：反思自身思维过程，检测偏见，提出改进"""
 
@@ -302,9 +291,3 @@ class Metacognition:
                     f"智能体 '{agent}' 贡献了 {info['contributions']/max(total, 1):.0%} 的记忆，存在单一来源偏见")
 
         return biases
-
-    def suggest_improvement(self) -> str:
-        assessment = self.assess()
-        if assessment["recommendations"]:
-            return assessment["recommendations"][0]
-        return "系统运行良好，继续积累战斗经验"

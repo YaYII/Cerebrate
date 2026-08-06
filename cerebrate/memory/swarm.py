@@ -1312,15 +1312,6 @@ class SwarmMemory:
                 result["by_project"][pid] = result["by_project"].get(pid, 0) + 1
         return result
 
-    def list_tags(self) -> list[str]:
-        metadatas = self._store.get_all_metadata(limit=1000)
-        tagset = set()
-        for meta in metadatas:
-            for t in _safe_split(meta.get("tags")):
-                if t.strip():
-                    tagset.add(t.strip())
-        return list(tagset)
-
     def get_memory(self, memory_id: str) -> Optional[dict]:
         item = self._store.get(memory_id)
         if item:

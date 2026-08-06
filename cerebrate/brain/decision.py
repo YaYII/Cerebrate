@@ -103,36 +103,6 @@ class DecisionRouter:
 
         return result
 
-    def quick_query(self, user_id: str, query: str) -> str:
-        """快速查询 - 直接获取最佳答案"""
-        result = self.decide(user_id, query)
-
-        parts = []
-
-        # 虫群经验
-        best = result["swarm_knowledge"].get("best_match")
-        if best:
-            parts.append(f"【虫群经验】{best.get('solution', best.get('content', ''))[:500]}"
-                         f"\n(来源: {best.get('source_agent', '虫群')}, "
-                         f"复用: {best.get('reuse_count', 0)}次, "
-                         f"结果: {best.get('outcome', 'unknown')})")
-
-        # 权威知识
-        if result["policy_result"]:
-            parts.append(f"【权威依据】{result['policy_result']['content'][:500]}"
-                         f"\n(来源: {result['policy_result']['source']})")
-
-        # 个性化包装
-        tone_info = result["personal_tone"]
-        greeting = ""
-        if tone_info.get("name"):
-            greeting = f"{tone_info['name']}，"
-
-        response = f"{greeting}{' '.join(parts)}" if parts else "未找到相关记忆，这是新领域。"
-
-        self.mm.log_query(user_id, query, "quick", len(parts))
-        return response
-
     def _is_policy_query(self, query: str, context: dict) -> bool:
         """判断是否涉及政策/规则查询"""
         policy_keywords = [

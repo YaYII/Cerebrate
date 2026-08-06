@@ -428,54 +428,6 @@ class CerebrateLLM:
             pass
         return self._rule_extract_lesson(problem, original_memory, outcome, feedback)
 
-    def suggest_tags(self, content: str) -> list[str]:
-        """自动生成标签"""
-        if self.is_available() and self._sdk_ready():
-            llm_tags = self._llm_suggest_tags(content)
-            if llm_tags:
-                return llm_tags
-        return self._rule_validate(content, "").get("suggested_tags", [])
-
-    def _llm_suggest_tags(self, content: str) -> Optional[list[str]]:
-        client = self._get_client()
-        if not client:
-            return None
-
-        prompt = f"""你是编程知识库的管理员（Knowledge Curator）。
-为以下编程相关内容推荐分类标签，帮助其他智能体快速检索到它：
-
-{content[:2000]}
-
-要求:
-- 3-5 个英文标签，小写，单个词或连字符
-- 第一个标签反映技术栈/语言（如 python、docker、react）
-- 第二个标签反映问题类型（如 bug、setup、performance）
-- 其余标签补充关键上下文
-
-返回 JSON: {{"tags": ["tag1", "tag2", "tag3"]}}，不要其他文字。"""
-
-        try:
-            kwargs = {
-                "model": self._model,
-                "max_tokens": 100,
-                "temperature": 0.1,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            if self._provider == "anthropic":
-                response = client.messages.create(**kwargs)
-                text = response.content[0].text if response.content else ""
-            else:
-                response = client.chat.completions.create(**kwargs)
-                text = response.choices[0].message.content
-
-            match = re.search(r'\{[\s\S]*\}', text)
-            if match:
-                result = json.loads(match.group())
-                return result.get("tags", [])
-        except Exception:
-            pass
-        return None
-
     # ==================== 结构化字段增强（Phase 4） ====================
 
     def compress_title(self, title: str, content: str = "") -> str:
@@ -908,48 +860,6 @@ class CerebrateLLM:
         if not self.is_available() or not self._sdk_ready():
             return None
         return self.chain_distill_knowledge(memories, topic)
-
-    def detect_conflicts(self, text_a: str, text_b: str) -> Optional[str]:
-        """检测两段知识是否存在矛盾"""
-        if not self.is_available() or not self._sdk_ready():
-            return None
-        client = self._get_client()
-        if not client:
-            return None
-
-        prompt = f"""判断以下两段编程知识是否存在矛盾:
-
-A: {text_a[:1500]}
-
-B: {text_b[:1500]}
-
-如果存在矛盾，返回 JSON: {{"conflict": true, "description": "矛盾描述"}}
-如果不存在矛盾，返回: {{"conflict": false}}
-
-只返回 JSON。"""
-
-        try:
-            kwargs = {
-                "model": self._model,
-                "max_tokens": 200,
-                "temperature": 0,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            if self._provider == "anthropic":
-                response = client.messages.create(**kwargs)
-                text = response.content[0].text if response.content else ""
-            else:
-                response = client.chat.completions.create(**kwargs)
-                text = response.choices[0].message.content
-
-            match = re.search(r'\{[\s\S]*\}', text)
-            if match:
-                result = json.loads(match.group())
-                if result.get("conflict"):
-                    return result.get("description", "检测到知识冲突")
-        except Exception:
-            pass
-        return None
 
     def filter_relevant(self, query: str, title: str, content: str) -> dict:
         """判断一段内容是否与查询相关

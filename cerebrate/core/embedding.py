@@ -168,26 +168,6 @@ class EmbeddingEngine:
                 _query_cache.popitem(last=False)
         return result
 
-    def encode_document(self, text: str, max_length: Optional[int] = None) -> list[float]:
-        """编码文档文本（线程安全）"""
-        with _encode_lock:
-            if self._mode == "bge" and self._model:
-                effective_max = max_length or self._max_length
-                # 检查截断
-                token_count = len(self._model.tokenizer.encode(text)) if hasattr(self._model, 'tokenizer') else len(text)
-                if token_count > effective_max:
-                    logger.warning(
-                        f"文档文本超过模型最大长度 "
-                        f"({token_count} > {effective_max} tokens)，将截断"
-                    )
-                emb = self._model.encode(
-                    text,
-                    normalize_embeddings=True,
-                    show_progress_bar=False,
-                )
-                return emb.tolist()
-            return self._hash_encode(text)
-
     def _hash_encode(self, text: str) -> list[float]:
         """确定性特征哈希向量，保证无网络时 Chroma 仍可查询。"""
         vector = [0.0] * self._dimension

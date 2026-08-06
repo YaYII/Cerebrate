@@ -224,12 +224,6 @@ class MemoryManager:
                                    "feedback": feedback})
         return record
 
-    def get_swarm_stats(self) -> dict:
-        return self.swarm.get_stats()
-
-    def get_swarm_categories(self) -> list[str]:
-        return self.swarm.list_categories()
-
     def get_swarm_memory(self, memory_id: str) -> Optional[dict]:
         return self.swarm.get_memory(memory_id)
 

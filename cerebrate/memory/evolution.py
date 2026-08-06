@@ -492,9 +492,6 @@ class EvolutionEngine:
 
         return conflicts
 
-    def get_history(self, limit: int = 10) -> list[dict]:
-        return self._history[-limit:]
-
     def get_last_evolution_time(self) -> Optional[str]:
         if self._history:
             return self._history[-1].get("timestamp")
