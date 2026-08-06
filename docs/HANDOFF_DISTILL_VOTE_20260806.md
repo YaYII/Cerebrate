@@ -566,3 +566,6 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/YaYII/Cerebrate/master/s
 1. 管理员：注册/rebind 生成账号 + 提供 URL 和 user token（如同事甲已开通）
 2. 同事：执行上面 curl 安装命令（填自己的 URL + token）
 3. 同事：粘贴脚本输出的配置片段到 AI 客户端 → 重启 → 对话先调 cerebrate_sense
+
+## 虫群记忆索引（第十六轮）
+- b311c061995c4a70 技能: Cerebrate MCP 交付 — 同事一键安装脚本 + 功能文档 + env文件配置（scope=project, cerebrate）
