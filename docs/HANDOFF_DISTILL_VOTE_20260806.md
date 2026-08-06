@@ -726,3 +726,35 @@ cerebrate-mcp setup --url https://<域名>/cerebrate --token <user token>
 - 发布需用户 npm 账号（本机未登录，无凭据，不能代办发布）
 - 首次发布后版本升级：改 package.json version → npm publish
 - ngrok 域名变化时同事只需重跑 setup --url 更新 env
+
+---
+
+# 追加（2026-08-06 第十九轮补充）：npm 发布成功 cerebrate-mcp@5.0.0
+
+## 发布结果
+- **cerebrate-mcp@5.0.0 已发布到 npm registry**（https://registry.npmjs.org/cerebrate-mcp）
+- 发布账号：**yangying1991**（granular token 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，
+  bypass 2FA；token 在 private_notes.md）
+- 版本升级：改 package.json version → npm publish（~/.npmrc 已配置 token）
+
+## npm 发布踩坑（2026-08-06，重要）
+1. npm 10+ 强制 Web OAuth 登录（CLI 密码直登被禁）：`npm login` 会打印一次性授权 URL，
+   需浏览器打开完成授权；授权后 `npm whoami` 验证
+2. npm 新策略：**发布必须 2FA 或 granular token with bypass 2FA**；Web login 产生的
+   token 发布仍会 403（E403 two-factor authentication required）
+3. **Granular Access Token 创建**：选「Only select packages and scopes」（不是组织），
+   添加 cerebrate-mcp 包、权限 Read and write、勾选 Bypass 2FA
+4. 用户误把 2FA 恢复码（64 位 hex）当 token 发来——恢复码不能用于发布（全部 401）
+5. 真正可用的 token 是 `npm_` 开头（granular）；发布账号可能 ≠ 登录账号（whoami 为准）
+
+## 同事安装（已验证全链路）
+```bash
+npm install -g cerebrate-mcp        # 或 npx -y cerebrate-mcp
+cerebrate-mcp setup --url https://<域名>/cerebrate --token <user token>
+# 复制输出的 Claude Code / Codex / stdio 配置片段 → 粘贴到工具 → 重启即用
+```
+验证证据：registry latest 端点正常、npm install 成功、setup 写 env + 打印配置、
+stdio sense 真实调用（1472 条记忆 healthy）
+
+## 虫群记忆索引（第十九轮补充）
+- 待提交：技能「Cerebrate MCP npm 发布」（含 npm 10 登录/2FA/发布踩坑）
