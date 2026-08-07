@@ -220,13 +220,19 @@ class SwarmMemory:
               observation_type: str = "",
               facts: Optional[list[str]] = None,
               concepts: Optional[list[str]] = None,
-              knowledge_type: str = "") -> str:
+              knowledge_type: str = "",
+              skill_fields: Optional[dict] = None) -> str:
         """向虫群共享记忆
 
         架构:
           1. 完整内容（content/problem_solved/solution）写入 DocumentStore
           2. 仅运营元数据（title/category/tags/lifecycle）写入 ChromaDB 索引
           3. 长文档自动分块，每块独立向量化，共享 doc_group_id
+
+        skill_fields（v5.6，借鉴 TencentDB Agent Memory）:
+          可选结构化技能字段（SKILL.md frontmatter 解析产物）:
+          name / description / version / category / trigger / validation /
+          resources / body。写入后检索/详情可见，支持按技能维度过滤。
 
         结构化字段（v5.3 Phase 4，对齐 claude-mem observation）:
           - observation_type: 类型标签（decision/bugfix/refactor/discovery/...）
@@ -314,6 +320,7 @@ class SwarmMemory:
                 facts=facts,
                 concepts=concepts,
                 knowledge_type=knowledge_type,
+                skill_fields=skill_fields,
             )
             # 短记忆标记位：让 enrich 知道内容已在 ChromaDB 中
             if is_short_memory:
@@ -403,6 +410,7 @@ class SwarmMemory:
                 facts=facts,
                 concepts=concepts,
                 knowledge_type=knowledge_type,
+                skill_fields=skill_fields,
             )
             self._store.add(chunk_mid, search_text, chunk_meta)
 
@@ -425,6 +433,7 @@ class SwarmMemory:
             facts=facts,
             concepts=concepts,
             knowledge_type=knowledge_type,
+            skill_fields=skill_fields,
         )
         parent_meta["_content_len"] = str(len(content))
         self._store.add(memory_id, title, parent_meta)
@@ -652,8 +661,10 @@ class SwarmMemory:
                         doc_group_id="", is_parent=False,
                         token_estimate=0,
                         observation_type="", facts=None, concepts=None,
-                        knowledge_type="") -> dict:
+                        knowledge_type="",
+                        skill_fields: Optional[dict] = None) -> dict:
         """构建统一的元数据字典"""
+        skill = skill_fields or {}
         return {
             "title": title,
             "content": content,
@@ -690,6 +701,14 @@ class SwarmMemory:
             "is_parent": is_parent,
             # 渐进式披露：取详情预估 token 成本（写入时计算）
             "token_estimate": max(1, int(token_estimate or 1)),
+            # Skill 结构化资产（v5.6，借鉴 TencentDB Agent Memory）
+            "skill_name": skill.get("name", ""),
+            "skill_version": skill.get("version", ""),
+            "skill_category": skill.get("category", ""),
+            "skill_trigger": skill.get("trigger", ""),
+            "skill_validation": skill.get("validation", ""),
+            "skill_resources": skill.get("resources", ""),
+            "skill_body": skill.get("body", ""),
         }
 
     # ==================== FTS5 全文索引（Phase 3） ====================
@@ -944,6 +963,9 @@ class SwarmMemory:
                 "doc_group_id": meta.get("doc_group_id", ""),
                 "cluster_id": meta.get("cluster_id", ""),
                 "token_estimate": int(meta.get("token_estimate", 0) or 0),
+                # Skill 结构化资产（v5.6）
+                "skill_name": meta.get("skill_name", ""),
+                "skill_version": meta.get("skill_version", ""),
             })
 
         if not scored:
@@ -1031,6 +1053,11 @@ class SwarmMemory:
             "outcome": e.get("outcome", ""),
             "confidence": e.get("confidence", 1.0),
             "total_chunks": e.get("total_chunks", 1),
+            # Skill 结构化资产摘要（v5.6）：索引层只带技能名/版本，避免膨胀
+            "skill": {
+                "name": e.get("skill_name", ""),
+                "version": e.get("skill_version", ""),
+            } if e.get("skill_name") else None,
         }
     @staticmethod
     def _diversity_rerank(results: list[dict], limit: int) -> list[dict]:
@@ -1208,6 +1235,9 @@ class SwarmMemory:
                 # 渐进式披露索引层字段（聚合时透传）
                 "token_estimate": int(group.get("token_estimate", 0) or 0),
                 "_content_len": group.get("_content_len", 0),
+                # Skill 结构化资产摘要（v5.6）：聚合时透传
+                "skill_name": group.get("skill_name", ""),
+                "skill_version": group.get("skill_version", ""),
                 # 携带最佳块的扩展上下文和来源范围
                 "_expanded_context": group.get("_expanded_context", full),
                 "_context_range": group.get("_context_range", {}),
@@ -1594,6 +1624,15 @@ class SwarmMemory:
             "knowledge_type": meta.get("knowledge_type", ""),
             "created": meta.get("created", ""),
             "total_chunks": meta.get("total_chunks", 1),
+            # Skill 结构化资产（v5.6）
+            "skill": {
+                "name": meta.get("skill_name", ""),
+                "version": meta.get("skill_version", ""),
+                "category": meta.get("skill_category", ""),
+                "trigger": meta.get("skill_trigger", ""),
+                "validation": meta.get("skill_validation", ""),
+                "resources": meta.get("skill_resources", ""),
+            },
         }
 
     def _calculate_swarm_score(self, meta: dict) -> float:

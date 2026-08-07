@@ -85,7 +85,8 @@ class MemoryManager:
                         observation_type: str = "",
                         facts: Optional[list[str]] = None,
                         concepts: Optional[list[str]] = None,
-                        knowledge_type: str = "") -> str:
+                        knowledge_type: str = "",
+                        skill_fields: Optional[dict] = None) -> str:
         memory_id = self.swarm.share(title, content, category, tags,
                                      source_agent, problem_solved, solution, outcome,
                                      project_id, scope=scope, life_stage=life_stage,
@@ -98,7 +99,8 @@ class MemoryManager:
                                      observation_type=observation_type,
                                      facts=facts,
                                      concepts=concepts,
-                                     knowledge_type=knowledge_type)
+                                     knowledge_type=knowledge_type,
+                                     skill_fields=skill_fields)
         self.agents.record_action(source_agent, "memory_shared", project_id, outcome,
                                   {"memory_id": memory_id, "life_stage": life_stage})
         return memory_id

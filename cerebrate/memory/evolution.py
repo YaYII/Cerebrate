@@ -271,7 +271,9 @@ class EvolutionEngine:
             all_origin_ids = set()
             supersedes_ids = []
             for m in mems:
-                oids = (m.get("origin_ids") or "").split(",")
+                _raw_oids = m.get("origin_ids") or []
+                oids = (_raw_oids.split(",") if isinstance(_raw_oids, str)
+                        else list(_raw_oids))
                 all_origin_ids.update(o for o in oids if o)
                 supersedes_ids.append(m.get("memory_id", ""))
 
@@ -353,6 +355,7 @@ class EvolutionEngine:
             if not mem or mem.get("life_stage") not in {"verified_skill", "memory"}:
                 continue
             reuse = int(mem.get("reuse_count", 0))
+            success = int(mem.get("success_count", 0))
             # 不设 reuse 门槛，低复用解以降权方式参与教条固化
             cat = mem.get("category", "general")
             mem["memory_id"] = mid
@@ -379,7 +382,9 @@ class EvolutionEngine:
             all_origin_ids = set()
             supersedes_ids = []
             for m in mems:
-                oids = (m.get("origin_ids") or "").split(",")
+                _raw_oids = m.get("origin_ids") or []
+                oids = (_raw_oids.split(",") if isinstance(_raw_oids, str)
+                        else list(_raw_oids))
                 all_origin_ids.update(o for o in oids if o)
                 supersedes_ids.append(m.get("memory_id", ""))
             all_origin_ids.discard("")

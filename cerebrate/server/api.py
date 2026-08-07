@@ -386,20 +386,11 @@ class BrainAPI:
                 project_id=project_id, scope=scope, index_only=True)
 
         if mode == "hybrid":
-            index: list = []
-            seen: set[str] = set()
-            for r in fts_results:
-                mid = r.get("memory_id", "")
-                if mid and mid not in seen:
-                    seen.add(mid)
-                    r["source"] = "fulltext"
-                    index.append(r)
-            for r in vec_results:
-                mid = r.get("memory_id", "")
-                if mid and mid not in seen:
-                    seen.add(mid)
-                    r["source"] = "vector"
-                    index.append(r)
+            # RRF 融合（借鉴 TencentDB Agent Memory）：FTS5 精确 + 向量语义
+            # 按排名 1/(k+rank) 融合，双路命中自动提升，避免单一来源独占。
+            from cerebrate.core.rrf import reciprocal_rank_fusion
+            index = reciprocal_rank_fusion(
+                [fts_results, vec_results], limit=limit)
             if not index:
                 index = vec_results
         elif mode == "fts":
@@ -907,6 +898,27 @@ class BrainAPI:
     def propose_memory(self, payload: dict) -> dict:
         title = payload.get("title", "")
         content = payload.get("content", "")
+
+        # ── Skill 结构化资产（v5.6，借鉴 TencentDB Agent Memory）──
+        # 可选 skill_markdown：SKILL.md（frontmatter + body）。解析成功 → 结构化字段
+        # 入库并校验；解析失败（非 SKILL.md）→ 按普通记忆处理，零破坏。
+        skill_fields = None
+        skill_markdown = payload.get("skill_markdown", "")
+        if skill_markdown:
+            from cerebrate.core.skill_format import (
+                parse_skill_markdown,
+                validate_skill_fields,
+            )
+            skill_fields = parse_skill_markdown(skill_markdown)
+            if skill_fields:
+                ok, issues = validate_skill_fields(skill_fields)
+                if not ok:
+                    raise ValueError(
+                        "skill_markdown 校验失败: " + "; ".join(issues))
+                # 未显式给 title 时用技能名
+                if not title:
+                    title = skill_fields["name"]
+
         if not title or not content:
             raise ValueError("title and content are required")
 
@@ -1015,6 +1027,7 @@ class BrainAPI:
             facts=facts,
             concepts=concepts,
             knowledge_type=knowledge_type,
+            skill_fields=skill_fields,
         )
         data = {
             "memory_id": memory_id,
@@ -1023,6 +1036,7 @@ class BrainAPI:
             "life_stage": life_stage,
             "agent": source_agent,
             "validation": validation,
+            "skill": bool(skill_fields),
             "authority": "brain_server",
         }
         self.events.append("memory.proposed", source_agent, data, project_id)

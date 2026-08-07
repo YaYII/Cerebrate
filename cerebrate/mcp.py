@@ -247,7 +247,7 @@ TOOLS = [
         }
     },    {
         "name": "cerebrate_propose",
-        "description": "【解决问题后调用】提交新记忆到虫群。替代 v3 的 share。\nlife_stage 说明:\n  memory: 直接存入虫群(默认)\n  nutrient: 存入营养池，需共识投票升级为 memory",
+        "description": "【解决问题后调用】提交新记忆到虫群。替代 v3 的 share。\nlife_stage 说明:\n  memory: 直接存入虫群(默认)\n  nutrient: 存入营养池，需共识投票升级为 memory\n可选 skill_markdown: SKILL.md（frontmatter+body）结构化技能，v5.6 借鉴腾讯",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -267,7 +267,8 @@ TOOLS = [
                 "observation_type": {"type": "string", "description": "观察类型（可选，缺省按 category 自动推导）: bugfix/decision/refactor/discovery/optimization/how-it-works/gotcha/problem-solution", "default": ""},
                 "facts": {"type": "string", "description": "逗号分隔的事实清单（可选，缺省从 solution/problem 规则提取）", "default": ""},
                 "concepts": {"type": "string", "description": "逗号分隔的概念标签（可选，缺省从 tags/category/标题 规则提取）", "default": ""},
-                "auto_entities": {"type": "boolean", "description": "本地实体化衍生：自动把文本中抽出的实体名并入 tags（轻量结构，服务端不存实体数据）", "default": True}
+                "auto_entities": {"type": "boolean", "description": "本地实体化衍生：自动把文本中抽出的实体名并入 tags（轻量结构，服务端不存实体数据）", "default": True},
+                "skill_markdown": {"type": "string", "description": "SKILL.md 全文（frontmatter+body），结构化技能资产", "default": ""}
             },
             "required": ["title", "content", "tags", "problem", "solution"]
         }
@@ -657,6 +658,7 @@ def _handle_call(name: str, args: dict) -> dict:
                 "observation_type": args.get("observation_type", ""),
                 "facts": args.get("facts", ""),
                 "concepts": args.get("concepts", ""),
+                "skill_markdown": args.get("skill_markdown", ""),
                 "physical_user": args.get("physical_user") or _PHYSICAL_USER,
             })
 
@@ -1074,7 +1076,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.0.2"}
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.1.0"}
                 }
             })
         elif method == "ping":

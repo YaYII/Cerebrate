@@ -649,7 +649,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.0.2" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.1.0" },
       } });
     } else if (method === "ping") {
       send({ jsonrpc: "2.0", id, result: {} });
@@ -704,7 +704,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.0.2");
+    console.log("5.1.0");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {

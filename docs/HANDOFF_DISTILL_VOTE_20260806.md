@@ -1017,3 +1017,97 @@ stdio sense 真实调用（1472 条记忆 healthy）
 ## 经验
 - 火山 /models 列表 ≠ 全部可用（很多 404）；必须实测确认
 - 模型状态可能变化（2-0-pro 之前 ModelNotOpen，后来可用）→ 降级链比写死模型健壮
+
+---
+
+# 追加（2026-08-07 第二十八轮）：借鉴 TencentDB Agent Memory 升级虫群（v5.1.0）
+
+## 用户要求（2026-08-07）
+深入学习腾讯开源团队记忆项目 TencentDB Agent Memory（GitHub 1.3 万+ star），
+与我们的方案对比，借鉴参考升级虫群，让该项目成为虫群养分。
+
+## 调研结论（代码级，已 clone 至 /home/as-workstation01/Documents/project/TencentDB-Agent-Memory）
+
+### 腾讯方案核心（MemoryCore 14.8 万行 TS）
+1. **L0→L3 分层蒸馏**：L0 原始对话 → L1 Atom（工具调用对 → 高密度摘要 JSON，
+   score 0-10 表示可替代性）→ L1.5 任务生命周期判断 → L2 Scenario（Mermaid
+   认知状态机，图表化压缩，token 降 61%）→ L3 Persona 长期画像
+2. **Skill 资产（v2）**：SKILL.md frontmatter（name/description/version/resources/
+   trigger/validation）+ body；appendVersion 版本化事务（hash 幂等 + 资源 copyTree）；
+   conversation-add 异步提取队列（extract-worker/trigger-service/message-compressor）
+3. **Loadout + ACL**：Fixed Binding + ACL 四级可见性（private/team/restricted/agent）
+4. **Wiki + CodeGraph**：文档→结构化页面+链接图谱（Karpathy LLM Wiki 思路）；
+   代码→符号/调用关系/影响路径（复用 codegraph 项目）
+5. **检索**：BM25 + 向量 + RRF 融合
+
+### 我们已有优势（腾讯缺）
+- 共识投票 + 免疫验证（dev.to 评论：腾讯「stores but doesn't adjudicate」）
+- origin 不可变溯源、scope 隔离（general/project）
+- TOTP 物理用户身份、代码不离开本地（harvest-push）
+- 业务画像双视图（数据世界/流程世界）
+
+### 本次借鉴落点（结合用户「追求简单化/增量演进」偏好，选高价值低风险两项）
+| 借鉴点 | 腾讯做法 | 我们的实现 |
+|---|---|---|
+| ① RRF 融合检索 | BM25+向量+RRF | `cerebrate/core/rrf.py` 新增；api.search hybrid 改造 |
+| ② Skill 结构化资产 | SKILL.md frontmatter+版本+触发+验证 | `cerebrate/core/skill_format.py` 新增；propose 支持 skill_markdown |
+
+未采纳（遗留建议）：L0-L3 分层（大工程）、Mermaid 场景压缩（需对话采集管道）、
+Loadout 装配（我们有 scope 已覆盖大部分）。
+
+## 交付（v5.1.0，5 处版本同步）
+
+### ① RRF 融合检索
+- `cerebrate/core/rrf.py`：`reciprocal_rank_fusion(ranked_lists, k=60, limit)` 纯函数
+  - 每路按排名 rank 计算 1/(k+rank)；同 memory_id 多路分累加（双路命中天然提升）
+  - source 标记：fulltext / vector / hybrid（双路命中）
+- `api.search` hybrid 分支：FTS5 + 向量两路召回 → RRF 融合（替代原简单拼接）
+  - 原拼接问题：FTS 命中但向量分低会被挤掉；向量命中排末尾
+- 测试：`tests/test_rrf.py`（5 用例：双路排前/单路不丢/limit/空输入/k 影响）
+
+### ② Skill 结构化资产
+- `cerebrate/core/skill_format.py`：SKILL.md frontmatter 解析 + 校验
+  - 解析：`---` 围栏 → name/description/version/category/trigger/validation/resources/body
+  - 校验：name 须 `^[a-z0-9][a-z0-9-]*$`（≤64）、description 必填（≤1024）、body ≤50000
+  - 非 SKILL.md（无 frontmatter）返回 None → 按普通记忆处理（零破坏）
+- `swarm.share` / `_build_metadata` / `manager.share_to_swarm`：新增 skill_fields 透传，
+  metadata 落 skill_name/version/category/trigger/validation/resources/body
+- `_item_to_dict` / `_to_index_entry` / `_aggregate_chunks`：详情/索引层输出 skill 字段
+- `api.propose_memory`：支持 skill_markdown 参数（解析→校验→结构化入库）；
+  空 title 自动用技能名；校验失败抛 ValueError
+- MCP 工具 cerebrate_propose（mcp_transport.py + mcp.py）：新增 skill_markdown 参数
+- 测试：`tests/test_skill_format.py`（8 用例：解析/默认版本/非skill返回None/校验/
+  端到端 roundtrip/非法拒绝/普通记忆零影响）
+
+### ③ 顺手修复 2 个既有 bug（自动进化崩溃根因）
+- `evolution.py` _distill_and_persist + _distill_doctrines：
+  `(m.get("origin_ids") or "").split(",")` → str/list 双类型兼容
+  （分块聚合记忆 origin_ids 是 list，之前自动进化必崩）
+- `evolution.py` _distill_doctrines：`success` 未定义 → 补 `success_count`
+- 测试：`tests/test_evolution_origin_ids.py`（4 用例）
+
+## 验证（真实执行）
+1. 全量回归：342 passed（新增 17，无回归）
+2. 服务重建：cerebrate:5.1.0 容器 healthy，/v1/sense ok（total 1495，bge）
+3. RRF hybrid 检索实测：查询「豆包 视觉 图像识别」→ 双路命中 2 条排前（source=hybrid），
+   单路命中随后（vector）✅
+4. Skill 结构化 propose 实测：提交 SKILL.md → skill=True；详情层 name=rrf-fusion
+   version=1.0 trigger/validation 完整；索引层 skill 摘要可见 ✅
+
+## 版本
+- VERSION: cerebrate-mcp-v5.1.0（5 处同步：VERSION/mcp_transport/mcp.py/mcp.js 两处/
+  package.json + 镜像 tag cerebrate:5.1.0 + DEPLOY.md）
+- 协议 meta.protocol 保持 v5 不变（API 协议版本与产品版本是两个维度）
+
+## 关键文件
+- 新增：`cerebrate/core/rrf.py`、`cerebrate/core/skill_format.py`
+- 修改：`cerebrate/memory/swarm.py`（skill_fields）、`cerebrate/memory/manager.py`、
+  `cerebrate/memory/evolution.py`（2 bug）、`cerebrate/server/api.py`（RRF+skill_markdown）、
+  `cerebrate/server/mcp_transport.py`、`cerebrate/mcp.py`
+- 测试：`tests/test_rrf.py`、`tests/test_skill_format.py`、`tests/test_evolution_origin_ids.py`
+
+## 遗留/下一步建议
+1. （可选）L0→L3 分层蒸馏：需对话采集管道（offload ingest），大工程，评估后再动
+2. （可选）Mermaid 场景压缩：腾讯最新卖点（token 降 61%），需短期记忆子系统
+3. （可选）Skill 版本化 appendVersion：当前只是版本字段，无版本树；团队多人改技能时再上
+4. （可选）Loadout 装配：等团队规模扩大、角色分化明显时再评估

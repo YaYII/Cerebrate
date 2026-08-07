@@ -16,7 +16,7 @@
 
 ```
 ┌─────────────────────────────┐        ┌──────────────────────────────┐
-│ 宿主机 / 局域网内的客户端    │        │ Docker 容器: cerebrate:5.0.2  │
+│ 宿主机 / 局域网内的客户端    │        │ Docker 容器: cerebrate:5.1.0  │
 │                             │        │                              │
 │  cerebrate.py  (CLI)  ──────┼──HTTP──┼─▶ Brain Server :8765         │
 │  cerebrate/mcp.py (MCP) ────┤ +token │   BrainAPI + ChromaDB + BGE  │
@@ -30,7 +30,7 @@
 
 ## 一、构建并启动
 
-> 当前镜像 tag：**cerebrate:5.0.2**（与 MCP 版本 cerebrate-mcp 5.0.2 统一；
+> 当前镜像 tag：**cerebrate:5.1.0**（与 MCP 版本 cerebrate-mcp 5.1.0 统一；
 > 协议标识 `meta.protocol` 保持 v5 不变）。
 
 ```bash
