@@ -17,6 +17,7 @@ from typing import Optional
 
 from cerebrate.core.storage import ChromaStore
 from cerebrate.core.decay import calculate_decay, boost_from_reuse
+from cerebrate.core.chunking import estimate_tokens
 from cerebrate.memory.docstore import DocumentStore
 from cerebrate.memory.metastore import get_metastore
 from cerebrate.config import config
@@ -92,17 +93,6 @@ def _safe_split(val, separator=","):
     if isinstance(val, str):
         return [s.strip() for s in val.split(separator) if s.strip()]
     return [str(val)]
-
-
-def estimate_tokens(text: str) -> int:
-    """粗略 token 估算：中英混合按 4 字符/token，最低 1。
-
-    用于渐进式披露索引层展示"取这条记忆要花多少 token"，
-    让 agent 在决定是否拉取详情前能做成本/收益判断。
-    """
-    if not text:
-        return 1
-    return max(1, int(len(text) // 4))
 
 
 class SwarmMemory:
@@ -1031,8 +1021,8 @@ class SwarmMemory:
         token_estimate = int(e.get("token_estimate", 0) or 0)
         if token_estimate <= 0:
             content_len = int(e.get("_content_len", 0) or 0)
-            token_estimate = estimate_tokens(
-                content_len) if content_len else estimate_tokens(e.get("title", ""))
+            # 仅长度可用时的长度估算（无原文，无法走 core.chunking 中英加权算法）
+            token_estimate = max(1, content_len // 4) if content_len else estimate_tokens(e.get("title", ""))
         return {
             "memory_id": e.get("memory_id", ""),
             "title": e.get("title", ""),

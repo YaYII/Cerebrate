@@ -1,5 +1,6 @@
 """统一记忆管理器 v5.0 — 集成向量记忆、项目隔离、智能体注册表"""
 import json
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +14,19 @@ from cerebrate.memory.origin import OriginLog
 from cerebrate.memory.docstore import DocumentStore
 from cerebrate.memory.metastore import get_metastore
 from cerebrate.config import config
+
+
+def _read_version() -> str:
+    """读取项目根 VERSION 文件并提取纯版本号，避免硬编码漂移。"""
+    try:
+        version_file = Path(__file__).resolve().parents[2] / "VERSION"
+        text = version_file.read_text(encoding="utf-8").strip()
+        m = re.search(r"(\d+\.\d+\.\d+)", text)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0"
 
 
 class MemoryManager:
@@ -271,7 +285,7 @@ class MemoryManager:
         except Exception:
             pass
         return {
-            "version": "5.1.2",
+            "version": _read_version(),
             "personal": {"user_count": len(self.personal.list_users())},
             "swarm": swarm_stats,
             "lifecycle": self.swarm.lifecycle_counts(),

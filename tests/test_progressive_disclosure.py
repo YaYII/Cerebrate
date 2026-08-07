@@ -92,8 +92,8 @@ class ProgressiveDisclosureTests(unittest.TestCase):
         mid = self._share("长记忆 token 估算", long_content)
         index = self.swarm.query("长记忆 token", index_only=True)
         self.assertEqual(len(index), 1)
-        # 400 字符 / 4 = 100 tokens
-        self.assertEqual(index[0]["token_estimate"], 100)
+        # 统一 core.chunking 中英加权算法：400 个 x = 1 个英文单词 → 2 tokens
+        self.assertEqual(index[0]["token_estimate"], 2)
 
     def test_api_search_returns_index(self):
         from cerebrate.server.api import BrainAPI
