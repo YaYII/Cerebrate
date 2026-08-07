@@ -853,9 +853,39 @@ function cli(argv) {
   }
 }
 
+// 首次使用说明：同事手动运行（终端 TTY）时自动打印，让对方知道如何接入。
+function printFirstRunHelp() {
+  console.log("");
+  console.log("🧠 Cerebrate MCP v5.2.3 — 团队记忆中枢客户端（已内置默认云端地址，零配置）");
+  console.log("");
+  console.log("你已连接到脑虫记忆系统，接入只需 3 步：");
+  console.log("");
+  console.log("  ① 在 AI 对话里让助手调用 MCP 工具注册：");
+  console.log("     cerebrate_auth_register { \"username\": \"你的用户名\" }");
+  console.log("     → 浏览器打开返回的 bind_url → 手机 Authenticator 扫码绑定");
+  console.log("");
+  console.log("  ② 登录拿本人 token（长期有效，仅存本机）：");
+  console.log("     cerebrate-mcp login --username <用户名> --code <Authenticator 6位码>");
+  console.log("");
+  console.log("  ③ 重启 AI 客户端，新对话里让 AI 先调 cerebrate_sense 即可开始使用。");
+  console.log("");
+  console.log("常用命令：");
+  console.log("  cerebrate-mcp status          # 查看登录态 / 服务地址");
+  console.log("  cerebrate-mcp login           # 登录（用户名 + Authenticator 码）");
+  console.log("  cerebrate-mcp logout          # 登出");
+  console.log("  cerebrate-mcp setup --url X   # 地址变了时覆盖默认云端地址");
+  console.log("  cerebrate-mcp --version       # 版本");
+  console.log("");
+  console.log("AI 对接手册：docs/AI_ONBOARDING.md（会话流程 / 43 工具分组 / 写记忆规范）");
+  console.log("");
+}
+
 if (require.main === module) {
   if (process.argv.length > 2 && ["setup", "login", "logout", "status", "--version", "-v", "--help", "-h"].includes(process.argv[2])) {
     cli(process.argv);
+  } else if (process.argv.length <= 2 && process.stdin.isTTY) {
+    // 用户手动运行（终端）：打印使用说明；AI 客户端以管道调用时 isTTY=false，走正常 MCP server
+    printFirstRunHelp();
   } else {
     runMcp();
   }

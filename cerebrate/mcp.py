@@ -1262,6 +1262,34 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("login", "logout", "status"):
         sys.exit(_run_cli(sys.argv[1:]))
 
+    # 用户手动运行（终端 TTY）：打印首次使用说明，让对方知道如何接入；
+    # AI 客户端以管道调用时 isatty()=False，走正常 MCP server 流程。
+    if len(sys.argv) <= 1 and sys.stdin.isatty():
+        print("")
+        print("🧠 Cerebrate MCP v5.2.3 — 团队记忆中枢客户端（已内置默认云端地址，零配置）")
+        print("")
+        print("你已连接到脑虫记忆系统，接入只需 3 步：")
+        print("")
+        print("  ① 在 AI 对话里让助手调用 MCP 工具注册：")
+        print("     cerebrate_auth_register { \"username\": \"你的用户名\" }")
+        print("     → 浏览器打开返回的 bind_url → 手机 Authenticator 扫码绑定")
+        print("")
+        print("  ② 登录拿本人 token（长期有效，仅存本机）：")
+        print("     python3 -m cerebrate.mcp login --username <用户名> --code <Authenticator 6位码>")
+        print("")
+        print("  ③ 重启 AI 客户端，新对话里让 AI 先调 cerebrate_sense 即可开始使用。")
+        print("")
+        print("常用命令：")
+        print("  cerebrate-mcp status          # 查看登录态 / 服务地址")
+        print("  cerebrate-mcp login           # 登录（用户名 + Authenticator 码）")
+        print("  cerebrate-mcp logout          # 登出")
+        print("  cerebrate-mcp setup --url X   # 地址变了时覆盖默认云端地址")
+        print("  cerebrate-mcp --version       # 版本")
+        print("")
+        print("AI 对接手册：docs/AI_ONBOARDING.md（会话流程 / 43 工具分组 / 写记忆规范）")
+        print("")
+        return
+
     # MCP server 不得在收到 initialize 前主动发消息，握手由客户端发起。
     for line in sys.stdin:
         line = line.strip()
