@@ -1,7 +1,8 @@
 # Cerebrate MCP 使用指南（同事接入版）
 
 > 脑虫记忆系统 MCP 客户端：把团队记忆接入你的 AI 助手（Codex / Claude Code / Qoder / opencode）。
-> 当前版本 **cerebrate-mcp 5.0.1**（npm 标准安装，Node 16+，零依赖）。
+> 当前版本 **cerebrate-mcp 5.2.2**（npm 标准安装，Node 16+，零依赖）。
+> 2026-08-07 更新：内置默认云端地址 → 零配置直连；自助注册 + Authenticator 绑定（不再由管理员发 token）。
 
 ---
 
@@ -17,33 +18,54 @@ Cerebrate 是团队共享的 AI 记忆中枢（服务端由管理员部署）。
 ## 2. 一键安装（本机直接安装，Node 首选）
 
 ```bash
-# 从管理员获取：脑虫地址（URL）+ 你的 user token
+# 首次安装（npm 官方渠道，正规）
 npm install -g cerebrate-mcp
-
-# 一条命令完成配置（自动写 ~/.cerebrate-mcp/cerebrate.env，chmod 600）
-cerebrate-mcp setup --url https://<脑虫域名>/cerebrate --token <你的token>
 ```
 
-`setup` 执行后自动：
-1. 写入 `~/.cerebrate-mcp/cerebrate.env`（URL + token，仅本用户可读）
-2. 打印 Claude Code / Codex / stdio 三套配置片段，**复制粘贴即可使用**
+> **零配置直连云端**：mcp 已内置默认云端脑虫地址，安装后无需配置 URL，
+> 直接进入下一步注册绑定即可。地址变化只需重跑
+> `cerebrate-mcp setup --url <新地址>`（见第 7 节常见问题）。
 
 > **为什么本机直接安装**：MCP 包含本地实体化抽取与用户代码库分析（harvest）能力，需要访问本机文件系统，容器化会隔离这些能力。地址变化只需重跑 `cerebrate-mcp setup --url <新地址>`。
 
-## 3. 配置到你的 AI 客户端（二选一）
+## 3. 注册 + 绑定身份（防投毒，必须做）
+
+每个用户用自己的「用户名 + 手机 Authenticator」绑定身份，token 只保存在自己本地。
+**管理员不发放 token**，避免 token 流转泄露、他人伪装投毒。
+
+```bash
+# ① 注册（首次，拿到绑定二维码网页）
+# 在你的 AI 客户端对话里，让助手调用 MCP 工具：
+#   cerebrate_auth_register { "username": "<你的用户名>" }
+```
+
+> 用户名须 3-32 位小写字母/数字/下划线/连字符。
+
+```text
+② 浏览器打开工具返回的 bind_url → 手机安装「Authenticator」App → 扫网页上的二维码完成绑定
+```
+
+```bash
+# ③ 登录（输入 Authenticator 当前 6 位动态码，token 自动保存本地，长期有效）
+cerebrate-mcp login --username <你的用户名> --code <6位码>
+```
+
+> 换机/重装后：只需重跑 ③ 登录（同一用户名 + 新 6 位码），无需重新注册。
+
+## 4. 配置到你的 AI 客户端（二选一）
 
 `setup` 最后会打印对应片段，粘贴即可：
 
 | 客户端 | 位置 |
 |---|---|
-| Codex | `~/.codex/config.toml` 的 `[mcp_servers.cerebrate] url = "https://<域名>/cerebrate/v1/mcp"` |
-| Claude Code | `claude mcp add --transport http cerebrate https://<域名>/cerebrate/v1/mcp --header "Authorization: Bearer <token>"`（推荐，零本地服务） |
+| Codex | `~/.codex/config.toml` 的 `[mcp_servers.cerebrate] url = "https://<域名>/cerebrate/v1/mcp"`（token 走本地文件，无需手填） |
+| Claude Code | `claude mcp add --transport http cerebrate https://<域名>/cerebrate/v1/mcp`（token 走本地文件；推荐，零本地服务） |
 | Qoder | stdio：命令 `npx -y cerebrate-mcp`，env 走 `CEREBRATE_SERVER_URL` / `CEREBRATE_SERVER_TOKEN` |
 | opencode | 同上（stdio） |
 
 stdio 客户端（Qoder / opencode / Trae）也可直接用 `npx -y cerebrate-mcp` 运行，无需全局安装。
 
-## 4. 开始使用
+## 5. 开始使用
 
 重启 AI 客户端，新对话里先让它调用 `cerebrate_sense`（感知记忆），之后：
 
@@ -55,7 +77,7 @@ AI：调用 cerebrate_search → 返回相关记忆
 AI：调用 cerebrate_propose → 沉淀到团队记忆
 ```
 
-## 5. 工具清单（43 个）
+## 6. 工具清单（43 个）
 
 ### 🟢 读 / 日常（最常用）
 | 工具 | 用途 |
@@ -96,7 +118,7 @@ AI：调用 cerebrate_propose → 沉淀到团队记忆
 
 > 服务端已做管理员角色隔离：普通用户调用管理端点返回 403（防止篡改灵魂、泄露用户列表、触发付费蒸馏等）。
 
-## 6. 认证与权限
+## 7. 认证与权限
 
 - **读共享**：所有人可读团队记忆
 - **写需身份**：写记忆用你的 token 确定 owner，只能管理自己写的
@@ -104,13 +126,16 @@ AI：调用 cerebrate_propose → 沉淀到团队记忆
 - **查询优先自己**：搜索时自己的记忆排前
 - **token 是唯一凭证**：妥善保存；换机后在你的机器上跑一次登录即可
 
-## 7. 常见问题
+## 8. 常见问题
 
 **Q: 401 unauthorized？**
-检查 `~/.cerebrate-mcp/cerebrate.env` 里 token 是否正确；或对话让 AI 调 `cerebrate_auth_login` 重新登录。
+先 `cerebrate-mcp status` 看登录态；未登录则跑 `cerebrate-mcp login --username <用户名> --code <6位码>`。
 
 **Q: 连接超时 / 地址变了？**
-脑虫公网地址由隧道提供，重启可能变化——向管理员要最新 URL，改 `cerebrate.env` 里的 `CEREBRATE_SERVER_URL` 即可。
+脑虫公网地址由隧道提供，重启可能变化——向管理员要最新 URL，重跑 `cerebrate-mcp setup --url <新地址>` 覆盖内置默认值即可。
+
+**Q: 换电脑 / 重装系统？**
+重新 `npm install -g cerebrate-mcp` → `cerebrate-mcp login --username <用户名> --code <Authenticator 当前码>`（token 重新保存本地）。
 
 **Q: 调用报 403 admin required？**
 该工具是管理员功能，普通用户不可用（属正常）。
