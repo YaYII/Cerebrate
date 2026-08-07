@@ -258,6 +258,7 @@ class BrainAPI:
         return {"users": self.auth.list_users()}
 
     def query(self, payload: dict) -> dict:
+        payload = self._apply_loadout_defaults(payload)
         query = payload.get("query", "")
         if not query:
             raise ValueError("query is required")
@@ -356,6 +357,7 @@ class BrainAPI:
           - fts: 仅 FTS5 全文检索（精确关键词，如错误码/命令/函数名）
           - vector: 仅向量语义检索（ChromaDB）
         """
+        payload = self._apply_loadout_defaults(payload)
         query = payload.get("query", "")
         if not query:
             raise ValueError("query is required")
@@ -432,6 +434,221 @@ class BrainAPI:
             "total": result.get("total", 0),
             "note": "重建后新写入的记忆会自动双写 FTS5；旧记忆通过本命令补齐。",
         }
+
+    # ==================== 短期场景（v5.2，借鉴 TencentDB Agent Memory L2） ====================
+
+    def scene_ingest(self, payload: dict) -> dict:
+        """短期场景：追加原始事件（零 LLM 成本，实时可用）。"""
+        session_id = payload.get("session_id", "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        events = payload.get("events", [])
+        if isinstance(events, str):
+            events = [{"kind": "msg", "text": events}]
+        prompt = payload.get("prompt", "")
+        result = self.mm.scene.ingest(session_id, events, prompt=prompt)
+        self.events.append("scene.ingested", "brain-server",
+                           {"session_id": session_id,
+                            "event_count": result["event_count"]})
+        return result
+
+    def scene_get(self, payload: dict) -> dict:
+        """短期场景：读取场景（最近 50 条事件 + Mermaid 压缩图 + 元数据）。"""
+        session_id = payload.get("session_id", "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        scene = self.mm.scene.get(session_id)
+        return {
+            "session_id": scene["session_id"],
+            "event_count": scene["event_count"],
+            "events": scene["events"],
+            "mmd": scene["mmd"],
+            "meta": scene["meta"],
+            "created": scene["created"],
+            "updated": scene["updated"],
+        }
+
+    def scene_compress(self, payload: dict) -> dict:
+        """短期场景：LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口约束省钱）。"""
+        session_id = payload.get("session_id", "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        # 蒸馏窗口（v5.1.1）：Mermaid 压缩是 LLM 调用，非低谷期禁止（force 逃生门）
+        from cerebrate.config import in_evolution_window
+        if not payload.get("force", False) and not in_evolution_window():
+            return {
+                "compressed": False,
+                "reason": "蒸馏窗口未开放（默认本地 0:00-1:00），Mermaid 压缩已跳过省钱。"
+                          "管理员可传 force=true 显式强制。",
+            }
+        scene = self.mm.scene.get(session_id)
+        if scene["event_count"] == 0:
+            return {"compressed": False, "reason": "场景无事件，无法压缩"}
+        from cerebrate.brain.llm import CerebrateLLM
+        llm = CerebrateLLM()
+        if not llm.is_available():
+            return {"compressed": False, "reason": "LLM 不可用"}
+        doc = llm.generate_scene_mmd(
+            scene["events"], existing_mmd=scene["mmd"],
+            task_goal=(scene["meta"] or {}).get("task_goal", ""))
+        if not doc:
+            return {"compressed": False, "reason": "LLM 压缩失败"}
+        meta = {"task_goal": doc["task_goal"], "progress": doc["progress"]}
+        result = self.mm.scene.set_mmd(session_id, doc["mmd"], meta=meta)
+        self.events.append("scene.compressed", "brain-server",
+                           {"session_id": session_id,
+                            "file_action": doc["file_action"]})
+        return {
+            "compressed": True,
+            "file_action": doc["file_action"],
+            "task_goal": doc["task_goal"],
+            "progress": doc["progress"],
+            "mmd": doc["mmd"],
+            "event_count": result["event_count"],
+        }
+
+    def scene_list(self, payload: dict = None) -> dict:
+        """短期场景：列出活跃场景。"""
+        try:
+            limit = min(int((payload or {}).get("limit", 100)), 500)
+        except (TypeError, ValueError):
+            limit = 100
+        return {"sessions": self.mm.scene.list_sessions(limit=limit)}
+
+    def scene_delete(self, payload: dict) -> dict:
+        """短期场景：删除场景（任务结束后清理）。"""
+        session_id = payload.get("session_id", "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        deleted = self.mm.scene.delete(session_id)
+        return {"session_id": session_id, "deleted": deleted}
+
+    # ==================== Skill 版本化（v5.2，借鉴 TencentDB Agent Memory appendNextVersion） ====================
+
+    def skill_append_version(self, payload: dict) -> dict:
+        """Skill 版本化：给已有技能记忆追加新版本（幂等）。
+
+        payload:
+          memory_id    必填，技能记忆 ID
+          content      必填，最新技能正文（SKILL.md 或技能说明）
+          description  可选，版本变更说明
+          skill_markdown 可选，SKILL.md 全文（含 frontmatter，解析后更新 head 结构化字段）
+        """
+        memory_id = payload.get("memory_id", "").strip()
+        content = payload.get("content", "")
+        if not memory_id or not content:
+            raise ValueError("memory_id and content are required")
+        # 权限：仅写入者本人可追加版本（与 propose 同源校验，规避篡改）
+        owner = (payload.get("_current_user") or ""
+                 or payload.get("physical_user") or "")
+        if not owner:
+            raise ValueError("physical_user is required")
+
+        skill_fields = None
+        skill_markdown = payload.get("skill_markdown", "")
+        if skill_markdown:
+            from cerebrate.core.skill_format import (
+                parse_skill_markdown, validate_skill_fields)
+            skill_fields = parse_skill_markdown(skill_markdown)
+            if skill_fields:
+                ok, issues = validate_skill_fields(skill_fields)
+                if not ok:
+                    raise ValueError(
+                        "skill_markdown 校验失败: " + "; ".join(issues))
+                content = content or skill_fields.get("body", "")
+
+        result = self.mm.swarm.append_skill_version(
+            memory_id, content=content, author=owner,
+            description=payload.get("description", ""),
+            skill_fields=skill_fields)
+        if result.get("appended"):
+            self.events.append("skill.versioned", owner,
+                               {"memory_id": memory_id,
+                                "version": result["version"]})
+        return result
+
+    def skill_versions(self, payload: dict) -> dict:
+        """Skill 版本化：读取技能版本历史。"""
+        memory_id = payload.get("memory_id", "").strip()
+        if not memory_id:
+            raise ValueError("memory_id is required")
+        versions = self.mm.swarm.skill_versions(memory_id)
+        mem = self.mm.get_swarm_memory(memory_id) or {}
+        return {
+            "memory_id": memory_id,
+            "title": mem.get("title", ""),
+            "current_version": mem.get("skill", {}).get("version", ""),
+            "version_count": len(versions),
+            "versions": versions,
+        }
+
+    # ==================== Loadout 装配（v5.2，借鉴 TencentDB Agent Memory Loadout） ====================
+
+    def loadout_set(self, payload: dict) -> dict:
+        """用户 Loadout 装配：设置绑定项目/偏好 scope/绑定标签。"""
+        user = (payload.get("_current_user") or ""
+                or payload.get("user") or payload.get("user_id") or "")
+        if not user:
+            raise ValueError("user is required (登录身份或 user 参数)")
+        bound_projects = payload.get("bound_projects", [])
+        if isinstance(bound_projects, str):
+            bound_projects = [p.strip() for p in
+                              bound_projects.split(",") if p.strip()]
+        bound_tags = payload.get("bound_tags", [])
+        if isinstance(bound_tags, str):
+            bound_tags = [t.strip() for t in bound_tags.split(",") if t.strip()]
+        loadout = self.mm.set_user_loadout(
+            user,
+            bound_projects=bound_projects,
+            preferred_scope=payload.get("preferred_scope", ""),
+            bound_tags=bound_tags)
+        self.events.append("loadout.set", user, loadout)
+        return {"user": user, "loadout": loadout}
+
+    def loadout_get(self, payload: dict = None) -> dict:
+        """用户 Loadout 装配：读取。"""
+        user = (payload or {}).get("user") or (payload or {}).get("user_id") or ""
+        if not user:
+            user = (payload or {}).get("_current_user") or ""
+        if not user:
+            return {"user": "", "loadout": {
+                "bound_projects": [], "preferred_scope": "",
+                "bound_tags": []}}
+        return {"user": user,
+                "loadout": self.mm.get_user_loadout(user)}
+
+    def _apply_loadout_defaults(self, payload: dict) -> dict:
+        """检索时应用 Loadout：未显式传 project_id/scope/tags 时用装配值。
+
+        装配的项目作为 project_id 默认、preferred_scope 作为 scope 默认、
+        bound_tags 并入 tags（不覆盖显式传入）。返回补齐后的 payload。
+        """
+        user = (payload.get("_current_user") or ""
+                or payload.get("user") or payload.get("user_id") or "")
+        if not user:
+            return payload
+        loadout = self.mm.get_user_loadout(user)
+        if not loadout:
+            return payload
+        out = dict(payload)
+        bound_projects = loadout.get("bound_projects", [])
+        if not out.get("project_id") and not out.get("project") \
+                and len(bound_projects) == 1:
+            out["project_id"] = bound_projects[0]
+        preferred_scope = loadout.get("preferred_scope", "")
+        if not out.get("scope") and preferred_scope:
+            out["scope"] = preferred_scope
+        bound_tags = loadout.get("bound_tags", [])
+        if bound_tags:
+            tags = out.get("tags", [])
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.split(",") if t.strip()]
+            tags = list(tags)
+            for t in bound_tags:
+                if t not in tags:
+                    tags.append(t)
+            out["tags"] = tags
+        return out
 
     def timeline(self, payload: dict) -> dict:
         """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文。

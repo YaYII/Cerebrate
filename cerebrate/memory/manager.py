@@ -22,6 +22,9 @@ class MemoryManager:
         self.personal = PersonalMemory(personal_path)
         self.swarm = SwarmMemory(swarm_path)
         self.knowledge = KnowledgeBase(knowledge_path)
+        from cerebrate.memory.scene import SceneStore
+        self.scene = SceneStore(
+            Path(config.memory_root) / "scenes")
         self._agent_registry = None  # 延迟加载
         self._agent_registry_lock = threading.Lock()
         self._usage_lock = threading.Lock()
@@ -69,6 +72,16 @@ class MemoryManager:
 
     def forget_user_key(self, user_id: str, key: str) -> bool:
         return self.personal.forget(user_id, key)
+
+    def set_user_loadout(self, user_id: str, *, bound_projects=None,
+                         preferred_scope: str = "",
+                         bound_tags=None) -> dict:
+        return self.personal.set_loadout(
+            user_id, bound_projects=bound_projects,
+            preferred_scope=preferred_scope, bound_tags=bound_tags)
+
+    def get_user_loadout(self, user_id: str) -> dict:
+        return self.personal.get_loadout(user_id)
 
     # ==================== 虫群共享记忆接口 ====================
 
@@ -279,12 +292,18 @@ class MemoryManager:
         swarm_count = self.swarm._store.count(
         ) if self.swarm._store else swarm_stats.get("total", 0)
         kb_count = self.knowledge._store.count() if self.knowledge._store else 0
+        scene_count = 0
+        try:
+            scene_count = len(self.scene.list_sessions())
+        except Exception:
+            pass
         return {
-            "version": "5.0.0",
+            "version": "5.1.2",
             "personal": {"user_count": len(self.personal.list_users())},
             "swarm": swarm_stats,
             "lifecycle": self.swarm.lifecycle_counts(),
             "scope": self.swarm.scope_counts(),
+            "scene": {"session_count": scene_count},
             "knowledge": {
                 "document_count": kb_count,
                 "topic_count": len(self.knowledge.list_topics()),

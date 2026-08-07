@@ -253,6 +253,11 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.consensus_snapshot(path.rsplit("/", 1)[-1])
         if method == "GET" and path.startswith("/v1/distill/"):
             return self.api.distill_status(path.rsplit("/", 1)[-1])
+        if method == "GET" and path == "/v1/scene/list":
+            limit = int((params.get("limit") or ["100"])[0])
+            return self.api.scene_list({"limit": limit})
+        if method == "GET" and path.startswith("/v1/scene/"):
+            return self.api.scene_get({"session_id": path.rsplit("/", 1)[-1]})
         if method == "GET" and path.startswith("/v1/origins/"):
             return self.api.get_origin(path.rsplit("/", 1)[-1])
         if method == "GET" and path.startswith("/v1/memories/"):
@@ -344,6 +349,22 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.query(payload)
         if method == "POST" and path == "/v1/search":
             return self.api.search(payload)
+        if method == "POST" and path == "/v1/scene/ingest":
+            return self.api.scene_ingest(payload)
+        if method == "POST" and path == "/v1/scene/compress":
+            return self.api.scene_compress(payload)
+        if method == "POST" and path == "/v1/scene/delete":
+            return self.api.scene_delete(payload)
+        if method == "POST" and path == "/v1/skills/append-version":
+            return self.api.skill_append_version(payload)
+        if method == "POST" and path == "/v1/skills/versions":
+            return self.api.skill_versions(payload)
+        if method == "POST" and path == "/v1/loadout":
+            return self.api.loadout_set(payload)
+        if method == "GET" and path == "/v1/loadout":
+            return self.api.loadout_get({
+                "user": (params.get("user") or [""])[0],
+            })
         if method == "POST" and path == "/v1/timeline":
             return self.api.timeline(payload)
         if method == "POST" and path == "/v1/fulltext/rebuild":

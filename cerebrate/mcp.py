@@ -1076,7 +1076,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.1.1"}
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.0"}
                 }
             })
         elif method == "ping":

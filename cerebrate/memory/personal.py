@@ -94,6 +94,50 @@ class PersonalMemory:
             self._index["users"][user_id] = {"first_seen": now}
         self._index["users"][user_id]["last_seen"] = now
 
+    def set_loadout(self, user_id: str, *, bound_projects: Optional[list[str]] = None,
+                    preferred_scope: str = "",
+                    bound_tags: Optional[list[str]] = None) -> dict:
+        """用户 Loadout 装配（v5.2，借鉴 TencentDB Agent Memory Loadout）。
+
+        用户配置自己的记忆装配：绑定的项目 / 偏好 scope / 绑定标签。
+        检索时自动应用（未显式传参时用装配值，且装配项目/标签优先召回）。
+        """
+        loadout = {
+            "bound_projects": [p.strip() for p in (bound_projects or [])
+                               if p and p.strip()],
+            "preferred_scope": (preferred_scope or "").strip(),
+            "bound_tags": [t.strip() for t in (bound_tags or [])
+                           if t and t.strip()],
+        }
+        # 存 JSON 字符串（remember 内部 str() 不会破坏合法 JSON）
+        import json
+        self.remember(user_id, "loadout", json.dumps(
+            loadout, ensure_ascii=False), confidence=1.0)
+        return loadout
+
+    def get_loadout(self, user_id: str) -> dict:
+        """读取用户 Loadout 装配（无则返回空装配）。"""
+        raw = self._cache.get(user_id, {}).get("loadout", {}).get("value", {})
+        if isinstance(raw, dict):
+            return {
+                "bound_projects": raw.get("bound_projects", []),
+                "preferred_scope": raw.get("preferred_scope", ""),
+                "bound_tags": raw.get("bound_tags", []),
+            }
+        if isinstance(raw, str) and raw.strip().startswith("{"):
+            try:
+                import json
+                raw = json.loads(raw)
+                return {
+                    "bound_projects": raw.get("bound_projects", []),
+                    "preferred_scope": raw.get("preferred_scope", ""),
+                    "bound_tags": raw.get("bound_tags", []),
+                }
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return {"bound_projects": [], "preferred_scope": "",
+                "bound_tags": []}
+
     def remember_project_pref(self, user_id: str, project_id: str,
                               key: str, value) -> None:
         self.remember(user_id, f"proj_{project_id}_{key}", value,

@@ -926,7 +926,7 @@ class CerebrateLLM:
         return self._rule_filter_relevant(query, title, content)
 
     def _rule_filter_relevant(self, query: str, title: str,
-                               content: str) -> dict:
+                              content: str) -> dict:
         """规则降级：关键词匹配判断相关性"""
         query_lower = query.lower()
         content_lower = content.lower()
@@ -949,3 +949,76 @@ class CerebrateLLM:
 
         return {"relevant": False, "relevance_score": 0.0,
                 "reason": "关键词匹配不足"}
+
+    def generate_scene_mmd(self, events: list[dict],
+                           existing_mmd: Optional[str] = None,
+                           task_goal: str = "") -> Optional[dict]:
+        """生成/更新场景 Mermaid 认知状态机（借鉴 TencentDB Agent Memory L2）。
+
+        把短期场景的原始事件流压缩为一张 Mermaid flowchart TD 认知状态机：
+          - taskGoal / progress / status（done/doing/paused/blocked）
+          - 节点 summary 结论导向、极简（≤150 字）
+          - 已有图时增量 replace，无图时 write
+        LLM 不可用时返回 None（调用方降级：保留原始事件，不强制压缩）。
+        """
+        if not self.is_available():
+            return None
+        if not events:
+            return None
+
+        event_lines = []
+        for i, ev in enumerate(events[:100], start=1):
+            kind = ev.get("kind", "tool")
+            text = (ev.get("text") or "")[:500]
+            event_lines.append(f"{i}. [{kind}] {text}")
+        events_text = "\n".join(event_lines)
+
+        system = (
+            "你是任务拓扑架构师：把工具调用/消息事件流压缩为一张极简 Mermaid "
+            "flowchart TD 认知状态机。只记录已发生的事实（实事求是），不写未来规划。"
+            "节点格式：NodeID[\"阶段名: 宏观动作<BR/>status: done|doing|paused|blocked"
+            "<BR/>summary: 核心结论摘要<BR/>Timestamp: ISO8601\"]。"
+            "语义浓缩：shape 表达领域，summary 极简（≤150 字）。"
+            "只输出纯 JSON：{\"task_goal\":\"一句话任务目标\","
+            "\"progress\":0-100,\"file_action\":\"write|replace\","
+            "\"mmd_content\":\"```mermaid ... ```\"}，禁止解释文本。"
+        )
+        user_parts = [f"## 事件流（共 {len(events)} 条，展示最近 100 条）：\n{events_text}"]
+        if existing_mmd:
+            user_parts.append(
+                f"## 已有 Mermaid（file_action=replace 时增量更新，保留仍有效的节点）：\n"
+                f"{existing_mmd}")
+        else:
+            user_parts.append("## 无已有图：file_action=write 新建。")
+        if task_goal:
+            user_parts.append(f"## 任务目标（可动态更新）：{task_goal}")
+
+        try:
+            text = self._chat_completion(
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": "\n\n".join(user_parts)}],
+                max_tokens=4000, temperature=0.2)
+            if not text:
+                return None
+            import re as _re
+            match = _re.search(r'\{[\s\S]*\}', text)
+            if not match:
+                return None
+            result = json.loads(match.group())
+            mmd = result.get("mmd_content") or ""
+            # 剥掉 ```mermaid 围栏
+            mmd = mmd.strip()
+            if mmd.startswith("```mermaid"):
+                mmd = mmd[len("```mermaid"):].strip()
+            if mmd.startswith("```"):
+                mmd = mmd[3:].strip()
+            if mmd.endswith("```"):
+                mmd = mmd[:-3].strip()
+            return {
+                "task_goal": (result.get("task_goal") or task_goal)[:300],
+                "progress": max(0, min(int(result.get("progress", 0) or 0), 100)),
+                "file_action": result.get("file_action") or "write",
+                "mmd": mmd,
+            }
+        except Exception:
+            return None

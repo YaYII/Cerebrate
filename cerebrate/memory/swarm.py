@@ -7,6 +7,7 @@ v5.1 改进:
   - 显式 max_length 控制 + 截断警告
 """
 import hashlib
+import json
 import logging
 import re
 import threading
@@ -1529,6 +1530,125 @@ class SwarmMemory:
             pass
 
         return success
+
+    def append_skill_version(self, memory_id: str, *, content: str,
+                             author: str = "", description: str = "",
+                             skill_fields: Optional[dict] = None) -> dict:
+        """Skill 版本化（v5.2，借鉴 TencentDB Agent Memory appendNextVersion）。
+
+        给已有技能记忆追加一个新版本：
+          - 幂等：content 与 head 相同 → 返回 head（不新增版本）
+          - 版本号 = 现有版本数 + 1（v1 → v2 → v3 ...）
+          - skill_versions 保存完整版本历史（version/content_hash/updated/author/description）
+          - 同步更新当前 head（skill_version + skill 结构化字段）
+        无历史时视为首次追加（v1）。
+        """
+        import json as _json
+        item = self._store.get(memory_id)
+        if not item:
+            return {"appended": False, "reason": "memory not found"}
+        meta = item["metadata"]
+        if not (meta.get("skill_name") or meta.get("skill_version")):
+            # 允许对 category=skill 但未结构化标记的记忆补版本
+            if meta.get("category") not in ("skill", "distilled_skill"):
+                return {"appended": False,
+                        "reason": "not a skill memory (category must be skill)"}
+
+        versions_raw = meta.get("skill_versions", "")
+        versions = []
+        if versions_raw:
+            try:
+                versions = _json.loads(versions_raw)
+            except (json.JSONDecodeError, TypeError):
+                versions = []
+
+        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        head = versions[-1] if versions else None
+        if head and head.get("content_hash") == content_hash:
+            return {
+                "appended": False,
+                "idempotent": True,
+                "memory_id": memory_id,
+                "version": head["version"],
+                "version_count": len(versions),
+            }
+
+        new_version = str(len(versions) + 1)
+        now = datetime.now(timezone.utc).isoformat()
+        entry = {
+            "version": new_version,
+            "content_hash": content_hash,
+            "updated": now,
+            "author": author or meta.get("physical_user", ""),
+            "description": (description or
+                            meta.get("skill_description", "") or "")[:1024],
+        }
+        versions.append(entry)
+
+        # 更新当前 head：skill_version + 结构化字段
+        updates = {
+            "skill_versions": _json.dumps(versions, ensure_ascii=False),
+            "skill_version": new_version,
+        }
+        if skill_fields:
+            updates.update({
+                "skill_name": skill_fields.get("name", meta.get("skill_name", "")),
+                "skill_description": skill_fields.get(
+                    "description", meta.get("skill_description", "")),
+                "skill_category": skill_fields.get(
+                    "category", meta.get("skill_category", "")),
+                "skill_trigger": skill_fields.get(
+                    "trigger", meta.get("skill_trigger", "")),
+                "skill_validation": skill_fields.get(
+                    "validation", meta.get("skill_validation", "")),
+                "skill_resources": skill_fields.get(
+                    "resources", meta.get("skill_resources", "")),
+            })
+        with self._get_mem_lock(memory_id):
+            for k, v in updates.items():
+                meta[k] = v
+            self._store.upsert(memory_id, item.get("document", ""), meta)
+
+        # 同步分块（如有）
+        try:
+            chunks = self._store.get_items_by_where(
+                {"doc_group_id": memory_id})
+            for ch in chunks:
+                ch_meta = ch["metadata"]
+                for k, v in updates.items():
+                    ch_meta[k] = v
+                self._store.upsert(ch["id"], ch.get("document", ""), ch_meta)
+        except Exception:
+            pass
+
+        # 同步 PostgreSQL 元数据
+        try:
+            if self._ms.available:
+                self._ms.update_metadata(memory_id, updates)
+        except Exception:
+            pass
+
+        return {
+            "appended": True,
+            "memory_id": memory_id,
+            "version": new_version,
+            "version_count": len(versions),
+            "content_hash": content_hash,
+        }
+
+    def skill_versions(self, memory_id: str) -> list[dict]:
+        """读取技能版本历史（v5.2）。"""
+        import json as _json
+        item = self._store.get(memory_id)
+        if not item:
+            return []
+        versions_raw = item["metadata"].get("skill_versions", "")
+        if not versions_raw:
+            return []
+        try:
+            return _json.loads(versions_raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     def _update_item_lifecycle(self, item_id: str, meta: dict,
                                 life_stage: str,

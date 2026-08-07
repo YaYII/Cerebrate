@@ -15,7 +15,7 @@ import json
 from cerebrate.protocol import ok
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
-SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.1.1"}
+SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.2.0"}
 
 
 # ── 工具定义（JSON Schema，与 mcp.py / mcp.js 一致）─────────
@@ -50,6 +50,14 @@ def _tools() -> list[dict]:
         {"name": "cerebrate_ingest", "description": "【管理员】文档吸入知识库（master token）。", "inputSchema": {"type": "object", "properties": {"dir": {"type": "string"}, "project": {"type": "string", "default": ""}, "dry_run": {"type": "boolean", "default": False}, "verbose": {"type": "boolean", "default": False}}, "required": ["dir"]}},
         {"name": "cerebrate_project_harvest", "description": "【管理员】本地代码分析推结构（master token）。", "inputSchema": {"type": "object", "properties": {"project": {"type": "string"}, "dir": {"type": "string"}, "exts": {"type": "array", "items": {"type": "string"}}}, "required": ["project"]}},
         {"name": "cerebrate_batch_process", "description": "【管理员】批量处理 IPC 队列（master token）。", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
+        {"name": "cerebrate_scene_ingest", "description": "【短期场景】追加原始事件（零 LLM 成本）。session_id + events[{kind:text}]。", "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}, "events": {"type": "array", "items": {"type": "object"}, "default": []}, "prompt": {"type": "string", "default": ""}}, "required": ["session_id"]}},
+        {"name": "cerebrate_scene_get", "description": "【短期场景】读取场景（最近事件 + Mermaid 压缩图 + 元数据）。", "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}}, "required": ["session_id"]}},
+        {"name": "cerebrate_scene_compress", "description": "【短期场景】LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口 0-1 点约束，force 逃生门）。", "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["session_id"]}},
+        {"name": "cerebrate_scene_list", "description": "【短期场景】列出活跃场景。", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 100}}}},
+        {"name": "cerebrate_skill_append_version", "description": "【Skill 版本化】给技能记忆追加新版本（幂等）。memory_id + content + skill_markdown(可选)。", "inputSchema": {"type": "object", "properties": {"memory_id": {"type": "string"}, "content": {"type": "string"}, "description": {"type": "string", "default": ""}, "skill_markdown": {"type": "string", "default": ""}}, "required": ["memory_id", "content"]}},
+        {"name": "cerebrate_skill_versions", "description": "【Skill 版本化】读取技能版本历史。", "inputSchema": {"type": "object", "properties": {"memory_id": {"type": "string"}}, "required": ["memory_id"]}},
+        {"name": "cerebrate_loadout_set", "description": "【Loadout 装配】设置用户装配（绑定项目/偏好 scope/绑定标签）。", "inputSchema": {"type": "object", "properties": {"bound_projects": {"type": "array", "items": {"type": "string"}, "default": []}, "preferred_scope": {"type": "string", "default": ""}, "bound_tags": {"type": "array", "items": {"type": "string"}, "default": []}}, "required": []}},
+        {"name": "cerebrate_loadout_get", "description": "【Loadout 装配】读取用户装配。", "inputSchema": {"type": "object", "properties": {"user": {"type": "string", "default": ""}}}},
     ]
 
 
@@ -74,6 +82,11 @@ _WRITE_TOOLS = {
     "cerebrate_use_start",
     "cerebrate_use_finish",
     "cerebrate_entity_extract",
+    # v5.2 新写工具（需登录）
+    "cerebrate_scene_ingest",
+    "cerebrate_scene_compress",
+    "cerebrate_skill_append_version",
+    "cerebrate_loadout_set",
 }
 
 
@@ -304,6 +317,36 @@ def _invoke_tool(api, name: str, args: dict, current_user: str,
             })
         if name == "cerebrate_batch_process":
             return api.batch_process({"limit": args.get("limit", 50)})
+        if name == "cerebrate_scene_ingest":
+            return api.scene_ingest({
+                "session_id": args["session_id"],
+                "events": args.get("events", []),
+                "prompt": args.get("prompt", ""),
+            })
+        if name == "cerebrate_scene_get":
+            return api.scene_get({"session_id": args["session_id"]})
+        if name == "cerebrate_scene_compress":
+            return api.scene_compress({
+                "session_id": args["session_id"],
+                "force": args.get("force", False),
+            })
+        if name == "cerebrate_scene_list":
+            return api.scene_list({"limit": args.get("limit", 100)})
+        if name == "cerebrate_skill_append_version":
+            payload = dict(args)
+            payload.setdefault("_current_user", current_user)
+            payload.setdefault("physical_user", current_user)
+            return api.skill_append_version(payload)
+        if name == "cerebrate_skill_versions":
+            return api.skill_versions({"memory_id": args["memory_id"]})
+        if name == "cerebrate_loadout_set":
+            payload = dict(args)
+            payload.setdefault("_current_user", current_user)
+            payload.setdefault("user", current_user)
+            return api.loadout_set(payload)
+        if name == "cerebrate_loadout_get":
+            return api.loadout_get({
+                "user": args.get("user", "") or current_user})
         return {"status": "error", "error": {
             "code": -1, "message": f"未知工具: {name}"}}
     except KeyError as e:

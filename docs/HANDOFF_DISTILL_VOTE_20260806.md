@@ -1154,3 +1154,75 @@ Loadout 装配（我们有 scope 已覆盖大部分）。
 ## 经验
 - 用户省钱诉求 → 定时任务窗口机制：统一判断函数 + 可配置 + force 逃生门 + 测试默认关窗，
   四者缺一不可（统一判断避免三处逻辑漂移；force 逃生门保管理员/测试；测试关窗防当前时刻影响）
+
+---
+
+# 追加（2026-08-07 第三十轮）：实现三大遗留借鉴点（v5.2.0）
+
+## 用户要求（2026-08-07）
+把上轮遗留的三个腾讯借鉴点都安排实现：Mermaid 场景压缩、Skill 版本化、Loadout 装配。
+
+## ① Mermaid 场景压缩（短期记忆子系统）
+### 借鉴（腾讯 L2 认知状态机）
+腾讯把长任务工具调用记录压缩为 Mermaid flowchart TD 认知状态机（token 降 61%）：
+节点 = 阶段名 + status(done/doing/paused/blocked) + 结论摘要 + 时间戳；增量 replace/write。
+### 我们的实现
+- `cerebrate/memory/scene.py`（新）：SceneStore 文件系统 JSON 存储
+  - ingest 追加原始事件（零 LLM 成本，实时可用）；上限 200 条
+  - get 返回最近 50 条事件 + Mermaid 图 + 元数据；list/delete 生命周期
+  - session_id 严格校验（防路径穿越）
+- `cerebrate/brain/llm.py`：generate_scene_mmd（LLM 生成/更新 Mermaid 认知状态机）
+- API：`POST /v1/scene/ingest` `GET /v1/scene/{session_id}` `POST /v1/scene/compress`
+  `GET /v1/scene/list` `POST /v1/scene/delete`
+- compress 受蒸馏窗口约束（0-1 点，force 逃生门）——Mermaid 是 LLM 调用，省钱
+
+## ② Skill 版本化 appendVersion
+### 借鉴（腾讯 appendNextVersion 版本树）
+技能有版本树（head + 历史），appendVersion 事务：content_hash 幂等、资源 copyTree、owner 校验。
+### 我们的实现
+- `swarm.append_skill_version`：幂等（content_hash 相同返回 head）、版本号 = 版本数+1
+  （v1→v2→v3）、skill_versions 保存完整历史、同步更新 head 结构化字段
+- `swarm.skill_versions`：读版本历史
+- API：`POST /v1/skills/append-version` `POST /v1/skills/versions`
+- 权限：physical_user 必填（规避篡改）
+
+## ③ Loadout 装配
+### 借鉴（腾讯 Fixed Binding + ACL）
+按身份装配记忆资产（private/team/restricted/agent）。
+### 我们的实现（结合已有 scope/用户体系，轻量版）
+- `personal.set_loadout/get_loadout`：用户装配（bound_projects/preferred_scope/bound_tags）
+- API：`POST /v1/loadout` `GET /v1/loadout?user=`
+- 检索自动应用：`_apply_loadout_defaults` 在 search/query 开头调用——
+  未显式传参时用装配值（单绑定项目→project_id、preferred_scope→scope、
+  bound_tags 并入 tags）；显式传参不覆盖；无用户/无装配行为不变
+
+## MCP 工具（29 → 37，8 个新）
+scene_ingest/scene_get/scene_compress/scene_list、skill_append_version/skill_versions、
+loadout_set/loadout_get；写工具入 _WRITE_TOOLS（需登录）
+
+## 验证（真实执行，HTTP + MCP 全通过）
+1. 场景：ingest→get→list→delete 全链路 ✅；MCP scene_get 200 ✅
+2. Skill 版本化：append v1 + 幂等 ✅；versions 列表 ✅
+3. Loadout：set + get（带 user query 参数）✅
+4. 全量回归 364 passed（新增 13：test_scene 5 / test_skill_versions 4 / test_loadout 4）
+
+## 版本
+- VERSION: cerebrate-mcp-v5.2.0（5 处同步 + 镜像 tag cerebrate:5.2.0 + DEPLOY.md）
+- 协议 meta.protocol 保持 v5 不变
+
+## 踩坑记录
+- GET /v1/scene/list 曾被 startswith("/v1/scene/") 抢先当 session_id → 特判前置修复
+- GET 分支无 payload 变量（UnboundLocalError）→ 用 params 传参修复
+- Loadout 存 dict 被 remember str() 转单引号 repr → 改存 JSON 字符串
+
+## 关键文件
+- 新增：cerebrate/memory/scene.py、tests/test_scene.py、tests/test_skill_versions.py、
+  tests/test_loadout.py
+- 修改：llm.py（generate_scene_mmd）、swarm.py（版本化）、personal.py（loadout）、
+  manager.py（scene/loadout）、api.py（5+2+2 端点 + _apply_loadout_defaults）、
+  http.py（路由）、mcp_transport.py（8 工具）
+
+## 遗留/下一步建议
+1. Scene 压缩后的短期记忆 → 任务结束时自动蒸馏为长期技能（接 distill 窗口）
+2. Skill 版本 diff 展示（当前只存 hash/描述，未存逐版全文）
+3. Loadout 检索加权（当前只是默认值注入，未做装配项目/标签加权排序）
