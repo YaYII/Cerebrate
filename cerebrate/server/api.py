@@ -56,6 +56,10 @@ class BrainAPI:
         self._sense_cache: Optional[dict] = None
         self._sense_cache_ts: float = 0.0
         self._sense_ttl: float = 60.0
+        # sense 重建锁：缓存过期瞬间防并发风暴（healthcheck 30s + 客户端并发，
+        # 无锁时全部线程同时全量扫 events → ChromaDB 锁竞争 → 服务假死，v5.2.1 修复）
+        self._sense_lock = threading.Lock()
+        self._sense_building = False
         # 轻量服务状态缓存（调度信号）：5s TTL，无全库统计，AI 感知脑虫状况用
         self._status_cache: Optional[dict] = None
         self._status_cache_ts: float = 0.0
@@ -93,15 +97,21 @@ class BrainAPI:
         now = time.monotonic()
         if self._sense_cache is not None and now - self._sense_cache_ts < self._sense_ttl:
             return self._sense_cache
-        mind = CerebrateMind(self.mm)
-        data = mind.sense()
-        data["latest_event_id"] = self.events.latest_id()
-        data["server_role"] = "authoritative_brain"
-        data["llm"] = CerebrateLLM().status()
-        data["consensus"] = self.consensus_overview()
-        self._sense_cache = data
-        self._sense_cache_ts = now
-        return data
+        # 重建锁：只允许一个线程重建缓存；其余线程在重建期间返回旧缓存
+        # （若有）或等待重建完成，绝不并发全量统计（防假死根因）
+        with self._sense_lock:
+            if self._sense_cache is not None and \
+                    time.monotonic() - self._sense_cache_ts < self._sense_ttl:
+                return self._sense_cache
+            mind = CerebrateMind(self.mm)
+            data = mind.sense()
+            data["latest_event_id"] = self.events.latest_id()
+            data["server_role"] = "authoritative_brain"
+            data["llm"] = CerebrateLLM().status()
+            data["consensus"] = self.consensus_overview()
+            self._sense_cache = data
+            self._sense_cache_ts = now
+            return data
 
     def status(self) -> dict:
         """轻量服务状态（调度信号）：AI 据此决定查询时机与方式。
@@ -1670,20 +1680,57 @@ class BrainAPI:
         return event
 
     def consensus_overview(self) -> dict:
-        snapshots = {}
+        """共识总览：单次扫描 events 聚合所有投票快照（v5.2.1 修复 O(N²)）。
+
+        旧实现：对每个 vote event 调 consensus_snapshot，而 consensus_snapshot
+        内部又全量扫描 events → O(N²) 且每次都是 ChromaDB 全表扫描，
+        并发 sense（healthcheck+客户端）时锁竞争 → 服务假死。
+        新实现：一次 _consensus_vote_events() 内联聚合各 memory 最新投票的
+        decision 计数，避免重复全量扫描。
+        """
+        active_agents = len(self.mm.agents.list_active())
+        quorum = max(2, min(3, active_agents if active_agents else 2))
+        # memory_id → {agent: {vote, weight}}
+        latest: dict[str, dict[str, dict]] = {}
         for event in self._consensus_vote_events():
-            mid = event.get("payload", {}).get("memory_id")
-            if mid:
-                try:
-                    snapshots[mid] = self.consensus_snapshot(mid, apply=False)
-                except KeyError:
-                    continue  # 记忆已被删除，跳过
+            payload = event.get("payload", {})
+            mid = payload.get("memory_id")
+            if not mid:
+                continue
+            agent = event.get("source_agent", "")
+            if not agent:
+                continue
+            latest.setdefault(mid, {})[agent] = {
+                "vote": payload.get("vote", "abstain"),
+                "weight": self._vote_weight(agent, payload),
+            }
+
         decisions = {"pending": 0, "accepted": 0, "rejected": 0, "split": 0}
-        for snapshot in snapshots.values():
-            decision = snapshot.get("decision", "pending")
+        for votes_by_agent in latest.values():
+            votes = {"support": 0, "oppose": 0, "abstain": 0}
+            weighted = {"support": 0.0, "oppose": 0.0, "abstain": 0.0}
+            for v in votes_by_agent.values():
+                choice = v["vote"]
+                if choice not in votes:
+                    choice = "abstain"
+                votes[choice] += 1
+                weighted[choice] += v["weight"]
+            decisive = weighted["support"] + weighted["oppose"]
+            support_ratio = weighted["support"] / decisive if decisive else 0.0
+            oppose_ratio = weighted["oppose"] / decisive if decisive else 0.0
+            quorum_met = votes["support"] + votes["oppose"] >= quorum
+            decision = "pending"
+            if quorum_met and votes["support"] >= quorum and support_ratio >= 0.7 \
+                    and weighted["support"] >= 1.5 and weighted["oppose"] < 0.75:
+                decision = "accepted"
+            elif quorum_met and votes["oppose"] >= quorum and oppose_ratio >= 0.6 \
+                    and weighted["oppose"] >= 1.2:
+                decision = "rejected"
+            elif weighted["support"] > 0 and weighted["oppose"] > 0:
+                decision = "split"
             decisions[decision] = decisions.get(decision, 0) + 1
         return {
-            "tracked_memories": len(snapshots),
+            "tracked_memories": len(latest),
             "decisions": decisions,
         }
 

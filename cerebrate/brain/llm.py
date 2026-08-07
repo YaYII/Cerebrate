@@ -64,15 +64,18 @@ class CerebrateLLM:
         try:
             if self._provider == "anthropic":
                 import anthropic
-                self._client = anthropic.Anthropic()
+                self._client = anthropic.Anthropic(
+                    timeout=config.llm_timeout_seconds)
             elif self._provider == "openai":
                 import openai
-                self._client = openai.OpenAI()
+                self._client = openai.OpenAI(
+                    timeout=config.llm_timeout_seconds)
             elif self._provider == "deepseek":
                 import openai
                 self._client = openai.OpenAI(
                     base_url="https://api.deepseek.com/v1",
                     api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                    timeout=config.llm_timeout_seconds,
                 )
             else:
                 self._sdk_available = False

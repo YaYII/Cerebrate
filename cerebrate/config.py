@@ -65,6 +65,10 @@ class CerebrateConfig:
     # LLM 配置
     llm_provider: str = field(default_factory=lambda: os.environ.get("CEREBRATE_LLM_PROVIDER", "anthropic"))
     llm_model: str = field(default_factory=lambda: os.environ.get("CEREBRATE_LLM_MODEL", "claude-sonnet-4-6"))
+    # LLM 调用超时（秒）：防网络挂起占满 HTTP worker 线程导致服务假死（v5.2.1 修复）
+    llm_timeout_seconds: float = field(
+        default_factory=lambda: float(os.environ.get("CEREBRATE_LLM_TIMEOUT", "60"))
+    )
 
     # 免疫系统配置
     immune_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_IMMUNE_ENABLED", "true").lower() == "true")

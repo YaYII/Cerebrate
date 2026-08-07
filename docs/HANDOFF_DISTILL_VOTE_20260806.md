@@ -1328,3 +1328,43 @@ make regression                          # Makefile 入口
   有一致性静态测试，否则漏同步一处即回归
 - 一键回归脚本是团队稳定性的底线：语法检查先行（秒级 fail fast）、
   一致性测试居中（防跨端漂移）、全量测试兜底、健康检查收尾
+
+---
+
+# 追加（2026-08-07 第三十三轮）：生产事故修复 — sense 并发假死 + opencode 恢复
+
+## 用户报告
+opencode 无法使用脑虫。
+
+## 证据链排查
+1. 容器 healthy 但 /v1/sense 超时、CPU 190-253%、74 线程堆积、日志 06:48 后无响应
+2. py-spy dump 定位：多个 HTTP worker 全卡在
+   `sense → consensus_overview → _consensus_vote_events → events.read_after`（ChromaDB 全表扫描）
+3. 根因：sense() 缓存(60s TTL) 无重建锁 + consensus_overview O(N²)
+   - healthcheck 每 30s 调 sense + opencode/客户端并发
+   - 缓存过期瞬间所有线程同时全量扫 events
+   - consensus_overview 对每个 vote event 调 consensus_snapshot（内部又全量扫）
+     → O(N²) 且 ChromaDB 锁竞争 → 64 worker 线程全部卡死 → 服务假死
+
+## 修复（cerebrate:5.2.1）
+1. sense() 加重建锁：缓存过期只允许一个线程重建，其余复用旧缓存
+2. consensus_overview() 重写：单次扫描 events 内联聚合（消除 O(N²)）
+3. LLM 客户端加超时（CEREBRATE_LLM_TIMEOUT 默认 60s，anthropic/openai/deepseek 三处）
+
+## 验证（真实执行）
+1. 并发 10 路 sense 压测：全部 0.1-0.16s ✅；CPU 0.01%（原 253%）✅
+2. 本地 8765 → nginx 80 → ngrok 公网 全链路 200 ✅
+3. ngrok /cerebrate/v1/mcp initialize：5.2.1 ✅
+4. **opencode 调用 cerebrate_sense：成功（total 1843, healthy）✅**
+5. 全量回归 389 passed（新增 test_sense_concurrency.py 3 用例）
+
+## 回归测试（tests/test_sense_concurrency.py，防事故复发）
+- test_concurrent_sense_all_return：并发 10 路全部返回、30s 内完成（防假死）
+- test_cache_expiry_rebuilds_once：缓存过期重建只执行一次全量统计（防并发风暴）
+- test_consensus_overview_matches_snapshot_aggregation：聚合与逐条一致
+
+## 经验
+- 容器 healthy ≠ 服务可用：healthcheck 可能被卡在队列里仍算 healthy
+- 缓存必须带重建锁：TTL 过期瞬间是并发风暴窗口，无锁必炸
+- O(N²) 全表扫描在并发下是服务假死元凶：聚合改单次扫描
+- py-spy 是定位 Python 线程卡死的利器（容器内 pip install py-spy + --privileged）
