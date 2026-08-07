@@ -724,7 +724,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.3" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.4" },
         instructions,
       } });
     } else if (method === "ping") {
@@ -780,7 +780,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.2.3");
+    console.log("5.2.4");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
@@ -856,7 +856,7 @@ function cli(argv) {
 // 首次使用说明：同事手动运行（终端 TTY）时自动打印，让对方知道如何接入。
 function printFirstRunHelp() {
   console.log("");
-  console.log("🧠 Cerebrate MCP v5.2.3 — 团队记忆中枢客户端（已内置默认云端地址，零配置）");
+  console.log("🧠 Cerebrate MCP v5.2.4 — 团队记忆中枢客户端（已内置默认云端地址，零配置）");
   console.log("");
   console.log("你已连接到脑虫记忆系统，接入只需 3 步：");
   console.log("");

@@ -1266,7 +1266,7 @@ def main():
     # AI 客户端以管道调用时 isatty()=False，走正常 MCP server 流程。
     if len(sys.argv) <= 1 and sys.stdin.isatty():
         print("")
-        print("🧠 Cerebrate MCP v5.2.3 — 团队记忆中枢客户端（已内置默认云端地址，零配置）")
+        print("🧠 Cerebrate MCP v5.2.4 — 团队记忆中枢客户端（已内置默认云端地址，零配置）")
         print("")
         print("你已连接到脑虫记忆系统，接入只需 3 步：")
         print("")
@@ -1328,7 +1328,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.3"},
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.4"},
                     "instructions": _instructions,
                 }
             })
