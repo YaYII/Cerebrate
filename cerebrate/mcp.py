@@ -1262,31 +1262,45 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("login", "logout", "status"):
         sys.exit(_run_cli(sys.argv[1:]))
 
-    # 用户手动运行（终端 TTY）：打印首次使用说明，让对方知道如何接入；
+    # 用户手动运行（终端 TTY）：打印「复制给 AI 的接入指令」；
     # AI 客户端以管道调用时 isatty()=False，走正常 MCP server 流程。
     if len(sys.argv) <= 1 and sys.stdin.isatty():
         print("")
-        print("🧠 Cerebrate MCP v5.2.4 — 团队记忆中枢客户端（已内置默认云端地址，零配置）")
+        print("🧠 Cerebrate MCP v5.2.5 — 团队记忆中枢客户端（已内置默认云端地址）")
+        print("服务地址: " + _SERVER_URL)
         print("")
-        print("你已连接到脑虫记忆系统，接入只需 3 步：")
+        # 已登录则直接提示
+        try:
+            _local = json.loads(_TOKEN_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _local = {}
+        if _local.get("token"):
+            print("✓ 你已登录: " + str(_local.get("user_id", "?")))
+            print("  直接在你的 AI 对话里让 AI 调 cerebrate_sense 即可开始使用。")
+            print("")
+            return
+        print("👇 把下面【】里的内容复制到你的 AI 对话里发送即可（AI 会帮你完成全部接入）：")
         print("")
-        print("  ① 在 AI 对话里让助手调用 MCP 工具注册：")
-        print("     cerebrate_auth_register { \"username\": \"你的用户名\" }")
-        print("     → 浏览器打开返回的 bind_url → 手机 Authenticator 扫码绑定")
+        print("──────────────────────────────────────────────────────")
+        print("【请帮我接入 Cerebrate 脑虫记忆系统：")
         print("")
-        print("  ② 登录拿本人 token（长期有效，仅存本机）：")
-        print("     python3 -m cerebrate.mcp login --username <用户名> --code <Authenticator 6位码>")
+        print("1. 先把 Cerebrate MCP 绑定到你的工具配置里（你按自己的标准方式配置）：")
+        print("   - MCP 服务地址: " + _SERVER_URL)
+        print("   - HTTP MCP 端点: " + _SERVER_URL + "/v1/mcp")
+        print("   - stdio 命令（若支持）: npx -y cerebrate-mcp@latest")
         print("")
-        print("  ③ 重启 AI 客户端，新对话里让 AI 先调 cerebrate_sense 即可开始使用。")
+        print("2. 绑定后调用 cerebrate_auth_register 注册新用户，用户名我稍后告诉你；")
+        print("   你会拿到一个 bind_url（绑定链接），把它发给我。")
         print("")
-        print("常用命令：")
-        print("  cerebrate-mcp status          # 查看登录态 / 服务地址")
-        print("  cerebrate-mcp login           # 登录（用户名 + Authenticator 码）")
-        print("  cerebrate-mcp logout          # 登出")
-        print("  cerebrate-mcp setup --url X   # 地址变了时覆盖默认云端地址")
-        print("  cerebrate-mcp --version       # 版本")
+        print("3. 我打开 bind_url 用手机 Authenticator 扫码绑定后，会给你 6 位动态码。")
         print("")
-        print("AI 对接手册：docs/AI_ONBOARDING.md（会话流程 / 43 工具分组 / 写记忆规范）")
+        print("4. 收到 6 位码后，调用 cerebrate_auth_login 完成登录，token 自动保存本地。")
+        print("")
+        print("5. 最后调 cerebrate_sense 确认连接成功，并告诉我怎么开始使用。】")
+        print("──────────────────────────────────────────────────────")
+        print("")
+        print("提示：如果 AI 说还没有这个 MCP 工具，说明它还没把 MCP 绑进配置——")
+        print("      把上面第 1 步的地址告诉它即可，AI 知道怎么绑定。")
         print("")
         return
 
@@ -1328,7 +1342,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.4"},
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.5"},
                     "instructions": _instructions,
                 }
             })

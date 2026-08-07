@@ -724,7 +724,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.4" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.5" },
         instructions,
       } });
     } else if (method === "ping") {
@@ -780,7 +780,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.2.4");
+    console.log("5.2.5");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
@@ -853,30 +853,42 @@ function cli(argv) {
   }
 }
 
-// 首次使用说明：同事手动运行（终端 TTY）时自动打印，让对方知道如何接入。
-function printFirstRunHelp() {
+// 首次使用引导：同事手动运行（终端 TTY）时打印「复制给 AI 的接入指令」。
+// 不要求手工操作：AI 自己会绑定 MCP、注册、获取授权码、扫码绑定、登录拿 token。
+function printOnboardingInstructions() {
   console.log("");
-  console.log("🧠 Cerebrate MCP v5.2.4 — 团队记忆中枢客户端（已内置默认云端地址，零配置）");
+  console.log("🧠 Cerebrate MCP v5.2.5 — 团队记忆中枢客户端（已内置默认云端地址）");
+  console.log("  服务地址: " + SERVER_URL);
   console.log("");
-  console.log("你已连接到脑虫记忆系统，接入只需 3 步：");
+  const local = readTokenFile();
+  if (local.token) {
+    console.log("✓ 你已登录: " + (local.user_id || "?"));
+    console.log("  直接在你的 AI 对话里让 AI 调 cerebrate_sense 即可开始使用。");
+    console.log("");
+    return;
+  }
+  console.log("👇 把下面【】里的内容复制到你的 AI 对话里发送即可（AI 会帮你完成全部接入）：");
   console.log("");
-  console.log("  ① 在 AI 对话里让助手调用 MCP 工具注册：");
-  console.log("     cerebrate_auth_register { \"username\": \"你的用户名\" }");
-  console.log("     → 浏览器打开返回的 bind_url → 手机 Authenticator 扫码绑定");
+  console.log("──────────────────────────────────────────────────────");
+  console.log("【请帮我接入 Cerebrate 脑虫记忆系统：");
   console.log("");
-  console.log("  ② 登录拿本人 token（长期有效，仅存本机）：");
-  console.log("     cerebrate-mcp login --username <用户名> --code <Authenticator 6位码>");
+  console.log("1. 先把 Cerebrate MCP 绑定到你的工具配置里（你按自己的标准方式配置）：");
+  console.log("   - MCP 服务地址: " + SERVER_URL);
+  console.log("   - HTTP MCP 端点: " + SERVER_URL + "/v1/mcp");
+  console.log("   - stdio 命令（若支持）: npx -y cerebrate-mcp@latest");
   console.log("");
-  console.log("  ③ 重启 AI 客户端，新对话里让 AI 先调 cerebrate_sense 即可开始使用。");
+  console.log("2. 绑定后调用 cerebrate_auth_register 注册新用户，用户名我稍后告诉你；");
+  console.log("   你会拿到一个 bind_url（绑定链接），把它发给我。");
   console.log("");
-  console.log("常用命令：");
-  console.log("  cerebrate-mcp status          # 查看登录态 / 服务地址");
-  console.log("  cerebrate-mcp login           # 登录（用户名 + Authenticator 码）");
-  console.log("  cerebrate-mcp logout          # 登出");
-  console.log("  cerebrate-mcp setup --url X   # 地址变了时覆盖默认云端地址");
-  console.log("  cerebrate-mcp --version       # 版本");
+  console.log("3. 我打开 bind_url 用手机 Authenticator 扫码绑定后，会给你 6 位动态码。");
   console.log("");
-  console.log("AI 对接手册：docs/AI_ONBOARDING.md（会话流程 / 43 工具分组 / 写记忆规范）");
+  console.log("4. 收到 6 位码后，调用 cerebrate_auth_login 完成登录，token 自动保存本地。");
+  console.log("");
+  console.log("5. 最后调 cerebrate_sense 确认连接成功，并告诉我怎么开始使用。】");
+  console.log("──────────────────────────────────────────────────────");
+  console.log("");
+  console.log("提示：如果 AI 说还没有这个 MCP 工具，说明它还没把 MCP 绑进配置——");
+  console.log("       把上面第 1 步的地址告诉它即可，AI 知道怎么绑定。");
   console.log("");
 }
 
@@ -885,7 +897,7 @@ if (require.main === module) {
     cli(process.argv);
   } else if (process.argv.length <= 2 && process.stdin.isTTY) {
     // 用户手动运行（终端）：打印使用说明；AI 客户端以管道调用时 isTTY=false，走正常 MCP server
-    printFirstRunHelp();
+    printOnboardingInstructions();
   } else {
     runMcp();
   }
