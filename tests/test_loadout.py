@@ -100,6 +100,39 @@ class LoadoutTests(unittest.TestCase):
         g = self.api.loadout_get({"user": "nobody"})
         self.assertEqual(g["loadout"]["bound_projects"], [])
 
+    def test_boost_project_tag_hits(self):
+        """检索加权：装配项目/标签命中的结果排前。"""
+        self.api.loadout_set({
+            "_current_user": "alice",
+            "bound_projects": ["cerebrate"],
+            "bound_tags": ["skill"],
+        })
+        items = [
+            {"memory_id": "a", "title": "other", "score": 0.9,
+             "project_id": "ihm", "tags": ["coding"]},
+            {"memory_id": "b", "title": "mine", "score": 0.8,
+             "project_id": "cerebrate", "tags": ["skill", "rrf"]},
+        ]
+        out = self.api._apply_loadout_boost(items, "alice")
+        # b 命中项目+标签 → 排前
+        self.assertEqual(out[0]["memory_id"], "b")
+        # 加权分叠加：0.8 + 0.15 + 0.08 = 1.03 > 0.9
+        self.assertGreater(out[0]["score"], out[1]["score"])
+
+    def test_boost_no_user_unchanged(self):
+        """无用户 → 加权不影响（原样返回）。"""
+        items = [{"memory_id": "a", "score": 0.5}]
+        out = self.api._apply_loadout_boost(items, "")
+        self.assertEqual(out, items)
+
+    def test_boost_empty_loadout_unchanged(self):
+        """无装配 → 加权不影响。"""
+        items = [{"memory_id": "a", "score": 0.5, "project_id": "x",
+                  "tags": ["y"]}]
+        out = self.api._apply_loadout_boost(items, "nobody")
+        self.assertEqual(out[0]["memory_id"], "a")
+        self.assertEqual(out[0]["score"], 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

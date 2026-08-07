@@ -355,10 +355,14 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.scene_compress(payload)
         if method == "POST" and path == "/v1/scene/delete":
             return self.api.scene_delete(payload)
+        if method == "POST" and path == "/v1/scene/distill":
+            return self.api.scene_distill(payload)
         if method == "POST" and path == "/v1/skills/append-version":
             return self.api.skill_append_version(payload)
         if method == "POST" and path == "/v1/skills/versions":
             return self.api.skill_versions(payload)
+        if method == "POST" and path == "/v1/skills/diff":
+            return self.api.skill_diff(payload)
         if method == "POST" and path == "/v1/loadout":
             return self.api.loadout_set(payload)
         if method == "GET" and path == "/v1/loadout":

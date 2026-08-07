@@ -1022,3 +1022,72 @@ class CerebrateLLM:
             }
         except Exception:
             return None
+
+    def distill_scene_to_skill(self, scene: dict) -> Optional[dict]:
+        """把短期场景蒸馏为结构化技能（借鉴 TencentDB Agent Memory 场景→技能沉淀）。
+
+        输入场景（事件流 + Mermaid 图 + 元数据），输出 SKILL.md 结构化技能：
+          {title, skill_markdown, problem, solution}
+        LLM 不可用/失败返回 None（调用方保留场景，不强制沉淀）。
+        """
+        if not self.is_available():
+            return None
+        events = scene.get("events", []) or []
+        mmd = scene.get("mmd") or ""
+        meta = scene.get("meta", {}) or {}
+        if not events and not mmd:
+            return None
+
+        event_lines = []
+        for i, ev in enumerate(events[:100], start=1):
+            kind = ev.get("kind", "tool")
+            text = (ev.get("text") or "")[:500]
+            event_lines.append(f"{i}. [{kind}] {text}")
+        events_text = "\n".join(event_lines)
+
+        system = (
+            "你是技能提炼专家：把完成任务的短期场景沉淀为可复用的 SKILL.md 技能。"
+            "输出必须是合法 YAML frontmatter + body 的 SKILL.md："
+            "frontmatter 含 name（小写连字符）、description、version、"
+            "trigger（何时触发）、validation（如何验证）、resources（可选）；"
+            "body 写清场景、排查步骤、根因、方案、验证。"
+            "只输出纯 JSON：{\"title\":\"技能标题\","
+            "\"skill_markdown\":\"---\\nname: ...\\n---\\n正文\","
+            "\"problem\":\"解决的原始问题\",\"solution\":\"一句话方案\"}。"
+            "禁止解释文本。"
+        )
+        user_parts = [
+            f"## 任务目标：{meta.get('task_goal', '')}",
+            f"## 进度：{meta.get('progress', 0)}%",
+            f"## 事件流（共 {len(events)} 条，展示最近 100 条）：\n{events_text}",
+        ]
+        if mmd:
+            user_parts.append(f"## Mermaid 认知状态机（压缩摘要）：\n{mmd}")
+        user_parts.append(
+            "## 要求：提炼出可复用的完整技能，body 至少 500 字符，"
+            "包含具体命令/步骤/验证方法。")
+
+        try:
+            text = self._chat_completion(
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": "\n\n".join(user_parts)}],
+                max_tokens=4000, temperature=0.2)
+            if not text:
+                return None
+            import re as _re
+            match = _re.search(r'\{[\s\S]*\}', text)
+            if not match:
+                return None
+            result = json.loads(match.group())
+            skill_md = (result.get("skill_markdown") or "").strip()
+            title = (result.get("title") or "").strip()
+            if not skill_md or not skill_md.startswith("---"):
+                return None
+            return {
+                "title": title[:200] or "技能: 场景沉淀",
+                "skill_markdown": skill_md,
+                "problem": (result.get("problem") or "")[:500],
+                "solution": (result.get("solution") or "")[:300],
+            }
+        except Exception:
+            return None

@@ -15,7 +15,7 @@ import json
 from cerebrate.protocol import ok
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
-SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.2.0"}
+SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.2.1"}
 
 
 # ── 工具定义（JSON Schema，与 mcp.py / mcp.js 一致）─────────
@@ -54,8 +54,10 @@ def _tools() -> list[dict]:
         {"name": "cerebrate_scene_get", "description": "【短期场景】读取场景（最近事件 + Mermaid 压缩图 + 元数据）。", "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}}, "required": ["session_id"]}},
         {"name": "cerebrate_scene_compress", "description": "【短期场景】LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口 0-1 点约束，force 逃生门）。", "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["session_id"]}},
         {"name": "cerebrate_scene_list", "description": "【短期场景】列出活跃场景。", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 100}}}},
+        {"name": "cerebrate_scene_distill", "description": "【短期场景】任务结束后蒸馏为长期技能（SKILL.md 结构化入库，受蒸馏窗口约束，force 逃生门）。", "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}, "force": {"type": "boolean", "default": False}, "cleanup": {"type": "boolean", "default": False}, "project_id": {"type": "string", "default": ""}, "scope": {"type": "string", "default": ""}}, "required": ["session_id"]}},
         {"name": "cerebrate_skill_append_version", "description": "【Skill 版本化】给技能记忆追加新版本（幂等）。memory_id + content + skill_markdown(可选)。", "inputSchema": {"type": "object", "properties": {"memory_id": {"type": "string"}, "content": {"type": "string"}, "description": {"type": "string", "default": ""}, "skill_markdown": {"type": "string", "default": ""}}, "required": ["memory_id", "content"]}},
         {"name": "cerebrate_skill_versions", "description": "【Skill 版本化】读取技能版本历史。", "inputSchema": {"type": "object", "properties": {"memory_id": {"type": "string"}}, "required": ["memory_id"]}},
+        {"name": "cerebrate_skill_diff", "description": "【Skill 版本化】对比两个版本的全文差异（difflib 行级）。", "inputSchema": {"type": "object", "properties": {"memory_id": {"type": "string"}, "from_version": {"type": "string", "default": ""}, "to_version": {"type": "string", "default": ""}}, "required": ["memory_id"]}},
         {"name": "cerebrate_loadout_set", "description": "【Loadout 装配】设置用户装配（绑定项目/偏好 scope/绑定标签）。", "inputSchema": {"type": "object", "properties": {"bound_projects": {"type": "array", "items": {"type": "string"}, "default": []}, "preferred_scope": {"type": "string", "default": ""}, "bound_tags": {"type": "array", "items": {"type": "string"}, "default": []}}, "required": []}},
         {"name": "cerebrate_loadout_get", "description": "【Loadout 装配】读取用户装配。", "inputSchema": {"type": "object", "properties": {"user": {"type": "string", "default": ""}}}},
     ]
@@ -85,6 +87,7 @@ _WRITE_TOOLS = {
     # v5.2 新写工具（需登录）
     "cerebrate_scene_ingest",
     "cerebrate_scene_compress",
+    "cerebrate_scene_distill",
     "cerebrate_skill_append_version",
     "cerebrate_loadout_set",
 }
@@ -332,6 +335,11 @@ def _invoke_tool(api, name: str, args: dict, current_user: str,
             })
         if name == "cerebrate_scene_list":
             return api.scene_list({"limit": args.get("limit", 100)})
+        if name == "cerebrate_scene_distill":
+            payload = dict(args)
+            payload.setdefault("_current_user", current_user)
+            payload.setdefault("physical_user", current_user)
+            return api.scene_distill(payload)
         if name == "cerebrate_skill_append_version":
             payload = dict(args)
             payload.setdefault("_current_user", current_user)
@@ -339,6 +347,12 @@ def _invoke_tool(api, name: str, args: dict, current_user: str,
             return api.skill_append_version(payload)
         if name == "cerebrate_skill_versions":
             return api.skill_versions({"memory_id": args["memory_id"]})
+        if name == "cerebrate_skill_diff":
+            return api.skill_diff({
+                "memory_id": args["memory_id"],
+                "from_version": args.get("from_version", ""),
+                "to_version": args.get("to_version", ""),
+            })
         if name == "cerebrate_loadout_set":
             payload = dict(args)
             payload.setdefault("_current_user", current_user)

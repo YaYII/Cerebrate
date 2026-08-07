@@ -126,6 +126,39 @@ class SceneApiTests(unittest.TestCase):
         self.assertFalse(r["compressed"])
         self.assertIn("LLM", r.get("reason", ""))
 
+    def test_distill_window_gate(self):
+        """窗口外 distill 被拦截；force 逃生门可过。"""
+        from cerebrate.config import config
+        config.evolution_window_enabled = True
+        config.evolution_window_start_hour = 0
+        config.evolution_window_end_hour = 1
+        config.evolution_window_tz_offset_hours = 8
+        local_noon_utc = datetime(2026, 8, 7, 12) - timedelta(hours=8)
+        with patch("cerebrate.config.datetime", wraps=datetime) as mock_dt:
+            mock_dt.now.return_value = local_noon_utc.replace(tzinfo=timezone.utc)
+            self.api.scene_ingest(
+                {"session_id": "d1", "events": [{"kind": "msg", "text": "x"}]})
+            r = self.api.scene_distill({"session_id": "d1"})
+            self.assertFalse(r["distilled"])
+            self.assertIn("蒸馏窗口未开放", r["reason"])
+
+            # force 逃生门：过窗口 → 但 LLM 不可用 → 返回 LLM 提示
+            r2 = self.api.scene_distill(
+                {"session_id": "d1", "force": True,
+                 "physical_user": "tester"})
+            self.assertFalse(r2["distilled"])
+            self.assertNotIn("蒸馏窗口未开放", r2.get("reason", ""))
+
+    def test_distill_requires_owner(self):
+        """distill 无 physical_user 时返回安全溯源错误（不抛异常）。"""
+        from cerebrate.config import config
+        config.evolution_window_enabled = False
+        self.api.scene_ingest(
+            {"session_id": "d2", "events": [{"kind": "msg", "text": "x"}]})
+        r = self.api.scene_distill({"session_id": "d2"})
+        self.assertFalse(r["distilled"])
+        self.assertIn("physical_user", r["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

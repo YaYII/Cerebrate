@@ -1582,6 +1582,8 @@ class SwarmMemory:
             "author": author or meta.get("physical_user", ""),
             "description": (description or
                             meta.get("skill_description", "") or "")[:1024],
+            # v5.2.1：保存每版全文快照（供 diff 展示；技能正文 ≤50KB 可接受）
+            "content": content[:50_000],
         }
         versions.append(entry)
 

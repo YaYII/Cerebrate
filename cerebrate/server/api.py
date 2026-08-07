@@ -286,6 +286,9 @@ class BrainAPI:
         all_matches.extend(related)
         # 查询优先自己的记忆（服务端认证身份）
         all_matches = self._prioritize_own(all_matches, payload.get("_current_user", ""))
+        # Loadout 检索加权：装配项目/标签命中排前（v5.2.1）
+        all_matches = self._apply_loadout_boost(
+            all_matches, payload.get("_current_user", ""))
         recommendation = "new_experience"
         task = None
         if best:
@@ -402,6 +405,8 @@ class BrainAPI:
 
         # 查询优先自己的记忆（服务端认证身份）
         index = self._prioritize_own(index, payload.get("_current_user", ""))
+        # Loadout 检索加权：装配项目/标签命中排前（v5.2.1）
+        index = self._apply_loadout_boost(index, payload.get("_current_user", ""))
         self.events.append("memory.searched", agent_id,
                            {"query": query, "matches": len(index)},
                            project_id or "")
@@ -523,6 +528,67 @@ class BrainAPI:
         deleted = self.mm.scene.delete(session_id)
         return {"session_id": session_id, "deleted": deleted}
 
+    def scene_distill(self, payload: dict) -> dict:
+        """短期场景 → 长期技能：把完成任务场景蒸馏为 SKILL.md 结构化技能入库。
+
+        接蒸馏窗口约束（0-1 点省钱，force 逃生门）——蒸馏是 LLM 调用。
+        蒸馏成功后可选删除场景（cleanup=true，默认保留供核查）。
+        """
+        session_id = payload.get("session_id", "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        # 蒸馏窗口（v5.2.1）：LLM 调用，非低谷期禁止（force 逃生门）
+        from cerebrate.config import in_evolution_window
+        if not payload.get("force", False) and not in_evolution_window():
+            return {
+                "distilled": False,
+                "reason": "蒸馏窗口未开放（默认本地 0:00-1:00），场景蒸馏已跳过省钱。"
+                          "管理员可传 force=true 显式强制。",
+            }
+        scene = self.mm.scene.get(session_id)
+        if scene["event_count"] == 0 and not scene["mmd"]:
+            return {"distilled": False, "reason": "场景无内容，无法蒸馏"}
+        # 安全溯源优先：先校验身份，再做任何 LLM 调用
+        owner = (payload.get("_current_user") or ""
+                 or payload.get("physical_user") or "")
+        if not owner:
+            return {"distilled": False,
+                    "reason": "physical_user is required for security traceability"}
+        from cerebrate.brain.llm import CerebrateLLM
+        llm = CerebrateLLM()
+        if not llm.is_available():
+            return {"distilled": False, "reason": "LLM 不可用"}
+        doc = llm.distill_scene_to_skill(scene)
+        if not doc:
+            return {"distilled": False, "reason": "LLM 蒸馏失败"}
+        # 校验 SKILL.md 并入库（复用 propose 路径，含安全溯源）
+        propose = self.propose_memory({
+            "title": doc["title"],
+            "content": doc["skill_markdown"],
+            "category": "skill",
+            "tags": "skill,scene-distilled",
+            "problem": doc["problem"],
+            "solution": doc["solution"],
+            "agent": payload.get("agent", "cerebrate-evolution"),
+            "physical_user": owner,
+            "project_id": payload.get("project_id", ""),
+            "scope": payload.get("scope", ""),
+            "validate": False,
+            "skill_markdown": doc["skill_markdown"],
+        })
+        memory_id = propose["memory_id"]
+        if payload.get("cleanup", False):
+            self.mm.scene.delete(session_id)
+        self.events.append("scene.distilled", "brain-server",
+                           {"session_id": session_id,
+                            "memory_id": memory_id})
+        return {
+            "distilled": True,
+            "memory_id": memory_id,
+            "title": doc["title"],
+            "scene_cleaned": bool(payload.get("cleanup", False)),
+        }
+
     # ==================== Skill 版本化（v5.2，借鉴 TencentDB Agent Memory appendNextVersion） ====================
 
     def skill_append_version(self, payload: dict) -> dict:
@@ -581,6 +647,58 @@ class BrainAPI:
             "version_count": len(versions),
             "versions": versions,
         }
+
+    def skill_diff(self, payload: dict) -> dict:
+        """Skill 版本化：对比两个版本的全文差异（difflib 行级）。"""
+        memory_id = payload.get("memory_id", "").strip()
+        if not memory_id:
+            raise ValueError("memory_id is required")
+        versions = self.mm.swarm.skill_versions(memory_id)
+        if not versions:
+            raise ValueError("memory has no skill versions")
+        # 缺省对比最近两个版本
+        try:
+            from_v = str(payload.get("from_version", "") or "")
+            to_v = str(payload.get("to_version", "") or "")
+            if not from_v or not to_v:
+                from_v = versions[-2]["version"] if len(versions) >= 2 \
+                    else versions[-1]["version"]
+                to_v = versions[-1]["version"]
+            a = next((v for v in versions if v["version"] == from_v), None)
+            b = next((v for v in versions if v["version"] == to_v), None)
+            if not a or not b:
+                raise ValueError(
+                    f"版本不存在（可用: {[v['version'] for v in versions]}）")
+            content_a = a.get("content", "")
+            content_b = b.get("content", "")
+            if not content_a or not content_b:
+                return {
+                    "memory_id": memory_id,
+                    "from_version": from_v,
+                    "to_version": to_v,
+                    "diff": None,
+                    "note": "旧版本未存全文快照，无法 diff（v5.2.1 后版本才有）",
+                }
+            import difflib
+            diff_lines = list(difflib.unified_diff(
+                content_a.splitlines(),
+                content_b.splitlines(),
+                fromfile=f"v{from_v}", tofile=f"v{to_v}", lineterm=""))
+            return {
+                "memory_id": memory_id,
+                "from_version": from_v,
+                "to_version": to_v,
+                "added": sum(1 for l in diff_lines if l.startswith("+")
+                             and not l.startswith("+++")),
+                "removed": sum(1 for l in diff_lines if l.startswith("-")
+                               and not l.startswith("---")),
+                "diff": diff_lines[:200],
+            }
+        except ValueError:
+            raise
+        except Exception as e:
+            return {"memory_id": memory_id, "diff": None,
+                    "note": f"diff 计算失败: {e}"}
 
     # ==================== Loadout 装配（v5.2，借鉴 TencentDB Agent Memory Loadout） ====================
 
@@ -649,6 +767,42 @@ class BrainAPI:
                     tags.append(t)
             out["tags"] = tags
         return out
+
+    def _apply_loadout_boost(self, items: list[dict], user: str) -> list[dict]:
+        """Loadout 检索加权：装配项目/标签命中的记忆排前（v5.2.1）。
+
+        在 _prioritize_own（优先自己的记忆）之后应用：
+          - 装配绑定的项目命中 → score +0.15
+          - 装配绑定的标签命中 → score +0.08
+        稳定排序（相同加权分保持原相对顺序），不丢失未命中项。
+        """
+        if not user or not items:
+            return items
+        loadout = self.mm.get_user_loadout(user)
+        if not loadout:
+            return items
+        bound_projects = set(loadout.get("bound_projects", []))
+        bound_tags = set(loadout.get("bound_tags", []))
+        if not bound_projects and not bound_tags:
+            return items
+
+        boosted: list[tuple[float, dict]] = []
+        for r in items:
+            score = float(r.get("score", 0) or 0)
+            pid = (r.get("project_id") or "").strip()
+            if pid in bound_projects:
+                score += 0.15
+            r_tags = r.get("tags") or []
+            if isinstance(r_tags, str):
+                r_tags = [t.strip() for t in r_tags.split(",") if t.strip()]
+            if bound_tags.intersection(set(r_tags)):
+                score += 0.08
+            boosted.append((score, r))
+        # 稳定排序：加权分降序，同分保持原相对顺序（Python sort 稳定）
+        boosted.sort(key=lambda x: x[0], reverse=True)
+        for score, r in boosted:
+            r["score"] = round(score, 4)
+        return [r for _, r in boosted]
 
     def timeline(self, payload: dict) -> dict:
         """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文。

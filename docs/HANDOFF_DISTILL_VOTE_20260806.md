@@ -1226,3 +1226,58 @@ loadout_set/loadout_get；写工具入 _WRITE_TOOLS（需登录）
 1. Scene 压缩后的短期记忆 → 任务结束时自动蒸馏为长期技能（接 distill 窗口）
 2. Skill 版本 diff 展示（当前只存 hash/描述，未存逐版全文）
 3. Loadout 检索加权（当前只是默认值注入，未做装配项目/标签加权排序）
+
+---
+
+# 追加（2026-08-07 第三十一轮）：实现三项遗留建议（v5.2.1）
+
+## 用户要求（2026-08-07）
+按交接文档的遗留建议自主实施：① Scene 蒸馏为长期技能 ② Skill 版本 diff
+③ Loadout 检索加权。用户授权自主判断（"你自己的记忆，你比我们更清楚如何管理"）。
+
+## ① Scene 蒸馏为长期技能（scene_distill）
+### 实现
+- `llm.distill_scene_to_skill(scene)`：把场景（事件流 + Mermaid 图 + 元数据）
+  LLM 蒸馏为 SKILL.md 结构化技能，输出 {title, skill_markdown, problem, solution}
+- `api.scene_distill`：窗口检查（0-1 点，force 逃生门）→ 安全溯源优先
+  （physical_user 必填，先于 LLM 检查）→ LLM 蒸馏 → 复用 propose_memory 入库
+  → cleanup=true 可选删除场景
+- API：POST /v1/scene/distill；MCP：cerebrate_scene_distill（写工具需登录）
+
+## ② Skill 版本 diff（skill_diff）
+### 实现
+- `append_skill_version` 的版本 entry 增加 content 全文快照（≤50KB）
+- `api.skill_diff`：difflib.unified_diff 行级对比，缺省对比最近两版；
+  返回 added/removed 计数 + diff 行（≤200）；旧版本无快照时提示不抛异常
+- API：POST /v1/skills/diff；MCP：cerebrate_skill_diff
+
+## ③ Loadout 检索加权（_apply_loadout_boost）
+### 实现
+- `api._apply_loadout_boost(items, user)`：装配绑定项目命中 → score+0.15，
+  装配绑定标签命中 → score+0.08；稳定排序（同分保持原相对顺序），不丢未命中项
+- 接入 search/query：在 _prioritize_own（优先自己的记忆）之后应用
+- 无用户/无装配 → 原样返回（零破坏）
+
+## 验证（真实执行 + 全量回归）
+1. Skill diff：v2→v3 正确识别 `+第三步：按 1/(k+rank) 融合。`（added=1）✅
+2. scene_distill：窗口外正确拦截（reason=蒸馏窗口未开放）✅
+3. 全量回归 371 passed（新增 7：test_scene 2 / test_skill_versions 2 / test_loadout 3）
+
+## 版本
+- VERSION: cerebrate-mcp-v5.2.1（5 处同步 + 镜像 tag cerebrate:5.2.1 + DEPLOY.md）
+- 协议 meta.protocol 保持 v5 不变
+
+## 关键文件
+- 修改：llm.py（distill_scene_to_skill）、swarm.py（版本快照 content）、
+  api.py（scene_distill/skill_diff/_apply_loadout_boost）、http.py（2 路由）、
+  mcp_transport.py（2 工具，29→39 累计）
+- 测试：test_scene.py / test_skill_versions.py / test_loadout.py（累计 20 用例）
+
+## 设计决策
+- 安全溯源优先于 LLM 调用：scene_distill 先校验 physical_user 再调 LLM（防匿名耗 LLM 费）
+- 版本快照存全文而非 hash：技能正文 ≤50KB 可接受，为 diff 提供基础
+- Loadout 加权用固定加分（0.15/0.08）而非重算 RRF：简单可预期、稳定排序
+
+## 经验
+三个建议都是"补完闭环"：场景有"沉淀出口"、版本有"对比能力"、装配有"排序影响"。
+实现原则延续：最小改动、零破坏（旧版本无快照/无装配都优雅降级）、可测试。

@@ -116,6 +116,42 @@ class SkillVersionsTests(unittest.TestCase):
             self.api.skill_append_version(
                 {"memory_id": mid, "content": "内容"})
 
+    def test_diff_between_versions(self):
+        """版本 diff：两个版本间返回行级差异与增减计数。"""
+        mid = self._create_skill("diff")
+        content_v1 = "步骤A\n步骤B\n步骤C\n"
+        self.api.skill_append_version(
+            {"memory_id": mid, "content": content_v1,
+             "description": "首版", "physical_user": "tester"})
+        content_v2 = "步骤A\n步骤B2\n步骤D\n"
+        self.api.skill_append_version(
+            {"memory_id": mid, "content": content_v2,
+             "description": "改B加D", "physical_user": "tester"})
+        d = self.api.skill_diff({"memory_id": mid})
+        self.assertEqual(d["from_version"], "1")
+        self.assertEqual(d["to_version"], "2")
+        self.assertGreater(d["added"], 0)
+        self.assertGreater(d["removed"], 0)
+        diff_text = "\n".join(d["diff"])
+        self.assertIn("步骤B2", diff_text)
+
+    def test_diff_missing_old_snapshot(self):
+        """旧版本无全文快照 → 提示无法 diff（不抛异常）。"""
+        mid = self._create_skill("old")
+        # 直接构造一个无 content 的版本历史
+        import json
+        from cerebrate.config import config
+        item = self.api.mm.swarm._store.get(mid)
+        meta = item["metadata"]
+        meta["skill_versions"] = json.dumps([
+            {"version": "1", "content_hash": "a" * 16,
+             "updated": "2026-01-01T00:00:00+00:00",
+             "author": "tester", "description": ""}])
+        self.api.mm.swarm._store.upsert(mid, item.get("document", ""), meta)
+        d = self.api.skill_diff({"memory_id": mid})
+        self.assertIsNone(d["diff"])
+        self.assertIn("旧版本未存全文快照", d["note"])
+
 
 if __name__ == "__main__":
     unittest.main()
