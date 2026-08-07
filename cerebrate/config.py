@@ -32,11 +32,6 @@ _load_dotenv()
 
 @dataclass
 class CerebrateConfig:
-    # 项目根目录
-    project_root: Path = field(default_factory=lambda: Path(
-        os.environ.get("CEREBRATE_ROOT", os.path.dirname(os.path.abspath(__file__)))
-    ))
-
     # 记忆存储路径
     memory_root: Path = field(
         default_factory=lambda: Path(os.environ.get(
@@ -52,14 +47,10 @@ class CerebrateConfig:
     events_path: Path = field(init=False)
     logs_path: Path = field(init=False)
     docstore_path: Path = field(init=False)
-    fulltext_path: Path = field(init=False)
 
     # 项目上下文
     current_project_id: str = field(
         default_factory=lambda: os.environ.get("CEREBRATE_PROJECT_ID", "")
-    )
-    current_project_name: str = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_PROJECT_NAME", "")
     )
 
     # LLM 配置
@@ -75,7 +66,6 @@ class CerebrateConfig:
     immune_threshold: float = field(default_factory=lambda: float(os.environ.get("CEREBRATE_IMMUNE_THRESHOLD", "0.7")))
 
     # 进化配置
-    evolution_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_EVOLUTION_ENABLED", "true").lower() == "true")
     evolution_interval_hours: int = field(default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_INTERVAL", "24")))
     decay_half_life_days: float = field(default_factory=lambda: float(os.environ.get("CEREBRATE_DECAY_HALF_LIFE", "30")))
 
@@ -100,7 +90,6 @@ class CerebrateConfig:
     )
 
     # 虫群配置
-    swarm_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_SWARM_ENABLED", "true").lower() == "true")
     default_language: str = field(default_factory=lambda: os.environ.get("CEREBRATE_LANGUAGE", "简体中文"))
 
     # ChromaDB 向量数据库配置 (v5)
@@ -123,9 +112,6 @@ class CerebrateConfig:
     embedding_summary_chars: int = field(
         default_factory=lambda: int(os.environ.get("CEREBRATE_EMBEDDING_SUMMARY_CHARS", "1000"))
     )
-    use_chroma: bool = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_USE_CHROMA", "true").lower() == "true"
-    )
 
     # 分块配置
     chunk_enabled: bool = field(
@@ -147,9 +133,6 @@ class CerebrateConfig:
     )
     reranker_model: str = field(
         default_factory=lambda: os.environ.get("CEREBRATE_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
-    )
-    reranker_top_k: int = field(
-        default_factory=lambda: int(os.environ.get("CEREBRATE_RERANKER_TOP_K", "10"))
     )
 
     # 查询重写配置
@@ -205,30 +188,9 @@ class CerebrateConfig:
         default_factory=lambda: os.environ.get("CEREBRATE_FULLTEXT_ENABLED", "true").lower() == "true"
     )
 
-    # PostgreSQL 元数据层配置
-    database_url: str = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_DATABASE_URL", "")
-    )
-    pg_host: str = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_PG_HOST", "127.0.0.1")
-    )
-    pg_port: int = field(
-        default_factory=lambda: int(os.environ.get("CEREBRATE_PG_PORT", "5432"))
-    )
-    pg_db: str = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_PG_DB", "cerebrate")
-    )
-    pg_user: str = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_PG_USER", "cerebrate")
-    )
-    pg_password: str = field(
-        default_factory=lambda: os.environ.get("CEREBRATE_PG_PASSWORD", "")
-    )
-
     # HTTP Brain Server
     server_host: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_HOST", "127.0.0.1"))
     server_port: int = field(default_factory=lambda: int(os.environ.get("CEREBRATE_SERVER_PORT", "8765")))
-    server_url: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_URL", ""))
     server_token: str = field(default_factory=lambda: os.environ.get("CEREBRATE_SERVER_TOKEN", ""))
 
     def __post_init__(self):
@@ -242,7 +204,6 @@ class CerebrateConfig:
         self.auth_path = self.memory_root / "auth"
         self.chroma_path = self.memory_root / "chroma_data"
         self.docstore_path = self.memory_root / "docstore"
-        self.fulltext_path = self.memory_root / "fulltext.sqlite3"
         self.profile_path = self.memory_root / "profiles"
         self.code_repos_path = self.memory_root / "code_repos"
 
