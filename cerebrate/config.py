@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 
 def _load_dotenv():
@@ -72,6 +74,21 @@ class CerebrateConfig:
     evolution_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_EVOLUTION_ENABLED", "true").lower() == "true")
     evolution_interval_hours: int = field(default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_INTERVAL", "24")))
     decay_half_life_days: float = field(default_factory=lambda: float(os.environ.get("CEREBRATE_DECAY_HALF_LIFE", "30")))
+
+    # 蒸馏窗口（v5.1.1，用户要求：仅在本地 0:00-1:00 低谷期运行，其他时间禁止蒸馏省钱）
+    evolution_window_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CEREBRATE_EVOLUTION_WINDOW_ENABLED", "true").lower() == "true"
+    )
+    evolution_window_start_hour: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_WINDOW_START_HOUR", "0"))
+    )
+    evolution_window_end_hour: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_WINDOW_END_HOUR", "1"))
+    )
+    # 本地时区偏移（Asia/Macau UTC+8，全年无夏令时 → 固定 +8）
+    evolution_window_tz_offset_hours: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_WINDOW_TZ_OFFSET", "8"))
+    )
 
     # 原始记忆归档保留（防删策略）：<=0 = 永不删除（默认，符合「任何记忆都有原始归档，防止被删除」）
     origin_retention_days: int = field(
@@ -243,3 +260,32 @@ class CerebrateConfig:
 
 
 config = CerebrateConfig()
+
+
+def in_evolution_window(now: Optional[datetime] = None) -> bool:
+    """判断当前时间是否在蒸馏窗口内（本地时区，默认 Asia/Macau UTC+8）。
+
+    v5.1.1 用户要求：蒸馏仅在每天 0:00-1:00（低谷 API 费用时段）运行，
+    其他时间禁止蒸馏。scheduler 自动调度与 evolution.evolve(force=False)
+    均以此函数为准；force=True（管理员显式）保留逃生门。
+
+    Args:
+        now: 可注入时间（测试用）；缺省取当前 UTC 时间换算本地时区。
+
+    Returns:
+        window 关闭（evolution_window_enabled=False）→ True（逃生门）
+        本地小时在 [start_hour, end_hour) 内 → True
+        否则 → False
+    """
+    if not config.evolution_window_enabled:
+        return True
+    local = (now or datetime.now(timezone.utc)) + timedelta(
+        hours=config.evolution_window_tz_offset_hours)
+    start = config.evolution_window_start_hour % 24
+    end = config.evolution_window_end_hour % 24
+    if start == end:
+        return False
+    if start < end:
+        return start <= local.hour < end
+    # 跨天窗口（如 22:00-02:00）
+    return local.hour >= start or local.hour < end

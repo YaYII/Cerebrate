@@ -2223,6 +2223,15 @@ class BrainAPI:
         if not topic:
             raise ValueError("topic is required")
 
+        # ── 蒸馏窗口检查（v5.1.1）：默认仅本地 0:00-1:00 低谷期运行 ──
+        from cerebrate.config import in_evolution_window
+        if not payload.get("force", False) and not in_evolution_window():
+            return {
+                "distilled": False,
+                "reason": "蒸馏窗口未开放（默认本地 0:00-1:00），为节省 API 费用已跳过。"
+                          "管理员可传 force=true 显式强制。",
+            }
+
         # 搜索相关记忆
         # 蒸馏需要跨项目全量记忆（不受 scope 隔离影响）
         memories = self.mm.query_swarm(topic, limit=20, scope="all")
@@ -2283,6 +2292,17 @@ class BrainAPI:
         topic = payload.get("topic", "").strip()
         if not topic:
             raise ValueError("topic is required")
+
+        # ── 蒸馏窗口检查（v5.1.1）：入队前拦截，避免低谷期外浪费 LLM 费用 ──
+        from cerebrate.config import in_evolution_window
+        if not payload.get("force", False) and not in_evolution_window():
+            return {
+                "task_id": None,
+                "topic": topic,
+                "status": "rejected",
+                "reason": "蒸馏窗口未开放（默认本地 0:00-1:00），为节省 API 费用已拒绝入队。"
+                          "管理员可传 force=true 显式强制。",
+            }
         task_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
         task = {

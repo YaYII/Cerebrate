@@ -1,7 +1,7 @@
 """脑虫后台调度器 v5 — 自动进化 + 原始记忆清理 + 自动经验提取
 
 四个独立后台线程：
-  - evolve_loop:  每 30 分钟检查进化窗口 (21:00-09:00)，自动触发进化
+  - evolve_loop:  每 30 分钟检查蒸馏窗口（默认本地 0:00-1:00，低谷期），自动触发进化
   - cleanup_loop: 每天检查一次，清理超过保留期的 OriginLog 原始记忆（先备份再删除）
   - extract_loop: 每 10 分钟扫描未处理的 usage 记录，自动提取经验教训（冷路径兜底）
   - verify_loop:  每 N 小时校验业务画像 vs 代码仓一致性，漂移告警（实事求是）
@@ -85,9 +85,9 @@ class CerebrateScheduler:
     # ── 进化调度 ─────────────────────────────────────────
 
     def _in_evolution_window(self) -> bool:
-        """当前时间是否在进化窗口内 (21:00-09:00)。"""
-        hour = datetime.now(timezone.utc).hour
-        return hour >= 21 or hour < 9
+        """当前时间是否在蒸馏窗口内（统一判断，本地时区 0:00-1:00 默认）。"""
+        from cerebrate.config import in_evolution_window
+        return in_evolution_window()
 
     def _evolve_loop(self):
         """进化调度主循环：每 N 分钟检查一次。"""

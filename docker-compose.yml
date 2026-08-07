@@ -12,7 +12,7 @@
 services:
   cerebrate:
     build: .
-    image: cerebrate:5.1.0
+    image: cerebrate:5.1.1
     container_name: cerebrate
     ports:
       - "127.0.0.1:8765:8765"

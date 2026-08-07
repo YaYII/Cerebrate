@@ -1111,3 +1111,46 @@ Loadout 装配（我们有 scope 已覆盖大部分）。
 2. （可选）Mermaid 场景压缩：腾讯最新卖点（token 降 61%），需短期记忆子系统
 3. （可选）Skill 版本化 appendVersion：当前只是版本字段，无版本树；团队多人改技能时再上
 4. （可选）Loadout 装配：等团队规模扩大、角色分化明显时再评估
+
+---
+
+# 追加（2026-08-07 第二十九轮）：蒸馏窗口机制（v5.1.1，仅本地 0:00-1:00 低谷期）
+
+## 用户要求（2026-08-07）
+蒸馏行为只在每天 0 点-1 点之间启动（API 费用低谷期），其他时间禁止蒸馏省钱。
+
+## 设计（统一窗口机制，config.py in_evolution_window）
+- **时区**：本地 Asia/Macau UTC+8（全年无夏令时 → 固定偏移，不依赖系统 TZ）
+- **窗口**：默认本地 0:00-1:00（可配置 CEREBRATE_EVOLUTION_WINDOW_START/END_HOUR）
+- **逃生门**：force=true（管理员显式）/ evolution_window_enabled=false（测试/运维）跳过窗口
+- **覆盖范围**（所有蒸馏触发路径）：
+  1. scheduler 自动调度（_evolve_loop）→ 窗口外跳过
+  2. evolution.evolve(force=False) → 窗口外 skipped=outside_evolution_window
+  3. 按需蒸馏同步（/v1/knowledge/distill → distill_knowledge_on_demand）→ 窗口外拒绝
+  4. 按需蒸馏异步（/v1/distill → api.distill）→ 窗口外拒绝入队（status=rejected）
+- **force=true**：以上 3/4 路径也支持（payload.force），管理员显式强制时绕过窗口
+
+## 交付文件
+- cerebrate/config.py：新增 4 个窗口配置 + in_evolution_window(now=None) 统一判断函数
+  （支持跨天窗口如 22:00-02:00；window 关闭恒 True）
+- cerebrate/server/scheduler.py：_in_evolution_window 改用统一函数
+- cerebrate/memory/evolution.py：evolve() 窗口检查改用统一函数（force=True 保留）
+- cerebrate/server/api.py：distill_knowledge_on_demand + distill 入口加窗口拦截
+- tests/conftest.py：测试默认 evolution_window_enabled=False（不受当前小时影响）
+- tests/test_evolution_window.py：9 用例（纯函数 5 + API 层 4）
+
+## 验证（真实执行，当前本地 12:46 窗口外）
+1. 窗口外同步按需蒸馏 → distilled=false + reason=蒸馏窗口未开放 ✅
+2. 窗口外异步蒸馏 → status=rejected + reason=拒绝入队 ✅
+3. 窗口外 evolve(force=False) → skipped=outside_evolution_window ✅
+4. force=true 异步 → status=queued → done（绕过窗口进入实际流程，主题不存在→信息不足）✅
+5. 全量回归 351 passed（新增 9，无回归）
+
+## 版本
+- VERSION: cerebrate-mcp-v5.1.1（5 处同步：VERSION/mcp_transport/mcp.py/mcp.js 两处/
+  package.json + 镜像 tag cerebrate:5.1.1 + DEPLOY.md）
+- 协议 meta.protocol 保持 v5 不变
+
+## 经验
+- 用户省钱诉求 → 定时任务窗口机制：统一判断函数 + 可配置 + force 逃生门 + 测试默认关窗，
+  四者缺一不可（统一判断避免三处逻辑漂移；force 逃生门保管理员/测试；测试关窗防当前时刻影响）

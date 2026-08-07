@@ -54,15 +54,15 @@ class EvolutionEngine:
     def evolve(self, force: bool = False) -> dict:
         now = datetime.now(timezone.utc)
 
-        # ── 时间窗口检查：仅在 21:00-09:00 (晚9到早9) 之间运行 ──
+        # ── 蒸馏窗口检查（v5.1.1）：默认仅本地 0:00-1:00（低谷 API 费用）运行 ──
+        # force=True（管理员显式/测试）保留逃生门；自动调度严格走窗口。
+        from cerebrate.config import in_evolution_window
         if not force:
-            hour = now.hour
-            in_window = (hour >= 21 or hour < 9)
-            if not in_window:
+            if not in_evolution_window():
                 return {
                     "timestamp": now.isoformat(),
                     "actions": [],
-                    "insights": ["进化窗口未开放（21:00-09:00），跳过执行"],
+                    "insights": ["蒸馏窗口未开放（默认本地 0:00-1:00），跳过执行"],
                     "stats": {"clustered": 0, "skills_created": 0, "doctrines_created": 0, "archived": 0, "conflicts": 0},
                     "skipped": True,
                     "reason": "outside_evolution_window",

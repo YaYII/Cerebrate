@@ -19,3 +19,9 @@ import cerebrate.config  # noqa: E402,F401
 
 for _llm_key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
     os.environ.pop(_llm_key, None)
+
+# 蒸馏窗口（v5.1.1）：测试默认关闭窗口限制（否则所有测试受当前小时影响），
+# 专项窗口测试（tests/test_evolution_window.py）单独开启并注入时间验证。
+from cerebrate.config import config  # noqa: E402
+
+config.evolution_window_enabled = False
