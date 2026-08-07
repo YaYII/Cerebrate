@@ -1,6 +1,5 @@
 """进化引擎 v5 — ChromaDB 持久化 + 服务端驱动的技能沉淀"""
 import json
-import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional

@@ -1,7 +1,6 @@
 """脑虫自我意识 v5 — ChromaDB 持久化 + 元认知"""
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from cerebrate.config import config

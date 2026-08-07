@@ -499,7 +499,6 @@ class BrainAPI:
         scene = self.mm.scene.get(session_id)
         if scene["event_count"] == 0:
             return {"compressed": False, "reason": "场景无事件，无法压缩"}
-        from cerebrate.brain.llm import CerebrateLLM
         llm = CerebrateLLM()
         if not llm.is_available():
             return {"compressed": False, "reason": "LLM 不可用"}
@@ -564,7 +563,6 @@ class BrainAPI:
         if not owner:
             return {"distilled": False,
                     "reason": "physical_user is required for security traceability"}
-        from cerebrate.brain.llm import CerebrateLLM
         llm = CerebrateLLM()
         if not llm.is_available():
             return {"distilled": False, "reason": "LLM 不可用"}
@@ -962,7 +960,6 @@ class BrainAPI:
     def _generate_memory_id(title: str, category: str) -> str:
         """预生成 memory_id，与 swarm.share() 中默认逻辑一致。"""
         import hashlib
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         return hashlib.sha256(
             f"{title}{category}{now}".encode()
@@ -1503,7 +1500,6 @@ class BrainAPI:
             pass  # 记忆可能已被删除
 
         # LLM 提取经验
-        from cerebrate.brain.llm import CerebrateLLM
         lesson = CerebrateLLM().extract_lesson_from_usage(
             problem, original_memory, outcome, feedback, agent_id
         )
@@ -2193,7 +2189,6 @@ class BrainAPI:
                 }
 
         # ── 3. LLM 生成回答 —─
-        from cerebrate.brain.llm import CerebrateLLM
         llm = CerebrateLLM()
         answer = ""
         if llm.is_available() and llm._sdk_ready():
@@ -2652,7 +2647,6 @@ class BrainAPI:
             return {"distilled": False, "reason": "无法加载完整记忆数据"}
 
         # 调用 LLM 蒸馏
-        from cerebrate.brain.llm import CerebrateLLM
         llm = CerebrateLLM()
         if not llm.is_available():
             return {"distilled": False, "reason": "LLM 不可用，请配置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY"}
@@ -2663,7 +2657,6 @@ class BrainAPI:
             return {"distilled": False, "reason": f"蒸馏跳过: {reason}。请提供更丰富的记忆数据。"}
 
         # 构建完整文档并入库
-        from cerebrate.memory.evolution import EvolutionEngine
         meta = doc.get("meta", {})
         title = meta.get("title", topic)
         content = EvolutionEngine._build_knowledge_document(doc, topic)

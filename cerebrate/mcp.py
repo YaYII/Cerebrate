@@ -127,9 +127,6 @@ def _load_effective_token() -> str:
     return _read_token_file().get("token", "")
 
 
-_SERVER_TOKEN = _load_effective_token()
-
-
 def _request(method: str, path: str, body: dict = None) -> dict:
     """向脑虫 Brain Server 发起 HTTP 请求，返回 v5 协议 JSON 信封。
 

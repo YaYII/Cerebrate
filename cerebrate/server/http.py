@@ -576,7 +576,6 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_ingest(self, payload: dict) -> dict:
         """处理知识蒸馏吸入请求（POST /v1/ingest）。"""
-        from pathlib import Path
         dir_raw = payload.get("dir", "")
         if not dir_raw:
             raise ValueError("缺少必填参数: dir")

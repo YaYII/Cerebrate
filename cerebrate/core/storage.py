@@ -285,6 +285,3 @@ class ChromaStore:
                     items.append({"id": mid, "metadata": meta, "document": doc, "embedding": emb})
                 return items
         return _retry_busy(_get)
-
-    def get_collection(self):
-        return self._collection

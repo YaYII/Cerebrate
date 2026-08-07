@@ -7,7 +7,6 @@
   2. 规则保底: LLM 不可用时，提取关键词 + 生成简单的词序变体
 """
 import logging
-import random
 import re
 from typing import Optional
 

@@ -150,21 +150,6 @@ class FullTextIndex:
             logger.warning(f"FTS upsert 失败 ({doc_id}): {e}")
             return False
 
-    def delete(self, doc_id: str) -> bool:
-        if not self._ready:
-            return False
-        try:
-            with self._lock, self._conn() as conn:
-                conn.execute(
-                    "DELETE FROM {fts} WHERE doc_id = ?".format(fts=self._fts_table), (doc_id,))
-                conn.execute(
-                    "DELETE FROM {meta} WHERE doc_id = ?".format(meta=self._meta_table), (doc_id,))
-                conn.commit()
-            return True
-        except Exception as e:
-            logger.warning(f"FTS delete 失败 ({doc_id}): {e}")
-            return False
-
     def _scope_conditions(self, scope: Optional[str],
                           project_id: Optional[str], prefix: str = "m") -> str:
         """scope 隔离过滤条件（与向量层语义一致）。

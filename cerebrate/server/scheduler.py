@@ -12,7 +12,6 @@
 import logging
 import threading
 import time
-from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("cerebrate.scheduler")
@@ -229,4 +228,3 @@ def start_scheduler(api) -> CerebrateScheduler:
     _scheduler = CerebrateScheduler(api)
     _scheduler.start()
     return _scheduler
-

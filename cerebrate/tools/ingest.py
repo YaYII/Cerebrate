@@ -27,11 +27,9 @@ import json
 import os
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 
 # 所有面向人的输出走 stderr，stdout 仅输出 JSON
@@ -483,9 +481,6 @@ def main(argv=None):
                         help="要扫描的文档目录路径")
     parser.add_argument("--project", "-p", default="",
                         help="项目隔离 ID，相同项目的知识可集中检索")
-    parser.add_argument("--scope", default="",
-                        choices=["", "general", "project"],
-                        help="记忆分类: general=通用知识; project=项目知识（默认按 project_id 推断）")
     parser.add_argument("--dry-run", action="store_true",
                         help="预览模式：扫描+分块但不写入知识库")
     parser.add_argument("--verbose", "-v", action="store_true",

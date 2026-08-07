@@ -18,7 +18,6 @@ const os = require("os");
 const path = require("path");
 const http = require("http");
 const https = require("https");
-const crypto = require("crypto");
 const readline = require("readline");
 const child_process = require("child_process");
 

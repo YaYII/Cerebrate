@@ -110,7 +110,6 @@ def cmd_project_harvest(args):
 def cmd_code_sync(args):
     """代码同步：把本地完整项目代码打包上传到脑虫服务器（→代码仓→harvest）"""
     from cerebrate.tools.code_sync import build_package
-    from pathlib import Path
     root = Path(args.dir).resolve()
     if not root.is_dir():
         print(json.dumps({"status": "error",
@@ -142,7 +141,6 @@ def cmd_harvest_push(args):
     """结构 push（代码不离开本地）：本地 AST 分析 → 只把结构结果给脑虫"""
     from cerebrate.tools.code_harvest import harvest_project, _safe_branch
     from cerebrate.tools.code_sync import _git_branch
-    from pathlib import Path
     root = Path(args.dir).resolve()
     if not root.is_dir():
         print(json.dumps({"status": "error",
@@ -223,10 +221,6 @@ def cmd_remember(args):
 
 def cmd_evolve(args):
     output(client_request(args.url, "POST", "/v1/evolve"))
-
-
-def cmd_stats(args):
-    output(client_request(args.url, "GET", "/v1/sense"))
 
 
 def cmd_register(args):
@@ -527,7 +521,6 @@ def main(argv=None):
     p.set_defaults(func=cmd_propose)
 
     p = sub.add_parser("recall", help="读取用户偏好")
-    p.add_argument("--user", default="default")
     p.set_defaults(func=cmd_recall)
 
     p = sub.add_parser("remember", help="记住用户偏好")
@@ -539,9 +532,6 @@ def main(argv=None):
 
     p = sub.add_parser("evolve", help="触发脑进化")
     p.set_defaults(func=cmd_evolve)
-
-    p = sub.add_parser("stats", help="查看虫群统计")
-    p.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("register", help="注册代理")
     p.add_argument("--id", default="cli")

@@ -1,5 +1,4 @@
 """统一记忆管理器 v5.0 — 集成向量记忆、项目隔离、智能体注册表"""
-import json
 import re
 import threading
 import uuid
@@ -11,8 +10,6 @@ from cerebrate.memory.personal import PersonalMemory
 from cerebrate.memory.swarm import SwarmMemory
 from cerebrate.memory.knowledge import KnowledgeBase
 from cerebrate.memory.origin import OriginLog
-from cerebrate.memory.docstore import DocumentStore
-from cerebrate.memory.metastore import get_metastore
 from cerebrate.config import config
 
 
