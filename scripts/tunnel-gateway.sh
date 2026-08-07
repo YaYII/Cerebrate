@@ -22,10 +22,12 @@ start() {
   if docker ps --format '{{.Names}}' | grep -q "^${NGINX_NAME}$"; then
     echo "   ✅ 网关已运行"
   else
+    # DSEDT Admin 静态挂载（nginx.conf 中 /admin/ 指向该目录）
     docker run -d --name "$NGINX_NAME" \
       --network cerebrate_default \
       -p 127.0.0.1:80:80 \
       -v "$ROOT/docker/nginx-gateway/nginx.conf:/etc/nginx/nginx.conf:ro" \
+      -v "/home/as-workstation01/Documents/project/DSEDT/verification-platform/frontend/admin/dist:/usr/share/nginx/admin:ro" \
       --restart unless-stopped nginx:alpine
     echo "   ✅ 网关已启动"
     sleep 3
