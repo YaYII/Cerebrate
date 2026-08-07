@@ -19,7 +19,7 @@ Cerebrate 是团队共享的 AI 记忆中枢（服务端由管理员部署）。
 
 ```bash
 # 首次安装（npm 官方渠道，正规）
-npm install -g cerebrate-mcp
+npm install -g cerebrate-mcp@latest
 ```
 
 > **零配置直连云端**：mcp 已内置默认云端脑虫地址，安装后无需配置 URL，
@@ -60,10 +60,12 @@ cerebrate-mcp login --username <你的用户名> --code <6位码>
 |---|---|
 | Codex | `~/.codex/config.toml` 的 `[mcp_servers.cerebrate] url = "https://<域名>/cerebrate/v1/mcp"`（token 走本地文件，无需手填） |
 | Claude Code | `claude mcp add --transport http cerebrate https://<域名>/cerebrate/v1/mcp`（token 走本地文件；推荐，零本地服务） |
-| Qoder | stdio：命令 `npx -y cerebrate-mcp`，env 走 `CEREBRATE_SERVER_URL` / `CEREBRATE_SERVER_TOKEN` |
+| Qoder | stdio：命令 `npx -y cerebrate-mcp@latest`，env 走 `CEREBRATE_SERVER_URL` / `CEREBRATE_SERVER_TOKEN` |
 | opencode | 同上（stdio） |
 
-stdio 客户端（Qoder / opencode / Trae）也可直接用 `npx -y cerebrate-mcp` 运行，无需全局安装。
+stdio 客户端（Qoder / opencode / Trae）也可直接用 `npx -y cerebrate-mcp@latest` 运行，无需全局安装。
+
+> ⚠️ 请务必带 `@latest`：漏写会命中 npx 本地缓存拿到旧版本（实测会回到 5.0.x）。若仍怀疑版本旧，先 `npm cache clean --force` 再运行。
 
 ## 5. 开始使用
 
@@ -135,7 +137,7 @@ AI：调用 cerebrate_propose → 沉淀到团队记忆
 脑虫公网地址由隧道提供，重启可能变化——向管理员要最新 URL，重跑 `cerebrate-mcp setup --url <新地址>` 覆盖内置默认值即可。
 
 **Q: 换电脑 / 重装系统？**
-重新 `npm install -g cerebrate-mcp` → `cerebrate-mcp login --username <用户名> --code <Authenticator 当前码>`（token 重新保存本地）。
+重新 `npm install -g cerebrate-mcp@latest` → `cerebrate-mcp login --username <用户名> --code <Authenticator 当前码>`（token 重新保存本地）。
 
 **Q: 调用报 403 admin required？**
 该工具是管理员功能，普通用户不可用（属正常）。

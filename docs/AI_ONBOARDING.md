@@ -87,7 +87,7 @@ Cerebrate 是团队共享的 AI 记忆中枢：所有同事的 AI（Codex / Clau
 ## 6. 连接配置（管理员已内置默认云端地址）
 
 ```bash
-npm install -g cerebrate-mcp    # 安装（零配置，自动连内置默认云端地址）
+npm install -g cerebrate-mcp@latest    # 安装（零配置，自动连内置默认云端地址；务必带 @latest 防缓存旧版）
 # 在 AI 对话让助手调 cerebrate_auth_register → 浏览器扫码绑定 → login
 cerebrate-mcp login --username <你的用户名> --code <Authenticator 6位码>
 ```

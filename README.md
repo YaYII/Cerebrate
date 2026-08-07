@@ -10,11 +10,13 @@ opencode / Trae 等 AI 客户端通过 [Model Context Protocol](https://modelcon
 
 ```bash
 # 全局安装（推荐，一条命令）
-npm install -g cerebrate-mcp
+npm install -g cerebrate-mcp@latest
 
 # 或免安装直接运行（npx）
-npx -y cerebrate-mcp
+npx -y cerebrate-mcp@latest
 ```
+
+> ⚠️ 请务必带 `@latest`：`npx -y cerebrate-mcp`（漏写 @latest）会命中本地缓存拿到旧版本。
 
 ## 首次配置（一条命令完成）
 
@@ -46,7 +48,7 @@ token 走环境变量 `CEREBRATE_SERVER_TOKEN`。
 ### stdio 客户端（Qoder / opencode / Trae）
 ```bash
 # 命令
-npx -y cerebrate-mcp
+npx -y cerebrate-mcp@latest
 
 # 环境变量
 CEREBRATE_SERVER_URL=https://<脑虫域名>/cerebrate
