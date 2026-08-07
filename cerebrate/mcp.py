@@ -68,9 +68,12 @@ def _load_env_file() -> dict:
 
 
 _ENV_FILE = _load_env_file()
+# 内置默认云端脑虫地址（2026-08-07）：零配置直连云端；env/cerebrate.env 可覆盖。
+_DEFAULT_SERVER_URL = "https://finale-earthworm-iciness.ngrok-free.dev/cerebrate"
 _SERVER_URL = (
     os.environ.get("CEREBRATE_SERVER_URL", "").strip()
     or _ENV_FILE.get("CEREBRATE_SERVER_URL", "").strip()
+    or _DEFAULT_SERVER_URL
     or "http://127.0.0.1:8765")
 
 # ── 本地持久化（认证阶段3 + 实体本地 MCP）─────────────────
@@ -1266,7 +1269,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.1"}
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.2"}
                 }
             })
         elif method == "ping":

@@ -49,9 +49,15 @@ function loadEnvFile() {
 }
 
 const ENV_FILE = loadEnvFile();
+// 内置默认云端脑虫地址（2026-08-07 配置）：
+//   让同事 npx -y cerebrate-mcp@latest 零配置直连云端，跳过 setup 直接注册绑定。
+//   优先级：环境变量 CEREBRATE_SERVER_URL > 本地 cerebrate.env > 此默认值 > 127.0.0.1。
+//   ⚠️ ngrok 免费域名重启会变：变了之后管理员用 `cerebrate-mcp setup --url <新地址>`
+//      覆盖，或发布新版更新此默认值。部署到固定域名云服务器后，此值可永久固定。
+const DEFAULT_SERVER_URL = "https://finale-earthworm-iciness.ngrok-free.dev/cerebrate";
 const SERVER_URL =
   (process.env.CEREBRATE_SERVER_URL || ENV_FILE.CEREBRATE_SERVER_URL || "")
-    .replace(/\/+$/, "") || "http://127.0.0.1:8765";
+    .replace(/\/+$/, "") || DEFAULT_SERVER_URL || "http://127.0.0.1:8765";
 const TOKEN_FILE =
   process.env.CEREBRATE_TOKEN_FILE ||
   path.join(os.homedir(), ".cerebrate", "token");
@@ -688,7 +694,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.1" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.2" },
       } });
     } else if (method === "ping") {
       send({ jsonrpc: "2.0", id, result: {} });
@@ -743,7 +749,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.2.1");
+    console.log("5.2.2");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
