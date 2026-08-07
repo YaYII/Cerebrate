@@ -2,6 +2,7 @@
 
 import hmac
 import json
+import os
 import signal
 import threading
 import time
@@ -76,6 +77,18 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
     """HTTP 请求处理器：路由到 BrainAPI，输出协议 v5 JSON。."""
 
     server_version = "CerebrateBrain/5"
+
+    def _infer_public_base(self) -> str:
+        """从请求头推断公网基础 URL（nginx/ngrok 穿透后服务端不知道公网地址）。."""
+        try:
+            scheme = self.headers.get("X-Forwarded-Proto", "") or "http"
+            host = self.headers.get("Host", "")
+            prefix = self.headers.get("X-Forwarded-Prefix", "").rstrip("/")
+            if host:
+                return f"{scheme}://{host}{prefix}".rstrip("/")
+        except Exception:
+            pass
+        return "http://127.0.0.1:8765"
 
     @property
     def api(self) -> BrainAPI:
@@ -201,6 +214,10 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED,
                             "MCP endpoint requires POST")
             return
+        # 公网基础 URL（用于拼 bind_url 等给用户打开的链接）：
+        #   优先级: CEREBRATE_PUBLIC_URL 环境变量 > X-Forwarded-Proto://Host + X-Forwarded-Prefix > http://Host > 127.0.0.1:8765
+        public_base = (os.environ.get("CEREBRATE_PUBLIC_URL", "")
+                       or self._infer_public_base())
         try:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8") if length else ""
@@ -222,7 +239,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             resp = handle_mcp_rpc(
                 msg, self.api,
                 getattr(self, "current_user", ""),
-                getattr(self, "is_admin", False))
+                getattr(self, "is_admin", False),
+                public_base=public_base)
             if resp is not None:
                 responses.append(resp)
 

@@ -123,7 +123,8 @@ def _call_result(data: dict) -> dict:
 
 
 def handle_mcp_rpc(body: dict, api, current_user: str = "",
-                   is_admin: bool = False) -> dict:
+                   is_admin: bool = False,
+                   public_base: str = "") -> dict:
     """处理单个 JSON-RPC 消息，返回 MCP 响应（dict 或 None=通知不响应）。."""
     method = body.get("method", "")
     req_id = body.get("id")
@@ -150,7 +151,8 @@ def handle_mcp_rpc(body: dict, api, current_user: str = "",
     if method == "tools/call":
         name = params.get("name", "")
         args = params.get("arguments", {}) or {}
-        data = _invoke_tool(api, name, args, current_user, is_admin)
+        data = _invoke_tool(api, name, args, current_user, is_admin,
+                            public_base=public_base)
         # 统一信封：_invoke_tool 错误路径已返回 {status:error}；成功路径返回
         # API 裸 data（对齐 REST 层 ok() 信封，与 mcp.py 客户端行为一致）。
         if not (isinstance(data, dict)
@@ -162,7 +164,7 @@ def handle_mcp_rpc(body: dict, api, current_user: str = "",
 
 
 def _invoke_tool(api, name: str, args: dict, current_user: str,
-                 is_admin: bool) -> dict:
+                 is_admin: bool, public_base: str = "") -> dict:
     """MCP 工具 → 服务端 API（参数转换与 mcp.py/mcp.js 对齐）。."""
     try:
         denied = _auth_gate(current_user, is_admin, name)
@@ -286,7 +288,17 @@ def _invoke_tool(api, name: str, args: dict, current_user: str,
                 "user_id": current_user, "role": role,
             }}
         if name == "cerebrate_auth_register":
-            return api.register_user({"username": args.get("username", "")})
+            result = api.register_user({"username": args.get("username", "")})
+            if result.get("registered") and result.get("bind_token"):
+                # 服务端不知道公网地址：用请求头推断的 public_base 拼绑定页 URL
+                base = (public_base or "http://127.0.0.1:8765").rstrip("/")
+                result["bind_url"] = (
+                    f"{base}/v1/auth/bind?token={result['bind_token']}")
+                result["hint"] = (
+                    "把 bind_url 发给用户：浏览器打开网页 → 网页显示二维码 → "
+                    "Authenticator 扫码绑定；绑定后请用户提供当前 6 位码再调 "
+                    "cerebrate_auth_login")
+            return result
         if name == "cerebrate_auth_login":
             result = api.login_user({
                 "username": args.get("username", ""),
