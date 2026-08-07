@@ -947,3 +947,39 @@ stdio sense 真实调用（1472 条记忆 healthy）
 ## 遗留/注意
 - key 在 private_notes.md；skill 脚本从 private_notes 兜底读取
 - 生图能力（若未来需要）走 PIL/treejs/SVG 程序化构建，与豆包 API 无关
+
+---
+
+# 追加（2026-08-07 第二十六轮）：豆包视觉 skill 同步到 opencode
+
+## 用户要求（2026-08-07）
+把豆包视觉图像识别技能同步到 opencode 工具，方便 opencode 也能调用。
+
+## 交付
+- opencode skill 位置：`~/.config/opencode/skills/doubao-vision/SKILL.md`（全局）
+- 格式：YAML frontmatter（name 必须小写连字符 `doubao-vision`，description 必填）
+- **单一脚本来源**：opencode SKILL.md 直接引用 `~/.codex/skills/doubao-vision/scripts/vision.py`
+  （不复制脚本，避免双份维护；与 Codex skill 共享同一实现）
+- 铁律同步：只识别绝不生图（生图用 PIL/treejs/SVG 程序化构建）
+
+## 验证（真实执行，opencode 1.18.14 + deepseek-v4-flash）
+1. `opencode run "列出可用 skills"` → 发现 `doubao-vision` ✅
+2. `opencode run "加载 doubao-vision 识别 /tmp/test_vision.png"` →
+   - opencode 自动加载 Skill "doubao-vision"
+   - 自动执行 vision.py 识别图片
+   - deepseek-v4-flash 用识别结果回答（蓝色矩形 HelloCerebrate + 红色圆形 Circle+Square）✅
+
+## opencode skills 机制要点（已确认）
+- 全局：`~/.config/opencode/skills/<name>/SKILL.md`
+- 项目：`.opencode/skills/<name>/SKILL.md`；也兼容 `.claude/skills/` `.agents/skills/`
+- 必须 YAML frontmatter：name（小写连字符 ^[a-z0-9]+(-[a-z0-9]+)*$）、description（1-1024 字符）
+- 配置加载一次，改配置需重启 opencode
+- 权限控制：opencode.json `permission.skill` 可 allow/deny/ask
+
+## 多工具覆盖现状
+| 工具 | skill 位置 | 状态 |
+|---|---|---|
+| Codex | ~/.codex/skills/doubao-vision/ | ✅ |
+| opencode | ~/.config/opencode/skills/doubao-vision/ | ✅ 新 |
+| Claude Code | ~/.claude/skills/（若需） | 未配置（可用同一脚本） |
+| Qoder | ~/.qoder/skills/（若需） | 未配置 |
