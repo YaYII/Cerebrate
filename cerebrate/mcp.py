@@ -1266,7 +1266,7 @@ def main():
     # AI 客户端以管道调用时 isatty()=False，走正常 MCP server 流程。
     if len(sys.argv) <= 1 and sys.stdin.isatty():
         print("")
-        print("🧠 Cerebrate MCP v5.2.5 — 团队记忆中枢客户端（已内置默认云端地址）")
+        print("🧠 Cerebrate MCP v5.2.6 — 团队记忆中枢客户端（已内置默认云端地址）")
         print("服务地址: " + _SERVER_URL)
         print("")
         # 已登录则直接提示
@@ -1285,12 +1285,13 @@ def main():
         print("【请帮我接入 Cerebrate 脑虫记忆系统：")
         print("")
         print("1. 先把 Cerebrate MCP 绑定到你的工具配置里（你按自己的标准方式配置）：")
-        print("   - MCP 服务地址: " + _SERVER_URL)
-        print("   - HTTP MCP 端点: " + _SERVER_URL + "/v1/mcp")
+        print("   - MCP 服务地址（公网，远程可用）: " + _SERVER_URL)
+        print("   - HTTP MCP 端点（公网）: " + _SERVER_URL + "/v1/mcp")
         print("   - stdio 命令（若支持）: npx -y cerebrate-mcp@latest")
+        print("   ⚠️ 务必使用上面的公网地址，不要用 127.0.0.1:8765（那是服务端本机回环地址，远程机器连不到）")
         print("")
         print("2. 绑定后调用 cerebrate_auth_register 注册新用户，用户名我稍后告诉你；")
-        print("   你会拿到一个 bind_url（绑定链接），把它发给我。")
+        print("   你会拿到一个 bind_url（公网绑定链接），把它发给我。")
         print("")
         print("3. 我打开 bind_url 用手机 Authenticator 扫码绑定后，会给你 6 位动态码。")
         print("")
@@ -1342,7 +1343,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.5"},
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.6"},
                     "instructions": _instructions,
                 }
             })

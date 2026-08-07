@@ -724,7 +724,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.5" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.6" },
         instructions,
       } });
     } else if (method === "ping") {
@@ -780,7 +780,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.2.5");
+    console.log("5.2.6");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
@@ -873,12 +873,13 @@ function printOnboardingInstructions() {
   console.log("【请帮我接入 Cerebrate 脑虫记忆系统：");
   console.log("");
   console.log("1. 先把 Cerebrate MCP 绑定到你的工具配置里（你按自己的标准方式配置）：");
-  console.log("   - MCP 服务地址: " + SERVER_URL);
-  console.log("   - HTTP MCP 端点: " + SERVER_URL + "/v1/mcp");
+  console.log("   - MCP 服务地址（公网，远程可用）: " + SERVER_URL);
+  console.log("   - HTTP MCP 端点（公网）: " + SERVER_URL + "/v1/mcp");
   console.log("   - stdio 命令（若支持）: npx -y cerebrate-mcp@latest");
+  console.log("   ⚠️ 务必使用上面的公网地址，不要用 127.0.0.1:8765（那是服务端本机回环地址，远程机器连不到）");
   console.log("");
   console.log("2. 绑定后调用 cerebrate_auth_register 注册新用户，用户名我稍后告诉你；");
-  console.log("   你会拿到一个 bind_url（绑定链接），把它发给我。");
+  console.log("   你会拿到一个 bind_url（公网绑定链接），把它发给我。");
   console.log("");
   console.log("3. 我打开 bind_url 用手机 Authenticator 扫码绑定后，会给你 6 位动态码。");
   console.log("");
