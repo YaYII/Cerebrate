@@ -23,7 +23,7 @@ COMPOSE_DEV      = $(COMPOSE_BASE) -f docker-compose.dev.yml
 COMPOSE_PRO      = $(COMPOSE_BASE) -f docker-compose.pro.yml
 
 .PHONY: build build-fast up up-dev up-pro down restart restart-dev \
-        logs ps shell test smoke clean
+        logs ps shell test regression smoke clean
 
 # ── 构建 ──
 
@@ -69,6 +69,9 @@ shell:
 
 test:
 	docker compose exec cerebrate python3 -m pytest tests/ -v
+
+regression:
+	bash scripts/run_regression.sh
 
 smoke:
 	@echo "=== 烟雾测试: 检查脑虫服务 ==="

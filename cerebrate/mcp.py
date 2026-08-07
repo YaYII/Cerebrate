@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import urllib.request
 import urllib.error
+import urllib.parse
 
 # ── 修复：MCP 以绝对路径启动时 sys.path[0] 落在 cerebrate/ 目录，
 #    导致 harvest-push 本地分析时 `import cerebrate` 失败
@@ -481,6 +482,127 @@ TOOLS = [
         }
     },
     {
+        "name": "cerebrate_scene_ingest",
+        "description": "【短期场景】追加原始事件（零 LLM 成本）。session_id + events[{kind,text}]。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "events": {"type": "array", "items": {"type": "object"}, "default": []},
+                "prompt": {"type": "string", "default": ""}
+            },
+            "required": ["session_id"]
+        }
+    },
+    {
+        "name": "cerebrate_scene_get",
+        "description": "【短期场景】读取场景（最近事件 + Mermaid 压缩图 + 元数据）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"}
+            },
+            "required": ["session_id"]
+        }
+    },
+    {
+        "name": "cerebrate_scene_compress",
+        "description": "【短期场景】LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口 0-1 点约束，force 逃生门）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "force": {"type": "boolean", "default": False}
+            },
+            "required": ["session_id"]
+        }
+    },
+    {
+        "name": "cerebrate_scene_list",
+        "description": "【短期场景】列出活跃场景。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 100}
+            }
+        }
+    },
+    {
+        "name": "cerebrate_scene_distill",
+        "description": "【短期场景】任务结束后蒸馏为长期技能（SKILL.md 结构化入库，受蒸馏窗口约束，force 逃生门）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "force": {"type": "boolean", "default": False},
+                "cleanup": {"type": "boolean", "default": False},
+                "project_id": {"type": "string", "default": ""},
+                "scope": {"type": "string", "default": ""}
+            },
+            "required": ["session_id"]
+        }
+    },
+    {
+        "name": "cerebrate_skill_append_version",
+        "description": "【Skill 版本化】给技能记忆追加新版本（幂等）。memory_id + content + skill_markdown(可选)。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string"},
+                "content": {"type": "string"},
+                "description": {"type": "string", "default": ""},
+                "skill_markdown": {"type": "string", "default": ""}
+            },
+            "required": ["memory_id", "content"]
+        }
+    },
+    {
+        "name": "cerebrate_skill_versions",
+        "description": "【Skill 版本化】读取技能版本历史。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string"}
+            },
+            "required": ["memory_id"]
+        }
+    },
+    {
+        "name": "cerebrate_skill_diff",
+        "description": "【Skill 版本化】对比两个版本的全文差异（difflib 行级）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string"},
+                "from_version": {"type": "string", "default": ""},
+                "to_version": {"type": "string", "default": ""}
+            },
+            "required": ["memory_id"]
+        }
+    },
+    {
+        "name": "cerebrate_loadout_set",
+        "description": "【Loadout 装配】设置用户装配（绑定项目/偏好 scope/绑定标签）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bound_projects": {"type": "array", "items": {"type": "string"}, "default": []},
+                "preferred_scope": {"type": "string", "default": ""},
+                "bound_tags": {"type": "array", "items": {"type": "string"}, "default": []}
+            }
+        }
+    },
+    {
+        "name": "cerebrate_loadout_get",
+        "description": "【Loadout 装配】读取用户装配。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user": {"type": "string", "default": ""}
+            }
+        }
+    },
+    {
         "name": "cerebrate_ingest",
         "description": "【知识蒸馏吸入】将本地文档目录批量吸入脑虫知识库。扫描 MD/TXT/RST/YML/JSON 等文件，智能分块后写入权威知识库，支持增量去重。\n\n用法示例:\n  AI智能体: 调用 cerebrate_ingest 并传 dir=/path/to/docs project=my-project\n\n决策矩阵:\n  - 需要将大量文档灌入脑虫时直接调用此工具\n  - 配合 cerebrate_knowledge_search 验证知识是否已入库",
         "inputSchema": {
@@ -828,6 +950,70 @@ def _handle_call(name: str, args: dict) -> dict:
             return _request("POST", "/v1/batch/process", {
                 "limit": args.get("limit", 50)
             })
+
+        elif name == "cerebrate_scene_ingest":
+            return _request("POST", "/v1/scene/ingest", {
+                "session_id": args["session_id"],
+                "events": args.get("events", []),
+                "prompt": args.get("prompt", ""),
+            })
+
+        elif name == "cerebrate_scene_get":
+            return _request("GET", f"/v1/scene/{args['session_id']}", None)
+
+        elif name == "cerebrate_scene_compress":
+            return _request("POST", "/v1/scene/compress", {
+                "session_id": args["session_id"],
+                "force": args.get("force", False),
+            })
+
+        elif name == "cerebrate_scene_list":
+            return _request("GET", "/v1/scene/list", None)
+
+        elif name == "cerebrate_scene_distill":
+            return _request("POST", "/v1/scene/distill", {
+                "session_id": args["session_id"],
+                "force": args.get("force", False),
+                "cleanup": args.get("cleanup", False),
+                "project_id": args.get("project_id", ""),
+                "scope": args.get("scope", ""),
+            })
+
+        elif name == "cerebrate_skill_append_version":
+            return _request("POST", "/v1/skills/append-version", {
+                "memory_id": args["memory_id"],
+                "content": args["content"],
+                "description": args.get("description", ""),
+                "skill_markdown": args.get("skill_markdown", ""),
+                "physical_user": args.get("physical_user") or _PHYSICAL_USER,
+            })
+
+        elif name == "cerebrate_skill_versions":
+            return _request("POST", "/v1/skills/versions", {
+                "memory_id": args["memory_id"],
+            })
+
+        elif name == "cerebrate_skill_diff":
+            return _request("POST", "/v1/skills/diff", {
+                "memory_id": args["memory_id"],
+                "from_version": args.get("from_version", ""),
+                "to_version": args.get("to_version", ""),
+            })
+
+        elif name == "cerebrate_loadout_set":
+            return _request("POST", "/v1/loadout", {
+                "bound_projects": args.get("bound_projects", []),
+                "preferred_scope": args.get("preferred_scope", ""),
+                "bound_tags": args.get("bound_tags", []),
+                "user": args.get("user") or _PHYSICAL_USER,
+            })
+
+        elif name == "cerebrate_loadout_get":
+            _u = args.get("user") or _PHYSICAL_USER
+            return _request(
+                "GET",
+                f"/v1/loadout?user={urllib.parse.quote(_u)}" if _u else "/v1/loadout",
+                None)
 
         elif name == "cerebrate_ingest":
             return _request("POST", "/v1/ingest", {

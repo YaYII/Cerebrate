@@ -1281,3 +1281,50 @@ loadout_set/loadout_get；写工具入 _WRITE_TOOLS（需登录）
 ## 经验
 三个建议都是"补完闭环"：场景有"沉淀出口"、版本有"对比能力"、装配有"排序影响"。
 实现原则延续：最小改动、零破坏（旧版本无快照/无装配都优雅降级）、可测试。
+
+---
+
+# 追加（2026-08-07 第三十二轮）：MCP 工具同步 + 回归测试体系（v5.2.1）
+
+## 用户要求（2026-08-07）
+1. 强调"MCP"——把 v5.2.0/v5.2.1 新增的 10 个工具同步到本地 MCP 客户端
+2. "有没有测试这些，需要有测试哦，否则会出现回归问题"——构建回归测试体系
+
+## ① MCP 工具三方同步（服务端 39 工具全部到本地客户端）
+新增 10 工具：scene 5（ingest/get/compress/list/distill）+ skill 3（append_version/
+versions/diff）+ loadout 2（set/get）
+- mcp.js（Node 本地客户端）：TOOLS 声明 + switch case 分发，43 工具
+- cerebrate/mcp.py（Python 本地客户端）：声明 + _handle_call 分发，43 工具
+- 工具一致性检查：服务端 ⊆ 本地 Python ⊆ 本地 Node（三方一致）
+
+## ② 回归测试体系（用户要求防回归）
+### 新增测试
+- tests/test_mcp_tool_parity.py（5 用例）：三方工具一致性静态解析——
+  服务端工具 ⊆ Python/Node；Python/Node 声明=分发；Python=Node 工具集一致
+- tests/test_mcp_local_dispatch.py（10 用例）：本地 Python 客户端 _handle_call
+  分发正确性（mock _request，验证 method/path/payload）
+
+### 一键回归脚本 scripts/run_regression.sh
+```bash
+bash scripts/run_regression.sh          # 完整回归（语法+一致性+全量+健康检查）
+bash scripts/run_regression.sh --fast   # 秒级（仅语法+工具一致性）
+make regression                          # Makefile 入口
+```
+覆盖：① Python/Node 语法检查 ② MCP 工具三方一致性 ③ 全量单元测试（零 LLM 付费）
+④ 脑虫服务健康检查（token 从环境变量或 .env 读取）
+
+## 验证
+- 三方一致性 5 passed + 本地分发 10 passed
+- 全量回归 386 passed（新增 15，无回归）
+- 本地 Python MCP 端到端：scene_ingest/get/list + loadout_set/get +
+  skill_versions/diff 全部通过（走真实服务）
+- 脚本 --fast 模式秒级通过；健康检查 token 解析正确
+
+## 版本
+- 仍为 v5.2.1（本次是同步+测试补全，非新功能；mcp.js/mcp.py 已与 VERSION 一致）
+
+## 经验
+- 用户对"回归风险"敏感：任何跨端功能（服务端+本地 Python+本地 Node）必须
+  有一致性静态测试，否则漏同步一处即回归
+- 一键回归脚本是团队稳定性的底线：语法检查先行（秒级 fail fast）、
+  一致性测试居中（防跨端漂移）、全量测试兜底、健康检查收尾

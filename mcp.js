@@ -416,6 +416,16 @@ const TOOLS = [
   { name: "cerebrate_project_harvest", description: "【本地代码分析·结构推送】传 dir 本地分析 push 结构；不传读服务端结构。", inputSchema: { type: "object", properties: { project: { type: "string" }, dir: { type: "string" }, exts: { type: "array", items: { type: "string" } } }, required: ["project"] } },
   { name: "cerebrate_project_work", description: "【多人协作】工作声明 claim/release/list。", inputSchema: { type: "object", properties: { project: { type: "string" }, action: { type: "string", enum: ["claim", "release", "list"], default: "list" }, branch: { type: "string", default: "" }, module: { type: "string", default: "" }, intent: { type: "string", default: "" }, agent_id: { type: "string", default: "" } }, required: ["project"] } },
   { name: "cerebrate_batch_process", description: "【会话结束】批量处理 IPC 队列待办请求。", inputSchema: { type: "object", properties: { limit: { type: "integer", default: 50 } } } },
+  { name: "cerebrate_scene_ingest", description: "【短期场景】追加原始事件（零 LLM 成本）。session_id + events[{kind,text}]。", inputSchema: { type: "object", properties: { session_id: { type: "string" }, events: { type: "array", items: { type: "object" }, default: [] }, prompt: { type: "string", default: "" } }, required: ["session_id"] } },
+  { name: "cerebrate_scene_get", description: "【短期场景】读取场景（最近事件 + Mermaid 压缩图 + 元数据）。", inputSchema: { type: "object", properties: { session_id: { type: "string" } }, required: ["session_id"] } },
+  { name: "cerebrate_scene_compress", description: "【短期场景】LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口 0-1 点约束，force 逃生门）。", inputSchema: { type: "object", properties: { session_id: { type: "string" }, force: { type: "boolean", default: false } }, required: ["session_id"] } },
+  { name: "cerebrate_scene_list", description: "【短期场景】列出活跃场景。", inputSchema: { type: "object", properties: { limit: { type: "integer", default: 100 } } } },
+  { name: "cerebrate_scene_distill", description: "【短期场景】任务结束后蒸馏为长期技能（SKILL.md 结构化入库，受蒸馏窗口约束，force 逃生门）。", inputSchema: { type: "object", properties: { session_id: { type: "string" }, force: { type: "boolean", default: false }, cleanup: { type: "boolean", default: false }, project_id: { type: "string", default: "" }, scope: { type: "string", default: "" } }, required: ["session_id"] } },
+  { name: "cerebrate_skill_append_version", description: "【Skill 版本化】给技能记忆追加新版本（幂等）。memory_id + content + skill_markdown(可选)。", inputSchema: { type: "object", properties: { memory_id: { type: "string" }, content: { type: "string" }, description: { type: "string", default: "" }, skill_markdown: { type: "string", default: "" } }, required: ["memory_id", "content"] } },
+  { name: "cerebrate_skill_versions", description: "【Skill 版本化】读取技能版本历史。", inputSchema: { type: "object", properties: { memory_id: { type: "string" } }, required: ["memory_id"] } },
+  { name: "cerebrate_skill_diff", description: "【Skill 版本化】对比两个版本的全文差异（difflib 行级）。", inputSchema: { type: "object", properties: { memory_id: { type: "string" }, from_version: { type: "string", default: "" }, to_version: { type: "string", default: "" } }, required: ["memory_id"] } },
+  { name: "cerebrate_loadout_set", description: "【Loadout 装配】设置用户装配（绑定项目/偏好 scope/绑定标签）。", inputSchema: { type: "object", properties: { bound_projects: { type: "array", items: { type: "string" }, default: [] }, preferred_scope: { type: "string", default: "" }, bound_tags: { type: "array", items: { type: "string" }, default: [] } }, required: [] } },
+  { name: "cerebrate_loadout_get", description: "【Loadout 装配】读取用户装配。", inputSchema: { type: "object", properties: { user: { type: "string", default: "" } } } },
   { name: "cerebrate_ingest", description: "【知识蒸馏吸入】将本地文档目录批量吸入知识库。", inputSchema: { type: "object", properties: { dir: { type: "string" }, project: { type: "string", default: "" }, dry_run: { type: "boolean", default: false }, verbose: { type: "boolean", default: false } }, required: ["dir"] } },
   { name: "cerebrate_knowledge_store", description: "【存入知识】直接存入权威知识库。", inputSchema: { type: "object", properties: { title: { type: "string" }, content: { type: "string" }, topics: { type: "string", default: "" }, project: { type: "string", default: "" } }, required: ["title", "content"] } },
   { name: "cerebrate_entity_extract", description: "【本地实体化衍生】在本地抽取文本实体（零 LLM 零成本），数据不离开本地。", inputSchema: { type: "object", properties: { text: { type: "string" }, persist: { type: "boolean", default: true }, top: { type: "number", default: 30 } }, required: ["text"] } },
@@ -559,6 +569,34 @@ async function handleCall(name, args) {
       case "cerebrate_batch_process": return await httpRequest("POST", "/v1/batch/process", {
         limit: args.limit || 50,
       }, effectiveToken());
+      case "cerebrate_scene_ingest": return await httpRequest("POST", "/v1/scene/ingest", {
+        session_id: args.session_id, events: args.events || [], prompt: args.prompt || "",
+      }, effectiveToken());
+      case "cerebrate_scene_get": return await httpRequest("GET", "/v1/scene/" + encodeURIComponent(args.session_id), null, effectiveToken());
+      case "cerebrate_scene_compress": return await httpRequest("POST", "/v1/scene/compress", {
+        session_id: args.session_id, force: !!args.force,
+      }, effectiveToken());
+      case "cerebrate_scene_list": return await httpRequest("GET", "/v1/scene/list", null, effectiveToken());
+      case "cerebrate_scene_distill": return await httpRequest("POST", "/v1/scene/distill", {
+        session_id: args.session_id, force: !!args.force, cleanup: !!args.cleanup,
+        project_id: args.project_id || "", scope: args.scope || "",
+      }, effectiveToken());
+      case "cerebrate_skill_append_version": return await httpRequest("POST", "/v1/skills/append-version", {
+        memory_id: args.memory_id, content: args.content,
+        description: args.description || "", skill_markdown: args.skill_markdown || "",
+      }, effectiveToken());
+      case "cerebrate_skill_versions": return await httpRequest("POST", "/v1/skills/versions", {
+        memory_id: args.memory_id,
+      }, effectiveToken());
+      case "cerebrate_skill_diff": return await httpRequest("POST", "/v1/skills/diff", {
+        memory_id: args.memory_id, from_version: args.from_version || "",
+        to_version: args.to_version || "",
+      }, effectiveToken());
+      case "cerebrate_loadout_set": return await httpRequest("POST", "/v1/loadout", {
+        bound_projects: args.bound_projects || [], preferred_scope: args.preferred_scope || "",
+        bound_tags: args.bound_tags || [],
+      }, effectiveToken());
+      case "cerebrate_loadout_get": return await httpRequest("GET", "/v1/loadout?user=" + encodeURIComponent(args.user || ""), null, effectiveToken());
       case "cerebrate_ingest": return await httpRequest("POST", "/v1/ingest", {
         dir: args.dir, project: args.project || "", dry_run: !!args.dry_run, verbose: !!args.verbose,
       }, effectiveToken());
