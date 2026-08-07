@@ -983,3 +983,37 @@ stdio sense 真实调用（1472 条记忆 healthy）
 | opencode | ~/.config/opencode/skills/doubao-vision/ | ✅ 新 |
 | Claude Code | ~/.claude/skills/（若需） | 未配置（可用同一脚本） |
 | Qoder | ~/.qoder/skills/（若需） | 未配置 |
+
+---
+
+# 追加（2026-08-07 第二十七轮）：豆包视觉 skill 模型降级链（不固定单一模型）
+
+## 用户要求（2026-08-07）
+不能固定一个模型——账号里多个视觉模型各有免费额度；超时/失败自动切下一个，
+避免误导其他 AI 认为豆包不可用。
+
+## 实测（关键发现）
+系统实测 15 个候选 VLM 模型，**可用 8 个**（此前以为只有 2 个）：
+- ✅ doubao-seed-2-1-pro-260628（主力，6s）
+- ✅ doubao-seed-2-0-pro-260215（6s）
+- ✅ doubao-seed-2-0-lite-260215 / doubao-seed-2-0-lite-260428（7-9s）
+- ✅ doubao-seed-2-0-mini-260215（2.3s 最快）/ doubao-seed-2-0-mini-260428（3.2s）
+- ✅ doubao-seed-2-1-turbo-260628（16s）
+- ✅ doubao-seed-2-0-code-preview-260215（11s，code 模型也支持视觉）
+- ❌ 404 不可用：doubao-seed-1-8/1-6 系列/1-5-vision-pro（models 列表可见但实际不存在）
+
+## 交付（vision.py 降级链）
+- MODEL_CHAIN 8 模型按优先级排序（pro → lite → mini → turbo → code-preview）
+- 每个模型 45s 超时；失败/超时/额度耗尽 → sleep 1s → 切下一个
+- 全部失败才报错并列出各模型失败原因（不再误判"豆包不可用"）
+- `--model` 仍可指定单一模型（覆盖降级链）
+- 两份 SKILL.md（Codex + opencode）已同步降级链说明
+
+## 验证（真实执行）
+- 降级链正常：默认主力成功 6.2s ✅
+- **降级行为验证**：链首换假模型 → 失败自动切 doubao-seed-2-1-pro 成功 ✅
+- opencode 重新调用：自动加载 skill + vision.py 识别成功 ✅
+
+## 经验
+- 火山 /models 列表 ≠ 全部可用（很多 404）；必须实测确认
+- 模型状态可能变化（2-0-pro 之前 ModelNotOpen，后来可用）→ 降级链比写死模型健壮
