@@ -138,11 +138,6 @@ class PersonalMemory:
         return {"bound_projects": [], "preferred_scope": "",
                 "bound_tags": []}
 
-    def remember_project_pref(self, user_id: str, project_id: str,
-                              key: str, value) -> None:
-        self.remember(user_id, f"proj_{project_id}_{key}", value,
-                      project_id=project_id)
-
     def recall(self, user_id: str, key: Optional[str] = None) -> dict:
         """纯内存读取"""
         data = self._cache.get(user_id, {})
@@ -198,25 +193,5 @@ class PersonalMemory:
         prefs = self.recall(user_id, "pref_tone")
         return prefs.get("pref_tone", "专业简洁")
 
-    def get_language(self, user_id: str) -> str:
-        prefs = self.recall(user_id, "pref_language")
-        return prefs.get("pref_language", "简体中文")
-
-    def get_name(self, user_id: str) -> str:
-        facts = self.recall(user_id, "fact_name")
-        return facts.get("fact_name", "")
-
     def list_users(self) -> list:
         return list(self._index.get("users", {}).keys())
-
-    def forget(self, user_id: str, key: str) -> bool:
-        data = self._cache.get(user_id, {})
-        if key in data:
-            del data[key]
-            doc_id = f"{user_id}:{key}"
-            try:
-                self._store.delete(doc_id)
-            except Exception:
-                pass
-            return True
-        return False

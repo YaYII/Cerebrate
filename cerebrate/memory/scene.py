@@ -92,15 +92,6 @@ class SceneStore:
             self._save(data)
             return self._summary(data)
 
-    def update_meta(self, session_id: str, **meta) -> dict:
-        """更新场景元数据（task_goal/progress/status 等，compress 时写入）。"""
-        with self._lock:
-            data = self._load(session_id)
-            data["meta"].update({k: v for k, v in meta.items()
-                                 if v is not None})
-            self._save(data)
-            return self._summary(data)
-
     # ── 读取 ──
 
     def get(self, session_id: str) -> dict:
@@ -114,9 +105,6 @@ class SceneStore:
             "created": data.get("created", ""),
             "updated": data.get("updated", ""),
         }
-
-    def get_mmd(self, session_id: str) -> Optional[str]:
-        return self._load(session_id).get("mmd")
 
     def set_mmd(self, session_id: str, mmd: str,
                 meta: Optional[dict] = None) -> dict:

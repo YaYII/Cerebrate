@@ -1430,10 +1430,6 @@ class SwarmMemory:
 
         return False
 
-    def load_memory_raw(self, memory_id: str) -> Optional[dict]:
-        """公共接口: 加载完整记忆元数据（分块文档自动聚合）."""
-        return self._load_memory(memory_id)
-
     def _load_memory(self, memory_id: str) -> Optional[dict]:
         """兼容旧调用者的内部接口（含 DocumentStore 加载）."""
         item = self._store.get(memory_id)

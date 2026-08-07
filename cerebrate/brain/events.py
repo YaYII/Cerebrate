@@ -163,7 +163,3 @@ class EventLog:
 
     def _next_sequence(self) -> int:
         return self.latest_id() + 1
-
-    def count(self) -> int:
-        ids = self._store.get_all_ids()
-        return sum(1 for eid in ids if eid != "_seq")

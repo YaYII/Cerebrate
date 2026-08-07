@@ -225,60 +225,6 @@ class KnowledgeBase:
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:5]
 
-    def get_policy(self, policy_name: str) -> Optional[dict]:
-        # 扫描查找匹配 policy_name
-        for did in self._store.get_all_ids():
-            item = self._store.get(did)
-            if item and item["metadata"].get("policy_name") == policy_name:
-                meta = item["metadata"]
-                return {
-                    "doc_id": item["id"],
-                    "title": meta.get("title", ""),
-                    "content": meta.get("content", ""),
-                    "source": meta.get("source", ""),
-                    "version": meta.get("version", ""),
-                    "policy_name": meta.get("policy_name", ""),
-                    "project_id": meta.get("project_id", ""),
-                    "scope": meta.get("scope", "project" if meta.get("project_id") else "general"),
-                    "verified": meta.get("verified") == "True",
-                    "deprecated": meta.get("deprecated") == "True",
-                }
-        return None
-
-    def verify(self, doc_id: str, verified: bool = True):
-        item = self._store.get(doc_id)
-        if item:
-            meta = item["metadata"]
-            meta["verified"] = str(verified)
-            meta["updated"] = datetime.now(timezone.utc).isoformat()
-            text = f"{meta.get('title','')}\n{meta.get('content','')}"
-            self._store.upsert(doc_id, text, meta)
-            self._fts_upsert(
-                doc_id, title=meta.get("title", ""),
-                content=meta.get("content", ""),
-                tags=meta.get("topics", ""),
-                scope=meta.get("scope", "general"),
-                project_id=meta.get("project_id", ""),
-                created=meta.get("created", ""),
-                updated=meta.get("updated", ""))
-
-    def deprecate(self, doc_id: str):
-        item = self._store.get(doc_id)
-        if item:
-            meta = item["metadata"]
-            meta["deprecated"] = str(True)
-            meta["updated"] = datetime.now(timezone.utc).isoformat()
-            text = f"{meta.get('title','')}\n{meta.get('content','')}"
-            self._store.upsert(doc_id, text, meta)
-            self._fts_upsert(
-                doc_id, title=meta.get("title", ""),
-                content=meta.get("content", ""),
-                tags=meta.get("topics", ""),
-                scope=meta.get("scope", "general"),
-                project_id=meta.get("project_id", ""),
-                created=meta.get("created", ""),
-                updated=meta.get("updated", ""))
-
     def list_topics(self) -> list[str]:
         topics = set()
         for did in self._store.get_all_ids()[:500]:

@@ -55,9 +55,6 @@ class MemoryManager:
                       confidence: float = 1.0, project_id: str = ""):
         self.personal.remember(user_id, key, value, confidence, project_id)
 
-    def remember_project_pref(self, user_id: str, project_id: str, key: str, value):
-        self.personal.remember_project_pref(user_id, project_id, key, value)
-
     def recall_user(self, user_id: str, key: Optional[str] = None) -> dict:
         return self.personal.recall(user_id, key)
 
@@ -66,12 +63,6 @@ class MemoryManager:
 
     def get_user_tone(self, user_id: str) -> str:
         return self.personal.get_tone(user_id)
-
-    def get_user_name(self, user_id: str) -> str:
-        return self.personal.get_name(user_id)
-
-    def forget_user_key(self, user_id: str, key: str) -> bool:
-        return self.personal.forget(user_id, key)
 
     def set_user_loadout(self, user_id: str, *, bound_projects=None,
                          preferred_scope: str = "",
@@ -137,12 +128,6 @@ class MemoryManager:
         return self.swarm.fulltext_query(
             query_text, limit=limit, project_id=project_id,
             scope=scope, category=category)
-
-    def fulltext_query_knowledge(self, query_text: str, limit: int = 20,
-                                 project_id: Optional[str] = None,
-                                 scope: Optional[str] = None) -> list[dict]:
-        return self.knowledge.fulltext_query(
-            query_text, limit=limit, project_id=project_id, scope=scope)
 
     def rebuild_fulltext(self, batch_size: int = 200) -> dict:
         """全量重建 FTS5 索引（swarm 记忆 + 权威知识库）。"""
@@ -258,15 +243,6 @@ class MemoryManager:
                          scope: Optional[str] = None) -> list[dict]:
         return self.knowledge.lookup(query, topic, exact_policy, project_id, scope)
 
-    def get_policy(self, policy_name: str) -> Optional[dict]:
-        return self.knowledge.get_policy(policy_name)
-
-    def verify_knowledge(self, doc_id: str, verified: bool = True):
-        self.knowledge.verify(doc_id, verified)
-
-    def deprecate_knowledge(self, doc_id: str):
-        self.knowledge.deprecate(doc_id)
-
     # ==================== 智能体接口 ====================
 
     def register_agent(self, agent_id: str, agent_type: str = "cli",
@@ -275,9 +251,6 @@ class MemoryManager:
                        physical_user: str = "") -> dict:
         return self.agents.register(agent_id, agent_type, capabilities, metadata,
                                     physical_user=physical_user)
-
-    def list_agents(self) -> list[str]:
-        return self.agents.list_active()
 
     def record_agent_action(self, agent_id: str, action_type: str,
                             project_id: str = "", outcome: str = "success",
@@ -327,9 +300,6 @@ class MemoryManager:
         })
         if len(self._query_log) > 1000:
             self._query_log = self._query_log[-500:]
-
-    def get_query_log(self, limit: int = 50) -> list[dict]:
-        return self._query_log[-limit:]
 
     # ==================== 刷盘 ====================
 

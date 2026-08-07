@@ -92,12 +92,6 @@ class CerebrateLogger:
 
         return results[-lines:]
 
-    def read_by_module(self, module: str, lines: int = 50) -> list[dict]:
-        return self.read_tail(lines=lines, module=module)
-
-    def read_by_level(self, level: str, lines: int = 50) -> list[dict]:
-        return self.read_tail(lines=lines, level=level)
-
 
 # 全局单例
 _logger: Optional[CerebrateLogger] = None

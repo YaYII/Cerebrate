@@ -31,9 +31,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CONTENT_KEY = "content"
-FULL_CONTENT_KEY = "full_content"
-
 # 生命周期 → 子目录类型映射
 LIFE_STAGE_TO_TYPE = {
     "memory": "memory",

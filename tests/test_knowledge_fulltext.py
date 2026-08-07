@@ -130,7 +130,6 @@ class KnowledgeFullTextTests(unittest.TestCase):
         self.assertGreaterEqual(result["knowledge"]["total"], 1)
         # 重建后两条索引都在
         self.assertEqual(len(manager.fulltext_query_swarm("MEMORY_UNIQUE_TOKEN_99999")), 1)
-        self.assertEqual(len(manager.fulltext_query_knowledge("KNOWLEDGE_UNIQUE_TOKEN_88888")), 1)
 
 
 if __name__ == "__main__":

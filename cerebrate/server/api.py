@@ -2620,22 +2620,6 @@ class BrainAPI:
             raise ValueError("project_id and target are required")
         return store.navigate(project_id, target, branch=branch)
 
-    def list_all_knowledge(self) -> list[dict]:
-        """列出知识库所有文档摘要。"""
-        docs = []
-        for did in self.mm.knowledge._store.get_all_ids():
-            item = self.mm.knowledge._store.get(did)
-            if item:
-                m = item["metadata"]
-                docs.append({
-                    "doc_id": item["id"],
-                    "title": m.get("title", ""),
-                    "topics": (m.get("topics") or "").split(","),
-                    "is_policy": m.get("is_policy") == "True",
-                    "updated": m.get("updated", ""),
-                })
-        return docs
-
     def distill_knowledge_on_demand(self, payload: dict) -> dict:
         """按需蒸馏：根据 topic 搜索记忆，LLM 生成知识文档并入库。"""
         topic = payload.get("topic", "").strip()

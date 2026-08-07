@@ -230,10 +230,3 @@ def start_scheduler(api) -> CerebrateScheduler:
     _scheduler.start()
     return _scheduler
 
-
-def stop_scheduler():
-    """停止全局调度器。"""
-    global _scheduler
-    if _scheduler is not None:
-        _scheduler.stop()
-        _scheduler = None

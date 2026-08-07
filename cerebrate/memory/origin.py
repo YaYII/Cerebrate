@@ -125,11 +125,6 @@ class OriginLog:
         results.sort(key=lambda x: x.get("recorded_at", ""))
         return results
 
-    def list_ids(self) -> list[str]:
-        """列出所有原始记录 ID。"""
-        return [did for did in self._store.get_all_ids()
-                if not did.startswith("_")]
-
     # ── 清理与备份 ──────────────────────────────────────
 
     def get_old_origins(self, days: int = 365) -> list[dict]:
@@ -265,8 +260,3 @@ class OriginLog:
                 result["deleted"] += 1
 
         return result
-
-    @property
-    def count(self) -> int:
-        with self._lock:
-            return self._count

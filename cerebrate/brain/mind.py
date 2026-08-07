@@ -63,19 +63,6 @@ class CerebrateMind:
         }
         store.upsert(self.STATE_DOC_ID, "cerebrate brain state", meta)
 
-    def think(self, about: str = "") -> dict:
-        stats = self.mm.get_all_stats()
-        agents = self.mm.agents.list_details()
-        return {
-            "generation": self.generation,
-            "birth_time": self.birth_time,
-            "mission": self.mission,
-            "state": self.state,
-            "stats": stats,
-            "agents": agents,
-            "thoughts": about,
-        }
-
     def sense(self) -> dict:
         stats = self.mm.get_all_stats()
         swarm_stats = stats.get("swarm", {})
@@ -145,11 +132,6 @@ class CerebrateMind:
         except Exception:
             pass  # ChromaDB may be temporarily busy; safe to skip
         return ""
-
-    def evolve(self):
-        self.generation += 1
-        self.state["confidence"] = min(1.0, self.state["confidence"] + 0.02)
-        self._save_state()
 
 class Metacognition:
     """元认知：反思自身思维过程，检测偏见，提出改进"""

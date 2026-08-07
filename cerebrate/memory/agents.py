@@ -120,15 +120,6 @@ class AgentRegistry:
         self._persist(agent_id)
         return info
 
-    def unregister(self, agent_id: str) -> bool:
-        with self._cache_lock:
-            if agent_id not in self._cache:
-                return False
-            del self._cache[agent_id]
-        doc_id = f"agent:{agent_id}"
-        self._store.delete(doc_id)
-        return True
-
     def get(self, agent_id: str) -> Optional[dict]:
         with self._cache_lock:
             return self._cache.get(agent_id)
@@ -231,7 +222,3 @@ class AgentRegistry:
                 "last_active": info.get("last_active", ""),
                 "registered_at": info.get("registered_at", ""),
             }
-
-    def is_registered(self, agent_id: str) -> bool:
-        with self._cache_lock:
-            return agent_id in self._cache

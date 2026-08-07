@@ -84,14 +84,6 @@ class OriginLogTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["title"], "记录2")
 
-    def test_count(self):
-        """计数器正确递增。"""
-        self.assertEqual(self.origin.count, 0)
-        self.origin.add("mem-1", {"title": "t1"})
-        self.assertEqual(self.origin.count, 1)
-        self.origin.add("mem-2", {"title": "t2"})
-        self.assertEqual(self.origin.count, 2)
-
     def test_appears_in_api_response(self):
         """验证 propose_memory 返回中包含 origin_id。"""
         from cerebrate.server.api import BrainAPI

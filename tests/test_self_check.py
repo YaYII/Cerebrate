@@ -512,21 +512,6 @@ class SwarmReadPathTests(unittest.TestCase):
             len(mem.get("content", "")), len(doc) * 0.5,
             f"聚合内容长度 {len(mem.get('content', ''))} 应与原文 {len(doc)} 接近")
 
-    def test_load_memory_raw_aggregates(self):
-        """load_memory_raw() 也聚合分块内容"""
-        doc = "\n\n".join([f"## 第{i}节\n\n{'内容' * 80}" for i in range(5)])
-        mid = self.swarm.share(
-            title="Raw 加载",
-            content=doc,
-            category="test",
-            tags=[],
-            source_agent="test",
-        )
-        raw = self.swarm.load_memory_raw(mid)
-        self.assertIsNotNone(raw)
-        self.assertIn("content", raw)
-        self.assertGreater(len(raw["content"]), 100)
-
     def test_context_expansion_adds_expanded_field(self):
         """上下文扩展在结果中添加 _expanded_context 字段"""
         doc = "\n\n".join([f"## 第{i}节\n\n{'详细内容' * 30}" for i in range(20)])
