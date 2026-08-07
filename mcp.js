@@ -389,7 +389,7 @@ function harvestProjectLocal(rootArg, projectId, exts) {
   };
 }
 
-// ── 工具定义（33 个，与 Python 版一致）──────────────────────
+// ── 工具定义（43 个，与 Python 版一致）──────────────────────
 const TOOLS = [
   { name: "cerebrate_sense", description: "【会话开始必须调用】感知虫群脑状态，返回健康状态、记忆总数、代理数、warnings。", inputSchema: { type: "object", properties: {} } },
   { name: "cerebrate_help", description: "获取 Cerebrate v5 API 发现文档。", inputSchema: { type: "object", properties: {} } },
@@ -572,7 +572,7 @@ async function handleCall(name, args) {
       case "cerebrate_scene_ingest": return await httpRequest("POST", "/v1/scene/ingest", {
         session_id: args.session_id, events: args.events || [], prompt: args.prompt || "",
       }, effectiveToken());
-      case "cerebrate_scene_get": return await httpRequest("GET", "/v1/scene/" + encodeURIComponent(args.session_id), null, effectiveToken());
+      case "cerebrate_scene_get": return await httpRequest("GET", "/v1/scene/" + args.session_id, null, effectiveToken());
       case "cerebrate_scene_compress": return await httpRequest("POST", "/v1/scene/compress", {
         session_id: args.session_id, force: !!args.force,
       }, effectiveToken());
@@ -584,6 +584,7 @@ async function handleCall(name, args) {
       case "cerebrate_skill_append_version": return await httpRequest("POST", "/v1/skills/append-version", {
         memory_id: args.memory_id, content: args.content,
         description: args.description || "", skill_markdown: args.skill_markdown || "",
+        physical_user: args.physical_user || PHYSICAL_USER,
       }, effectiveToken());
       case "cerebrate_skill_versions": return await httpRequest("POST", "/v1/skills/versions", {
         memory_id: args.memory_id,
@@ -595,6 +596,7 @@ async function handleCall(name, args) {
       case "cerebrate_loadout_set": return await httpRequest("POST", "/v1/loadout", {
         bound_projects: args.bound_projects || [], preferred_scope: args.preferred_scope || "",
         bound_tags: args.bound_tags || [],
+        user: args.user || PHYSICAL_USER,
       }, effectiveToken());
       case "cerebrate_loadout_get": return await httpRequest("GET", "/v1/loadout?user=" + encodeURIComponent(args.user || ""), null, effectiveToken());
       case "cerebrate_ingest": return await httpRequest("POST", "/v1/ingest", {
