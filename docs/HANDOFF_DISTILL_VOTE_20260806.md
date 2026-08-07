@@ -914,3 +914,36 @@ stdio sense 真实调用（1472 条记忆 healthy）
   超大项目（>2000 文件）只扫前 2000，可在参数 limit 扩展
 - 服务端 MCP 端点（HTTP /v1/mcp）的 entity_extract 仍返回提示（本地 MCP 才有实体化，数据不离开本地）——
   这是架构设计：实体化/代码分析必须在本地 MCP（npm 包）执行
+
+---
+
+# 追加（2026-08-07 第二十五轮）：豆包视觉图像识别 skill（deepseek 视觉补充）
+
+## 背景与约束（用户明确）
+- 提供火山引擎豆包多模态 API Key，补充 **deepseek 无图像识别**的能力
+- **铁律：绝不生图**——本 API 只用于图像识别（便宜）；生图用程序化构建
+  （Python PIL/treejs/SVG/Matplotlib），不用多模态生成（贵）
+- 定位：辅助技能，非主力；只做「图像识别 → 文本结果」，交给主模型继续推理
+
+## API 事实（实测确认）
+- endpoint: https://ark.cn-beijing.volces.com/api/v3/chat/completions（OpenAI 兼容）
+- 可用视觉模型（key 已开通）：doubao-seed-2-1-pro-260628（主力精准）/
+  doubao-seed-2-1-turbo-260628（备选快省）
+- 未开通：doubao-seed-2-0-pro-260215 等（需 Ark 控制台激活，报 ModelNotOpen）
+- 图片：base64 data URL（本地推荐，最可靠）或 http(s) URL（需火山服务器可达）
+- key 明文只在 ~/.codex/private_notes.md（本机）；虫群记忆/交接文档不写明文
+
+## 交付
+- skill: ~/.codex/skills/doubao-vision/（SKILL.md + scripts/vision.py）
+- 用法：python3 ~/.codex/skills/doubao-vision/scripts/vision.py <图片|URL|-> [提问] [--model X]
+- 特性：stdin 输入、>1MB 自动 PIL 压缩（限宽 1024）、120s 超时 + 一次重试、
+  key 读取（环境变量 DOUBAO_VISION_API_KEY > private_notes 兜底）
+
+## 验证（真实执行）
+- 测试图（矩形+圆形+文字）：pro 精准识别形状/颜色/文字 ✅
+- 真实截图（vscode-database-client SQL 工具）：OCR 提取 SQL/按钮/分页精准（pro 25s / turbo 15s）✅
+- URL 图片：wikimedia 曾超时（火山服务器下载失败），本地 base64 无此问题 ✅
+
+## 遗留/注意
+- key 在 private_notes.md；skill 脚本从 private_notes 兜底读取
+- 生图能力（若未来需要）走 PIL/treejs/SVG 程序化构建，与豆包 API 无关
