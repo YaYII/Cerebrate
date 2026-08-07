@@ -4,6 +4,8 @@
 > 方法：5 个子代理并行只读审查（server/brain、memory、core、client/tools/mcp、腾讯项目），关键结论由主代理逐条实证复核。
 > 状态：本次为只读审查，**未修改任何代码、未删除腾讯项目**（需用户确认后再执行清理）。
 
+> **2026-08-07 追加（执行结果）**：用户确认后已按顺序完成全部 9 项任务，详见文末「§8 执行结果」。
+
 ---
 
 ## 1. 任务背景与需求
@@ -83,3 +85,40 @@
 - 关键证据位置：`api.py:1501/2622/2942`、`swarm.py:1629`、`manager.py:301`、`server/cli.py:33`、`config.py:78-248`
 - 回归测试：`python3 -m pytest tests/ -x -q` 或 `scripts/run_regression.sh`
 - 腾讯项目：`/home/as-workstation01/Documents/project/TencentDB-Agent-Memory/`
+
+---
+
+## 8. 执行结果（2026-08-07，全部完成并推送）
+
+腾讯项目已删除（`/home/as-workstation01/Documents/project/TencentDB-Agent-Memory/`，75MB，非 submodule，借鉴点已全部落地）。
+
+### 提交序列（master，8 个 commit，均 push 远程）
+| commit | 任务 | 内容 |
+|---|---|---|
+| ba1283d | 任务0 | 审查报告文档（含腾讯项目删除） |
+| 4398387 | 任务1-3 | P0×3：NameError / PG 幽灵调用 / migrate 导入路径 |
+| cbb6c08 | 任务4 | 死代码 -226 行（26 处） |
+| 94e9a55 | 任务5 | 死配置字段 -41 行（14 个） |
+| fca2531 | 任务6 | 版本号读 VERSION 文件 + token 估算统一 |
+| 46dabf3 | 任务7 | mcp.js 行为对齐（user/physical_user/scene_get 编码） |
+| de3b10c | 任务8 | CLI 死参数/死变量/无用 import -55 行（15 文件） |
+| acd1d5a | 任务9 | project-harvest 弃用转调 harvest-push（红线） |
+
+### 验收证据
+- 每任务后全量回归：`pytest tests/ --ignore=prod_test.py` **387 passed**（无回归）
+- 版本号实测 `_read_version() = 5.2.1`；token 估算统一后 `estimate_tokens('x'*400)=2`
+- parity 测试 `test_mcp_tool_parity.py` 5 passed；`node --check mcp.js` OK
+- 代码净减 **289 行**（17899 → 17610）
+
+### 保留项（有意为之）
+- `docstore.get_content/get_metadata/exists/get_available_ids`：C 级保留（test_self_check 使用）
+- `config.code_repos_path`：C 级保留（test_system_boundaries 使用）
+- `core/__init__.py` re-export：包公共 API，删除风险高收益小
+- 服务端 MCP 39 个工具 ⊆ 本地 43 个：有意设计（服务端不暴露 logout/deprecated/register 别名）
+- mcp.js `entity_extract` 不落盘：Node 零依赖版设计
+- api.py `timezone as _tz`：真实使用，非重复
+
+### 遗留建议（未执行，可选）
+- `distill_knowledge_on_demand`（同步）vs `_run_distill`（异步）两套蒸馏并存，可评估合并
+- `tools/curate_v3.py:31` 无用的 `MemoryManager` import（脚本废弃）
+- `.env` 中 `CEREBRATE_EVOLUTION_ENABLED=true` 现已无消费者（config 字段已删），建议后续清理本地 .env
