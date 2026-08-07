@@ -704,7 +704,27 @@ def _handle_call(name: str, args: dict) -> dict:
             return _request("GET", "/v1/sense")
 
         elif name == "cerebrate_help":
-            return _request("GET", "/v1/help")
+            return {
+                "status": "ok",
+                "data": {
+                    "server": "Cerebrate Brain Server v5 (cerebrate-mcp 5.2.2)",
+                    "对接手册": "完整版见 docs/AI_ONBOARDING.md；以下为核心指令",
+                    "会话流程": [
+                        "开始: cerebrate_sense 感知脑状态",
+                        "遇到问题: cerebrate_search(索引) → cerebrate_detail(详情) / cerebrate_query(决策)",
+                        "解决后: cerebrate_propose(沉淀经验)",
+                        "复用反馈: cerebrate_use_start → cerebrate_use_finish",
+                    ],
+                    "写记忆规范": "title/problem/solution/content/tags/category；scope=general 技术通用 / scope=project+project_id 项目专属；禁止无证据臆测",
+                    "工具分组": {
+                        "读/感知": ["cerebrate_sense", "cerebrate_search", "cerebrate_timeline", "cerebrate_detail", "cerebrate_query", "cerebrate_recall", "cerebrate_remember", "cerebrate_doctrines"],
+                        "写/贡献": ["cerebrate_propose", "cerebrate_knowledge_store", "cerebrate_knowledge_search", "cerebrate_use_start", "cerebrate_use_finish", "cerebrate_vote", "cerebrate_skill_append_version", "cerebrate_skill_versions", "cerebrate_skill_diff", "cerebrate_ingest"],
+                        "协作/项目": ["cerebrate_project_work", "cerebrate_project_profile", "cerebrate_project_navigate", "cerebrate_project_harvest", "cerebrate_scene_ingest", "cerebrate_scene_get", "cerebrate_scene_compress", "cerebrate_scene_distill", "cerebrate_scene_list"],
+                        "认证/管理": ["cerebrate_auth_register", "cerebrate_auth_login", "cerebrate_auth_status", "cerebrate_register"],
+                    },
+                },
+                "meta": {"protocol": "v5"},
+            }
 
         elif name == "cerebrate_doctrines":
             return _request("GET", "/v1/doctrines")
@@ -1263,13 +1283,25 @@ def main():
 
         if method == "initialize":
             client_version = params.get("protocolVersion", "2024-11-05")
+            # AI 对接核心指令（完整版见 docs/AI_ONBOARDING.md）：
+            # 客户端会将 instructions 注入 AI 上下文，让 AI 知道如何用脑虫。
+            _instructions = "\n".join([
+                "你是 Cerebrate 脑虫记忆系统的 AI 助手（团队共享记忆，v5）。",
+                "【会话开始】先调 cerebrate_sense 感知脑状态与最近记忆。",
+                "【遇到问题】先 cerebrate_search 检索是否已有经验（先索引再 detail，省 token）；决策用 cerebrate_query。",
+                "【解决问题后】用 cerebrate_propose 沉淀经验（含 title/content/tags/problem/solution/category，证据链完整）。",
+                "【复用他人经验】cerebrate_use_start → use_finish 反馈有效性。",
+                "【写记忆规范】技术通用经验 scope=general；项目专属业务 scope=project + 小写 project_id；禁止无证据臆测。",
+                "【安全】token 为本人登录凭证，勿分享；只管理自己写的记忆；代码不离开本地。",
+            ])
             _send({
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.2"}
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.2"},
+                    "instructions": _instructions,
                 }
             })
         elif method == "ping":
