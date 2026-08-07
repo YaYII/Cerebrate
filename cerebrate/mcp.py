@@ -707,7 +707,7 @@ def _handle_call(name: str, args: dict) -> dict:
             return {
                 "status": "ok",
                 "data": {
-                    "server": "Cerebrate Brain Server v5 (cerebrate-mcp 5.2.2)",
+                    "server": "Cerebrate Brain Server v5 (cerebrate-mcp 5.2.3)",
                     "对接手册": "完整版见 docs/AI_ONBOARDING.md；以下为核心指令",
                     "会话流程": [
                         "开始: cerebrate_sense 感知脑状态",
@@ -1300,7 +1300,7 @@ def main():
                 "result": {
                     "protocolVersion": client_version,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.2"},
+                    "serverInfo": {"name": "cerebrate-mcp-v5", "version": "5.2.3"},
                     "instructions": _instructions,
                 }
             })

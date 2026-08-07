@@ -1,6 +1,6 @@
 {
   "name": "cerebrate-mcp",
-  "version": "5.2.2",
+  "version": "5.2.3",
   "description": "Cerebrate 脑虫记忆系统 MCP Server (Node.js) — 团队长期记忆 + 业务画像 + 本地实体化，零依赖",
   "main": "mcp.js",
   "bin": {

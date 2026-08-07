@@ -455,7 +455,7 @@ async function handleCall(name, args) {
       case "cerebrate_help": return {
         status: "ok",
         data: {
-          server: "Cerebrate Brain Server v5 (cerebrate-mcp 5.2.2)",
+          server: "Cerebrate Brain Server v5 (cerebrate-mcp 5.2.3)",
           "对接手册": "完整版见 docs/AI_ONBOARDING.md；以下为核心指令",
           "会话流程": [
             "开始: cerebrate_sense 感知脑状态",
@@ -724,7 +724,7 @@ function runMcp() {
       send({ jsonrpc: "2.0", id, result: {
         protocolVersion: params.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.2" },
+        serverInfo: { name: "cerebrate-mcp-v5-node", version: "5.2.3" },
         instructions,
       } });
     } else if (method === "ping") {
@@ -780,7 +780,7 @@ function cli(argv) {
   if (cmd === "--version" || cmd === "-v") {
     // 硬编码版本（与 initialize serverInfo 一致；mcp.js 可被公网单独下载，
     // 同目录不一定有 package.json，不能 require 它）
-    console.log("5.2.2");
+    console.log("5.2.3");
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
