@@ -29,7 +29,7 @@ def cmd_serve(args):
 
 
 def cmd_migrate(args):
-    from migrate import migrate_all, export_seeds, reindex_from_seeds
+    from cerebrate.migrate import migrate_all, export_seeds, reindex_from_seeds
     if args.export_seeds:
         result = export_seeds()
     elif args.reindex:
@@ -42,7 +42,7 @@ def cmd_migrate(args):
 
 
 def _migrate_swarm(dry_run: bool) -> int:
-    from migrate import migrate_swarm
+    from cerebrate.migrate import migrate_swarm
     return migrate_swarm(dry_run)
 
 

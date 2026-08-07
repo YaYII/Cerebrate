@@ -1623,12 +1623,10 @@ class SwarmMemory:
         except Exception:
             pass
 
-        # 同步 PostgreSQL 元数据
-        try:
-            if self._ms.available:
-                self._ms.update_metadata(memory_id, updates)
-        except Exception:
-            pass
+        # 同步 PostgreSQL 元数据：
+        # MetaStore 无 update_metadata 方法（仅有 update_lifecycle/put_document 等），
+        # 此调用原本被 try/except 吞掉静默失败，等价无副作用，故直接删除。
+        # ChromaDB 侧 metadata 已在上面同步完成，PG 元数据暂不支持自由字段更新。
 
         return {
             "appended": True,

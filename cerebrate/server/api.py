@@ -1495,15 +1495,6 @@ class BrainAPI:
         if usage_id:
             self._auto_extracted_usages.add(usage_id)
 
-        # 问题级去重：同标题的 [自动经验] 已存在（非 archived）则跳过。
-        # 根因：不同 usage（usage_id 不同）引用相同 problem 时会重复提取同 title 经验，
-        # usage 级去重无法拦截；这里在 propose 前做标题去重，从源头防重复。
-        title = lesson.get("title", f"[自动经验] {problem[:60]}")
-        if self._auto_lesson_exists(title):
-            logger.info(
-                "自动经验去重跳过 (title=%s): 同标题经验已存在", title[:60])
-            return None
-
         # 获取被复用的原始记忆
         original_memory = None
         try:
@@ -1518,6 +1509,16 @@ class BrainAPI:
         )
         if not lesson or not lesson.get("content"):
             return None
+        # 问题级去重：同标题的 [自动经验] 已存在（非 archived）则跳过。
+        # 根因：不同 usage（usage_id 不同）引用相同 problem 时会重复提取同 title 经验，
+        # usage 级去重无法拦截；这里在 propose 前做标题去重，从源头防重复。
+        # 必须在 lesson 成功提取后再执行（lesson 未定义前访问会抛 NameError）。
+        title = lesson.get("title", f"[自动经验] {problem[:60]}")
+        if self._auto_lesson_exists(title):
+            logger.info(
+                "自动经验去重跳过 (title=%s): 同标题经验已存在", title[:60])
+            return None
+
         # 自动 propose：用系统账户提交，但 credit 归原 agent
         physical_user = ""
         try:
