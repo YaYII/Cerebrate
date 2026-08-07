@@ -1,4 +1,5 @@
-"""短期场景存储 v5.2 — 进行中任务的场景上下文（借鉴 TencentDB Agent Memory L2）
+"""
+短期场景存储 v5.2 — 进行中任务的场景上下文（借鉴 TencentDB Agent Memory L2）.
 
 与长期记忆（swarm/knowledge）分离：
   - 场景是进行中任务的短期上下文（session 级），任务结束后可蒸馏沉淀为长期技能
@@ -12,16 +13,14 @@ session_id 严格校验（防路径穿越，对齐腾讯 storage local-backend C
 import json
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
-
 
 SAFE_SESSION_RE = re.compile(r"^[a-zA-Z0-9_.\-]{1,100}$")
 
 
 class SceneStore:
-    """短期场景存储：session_id → 事件流 + Mermaid 压缩图 + 元数据"""
+    """短期场景存储：session_id → 事件流 + Mermaid 压缩图 + 元数据."""
 
     def __init__(self, storage_path: Path):
         self.storage_path = Path(storage_path)
@@ -37,7 +36,7 @@ class SceneStore:
         return self.storage_path / f"{session_id}.json"
 
     def _now(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def _load(self, session_id: str) -> dict:
         path = self._path(session_id)
@@ -73,7 +72,7 @@ class SceneStore:
 
     def ingest(self, session_id: str, events: list[dict],
                prompt: str = "") -> dict:
-        """追加原始事件（零 LLM 成本）。events: [{ts, kind: tool|msg, text}]"""
+        """追加原始事件（零 LLM 成本）。events: [{ts, kind: tool|msg, text}]."""
         with self._lock:
             data = self._load(session_id)
             now = self._now()
@@ -95,6 +94,7 @@ class SceneStore:
     # ── 读取 ──
 
     def get(self, session_id: str) -> dict:
+        """读取场景快照：事件列表（最多最近 50 条）+ Mermaid 压缩图 + 元数据。."""
         data = self._load(session_id)
         return {
             "session_id": data["session_id"],
@@ -107,8 +107,8 @@ class SceneStore:
         }
 
     def set_mmd(self, session_id: str, mmd: str,
-                meta: Optional[dict] = None) -> dict:
-        """写入 Mermaid 压缩图（compress 成功后调用）。"""
+                meta: dict | None = None) -> dict:
+        """写入 Mermaid 压缩图（compress 成功后调用）。."""
         with self._lock:
             data = self._load(session_id)
             data["mmd"] = mmd
@@ -118,6 +118,7 @@ class SceneStore:
             return self._summary(data)
 
     def list_sessions(self, limit: int = 100) -> list[dict]:
+        """列出场景摘要（session_id/事件数/是否有压缩图/更新时间），按更新时间倒序。."""
         sessions = []
         for path in sorted(self.storage_path.glob("*.json")):
             if path.name.endswith(".tmp"):
@@ -140,6 +141,7 @@ class SceneStore:
         return sessions
 
     def delete(self, session_id: str) -> bool:
+        """删除场景文件，删除成功返回 True，不存在返回 False。."""
         with self._lock:
             path = self._path(session_id)
             if path.exists():

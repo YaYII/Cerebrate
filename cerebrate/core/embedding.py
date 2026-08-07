@@ -1,5 +1,5 @@
 
-"""嵌入引擎 — 文本向量化，BGE 模型优先，本地 hash 回退"""
+"""嵌入引擎 — 文本向量化，BGE 模型优先，本地 hash 回退."""
 import hashlib
 import logging
 import math
@@ -28,7 +28,7 @@ _query_cache_misses = 0
 
 def get_embedding_engine(model_name: str = "BAAI/bge-small-zh-v1.5",
                          device: str = "cpu") -> "EmbeddingEngine":
-    """获取嵌入引擎单例（线程安全）"""
+    """获取嵌入引擎单例（线程安全）."""
     global _engine
     if _engine is None:
         with _engine_lock:
@@ -38,7 +38,8 @@ def get_embedding_engine(model_name: str = "BAAI/bge-small-zh-v1.5",
 
 
 def query_cache_stats() -> dict:
-    """查询向量缓存统计（供 /v1/status 调度信号）。
+    """
+    查询向量缓存统计（供 /v1/status 调度信号）。.
 
     返回当前缓存占用、容量、命中/未命中计数与命中率——
     AI 据此判断「高频查询是否已被缓存复用，现在查询代价高低」。
@@ -60,7 +61,8 @@ def query_cache_stats() -> dict:
 
 
 class EmbeddingEngine:
-    """文本向量化引擎
+    """
+    文本向量化引擎.
 
     优先使用 sentence-transformers + BGE 模型（推荐 BAAI/bge-m3，8192 tokens），
     不可用时回退到确定性本地 hash 向量。
@@ -78,7 +80,7 @@ class EmbeddingEngine:
         self._init_model()
 
     def _init_model(self):
-        """尝试加载 BGE 模型，失败则回退 hash"""
+        """尝试加载 BGE 模型，失败则回退 hash."""
         try:
             from sentence_transformers import SentenceTransformer
             kwargs = {"device": self.device}
@@ -106,17 +108,19 @@ class EmbeddingEngine:
 
     @property
     def mode(self) -> str:
+        """返回当前 embedding 引擎模式（bge/hash 等），未初始化时为 unknown。."""
         return self._mode or "unknown"
 
     @property
     def dimension(self) -> int:
+        """返回向量维度：BGE 模式取模型维度，否则用回退的 _dimension。."""
         if self._mode == "bge" and self._model:
             return getattr(self._model, 'get_embedding_dimension',
                            getattr(self._model, 'get_sentence_embedding_dimension', lambda: self._dimension))()
         return self._dimension
 
-    def encode(self, texts: list[str], max_length: Optional[int] = None) -> list[list[float]]:
-        """将文本列表编码为向量列表（线程安全）"""
+    def encode(self, texts: list[str], max_length: int | None = None) -> list[list[float]]:
+        """将文本列表编码为向量列表（线程安全）."""
         if not texts:
             return []
         effective_max = max_length or self._max_length
@@ -139,8 +143,8 @@ class EmbeddingEngine:
                 return embeddings.tolist()
             return [self._hash_encode(text) for text in texts]
 
-    def encode_query(self, query: str, max_length: Optional[int] = None) -> list[float]:
-        """编码查询文本（BGE 需要加前缀，线程安全）"""
+    def encode_query(self, query: str, max_length: int | None = None) -> list[float]:
+        """编码查询文本（BGE 需要加前缀，线程安全）."""
         global _query_cache_hits, _query_cache_misses
         # LRU 缓存：相同查询直接命中，避免重复编码（阶段 1 扩展）
         cache_key = query if max_length is None else f"{query}\x00{max_length}"
@@ -169,7 +173,7 @@ class EmbeddingEngine:
         return result
 
     def _hash_encode(self, text: str) -> list[float]:
-        """确定性特征哈希向量，保证无网络时 Chroma 仍可查询。"""
+        """确定性特征哈希向量，保证无网络时 Chroma 仍可查询。."""
         vector = [0.0] * self._dimension
         tokens = re.findall(r"[\w\u4e00-\u9fff]+", (text or "").lower())
         if not tokens:

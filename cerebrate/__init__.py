@@ -1,4 +1,5 @@
-"""Cerebrate v5 — AI 脑虫记忆中枢.
+"""
+Cerebrate v5 — AI 脑虫记忆中枢.
 
 Layers (strict top-down dependency):
   core/     — ChromaDB storage, embedding engine, time decay

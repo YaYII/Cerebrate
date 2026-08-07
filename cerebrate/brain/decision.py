@@ -1,4 +1,5 @@
-"""决策路由器 - AI 三层决策逻辑
+"""
+决策路由器 - AI 三层决策逻辑.
 
 决策流程:
 0. 查询重写 → 多角度检索
@@ -7,7 +8,6 @@
 3. 用个人记忆套上用户熟悉的语气
 """
 import logging
-from typing import Optional
 
 from cerebrate.config import config
 
@@ -15,13 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 class DecisionRouter:
-    """虫群决策路由器 - 实现三层优先级查询逻辑"""
+    """虫群决策路由器 - 实现三层优先级查询逻辑."""
 
     def __init__(self, memory_manager):
         self.mm = memory_manager
 
-    def decide(self, user_id: str, query: str, context: Optional[dict] = None) -> dict:
-        """执行完整的三层决策流程
+    def decide(self, user_id: str, query: str, context: dict | None = None) -> dict:
+        """
+        执行完整的三层决策流程.
 
         context 可选键:
           - project_id / scope / category / tags: 记忆检索过滤
@@ -104,7 +105,7 @@ class DecisionRouter:
         return result
 
     def _is_policy_query(self, query: str, context: dict) -> bool:
-        """判断是否涉及政策/规则查询"""
+        """判断是否涉及政策/规则查询."""
         policy_keywords = [
             "政策", "规则", "规定", "policy", "rule", "条款",
             "退货", "退款", "保证", "保修", "协议", "合同",

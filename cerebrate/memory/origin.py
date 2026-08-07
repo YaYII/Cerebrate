@@ -1,4 +1,5 @@
-"""原始记忆日志 v5 — 不可变 append-only 存储
+"""
+原始记忆日志 v5 — 不可变 append-only 存储.
 
 每条记忆写入虫群时，在此保留完整原始副本。不可修改、不可删除。
 共享记忆通过 origin_ids 引用此处的原始记录，实现完整审计溯源。
@@ -10,28 +11,28 @@ import hashlib
 import json
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 from cerebrate.core.storage import ChromaStore
 
 
 class OriginLog:
-    """不可变原始记忆日志。
+    """
+    不可变原始记忆日志。.
 
     只提供 add / get 操作，无 update / delete。
     每条原始记录关联到一条共享记忆 (memory_id)。
     """
 
-    def __init__(self, chroma_path: Optional[Path] = None):
-        self._store: Optional[ChromaStore] = None
+    def __init__(self, chroma_path: Path | None = None):
+        self._store: ChromaStore | None = None
         self._count: int = 0
         self._lock = threading.Lock()
         self._init_store(chroma_path)
 
-    def _init_store(self, chroma_path: Optional[Path] = None):
+    def _init_store(self, chroma_path: Path | None = None):
         from cerebrate.core.embedding import get_embedding_engine
         engine = get_embedding_engine(
             config.embedding_model, config.embedding_device)
@@ -42,7 +43,8 @@ class OriginLog:
     # ── 写入 ──────────────────────────────────────────────
 
     def add(self, memory_id: str, payload: dict) -> str:
-        """写入一条原始记忆记录，返回 origin_id。
+        """
+        写入一条原始记忆记录，返回 origin_id。.
 
         Args:
             memory_id: 关联的共享记忆 ID
@@ -50,8 +52,9 @@ class OriginLog:
 
         Returns:
             origin_id: 原始记录唯一标识
+
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         origin_id = hashlib.sha256(
             f"origin:{memory_id}:{now}".encode()
         ).hexdigest()[:20]
@@ -78,12 +81,14 @@ class OriginLog:
 
     # ── 读取 ──────────────────────────────────────────────
 
-    def get(self, origin_id: str) -> Optional[dict]:
-        """按 origin_id 读取原始记忆完整内容。
+    def get(self, origin_id: str) -> dict | None:
+        """
+        按 origin_id 读取原始记忆完整内容。.
 
         Returns:
             dict 含 origin_id, memory_id, payload (原始数据), recorded_at 等；
             不存在返回 None。
+
         """
         item = self._store.get(origin_id)
         if not item:
@@ -108,7 +113,8 @@ class OriginLog:
         }
 
     def get_by_memory_id(self, memory_id: str) -> list[dict]:
-        """查询关联到某条共享记忆的所有原始记录。
+        """
+        查询关联到某条共享记忆的所有原始记录。.
 
         通常只有一条，但进化合并后可能有多条。
         """
@@ -128,15 +134,17 @@ class OriginLog:
     # ── 清理与备份 ──────────────────────────────────────
 
     def get_old_origins(self, days: int = 365) -> list[dict]:
-        """获取超过指定天数的原始记录列表。
+        """
+        获取超过指定天数的原始记录列表。.
 
         Args:
             days: 保留天数，默认 365 天
 
         Returns:
             list[dict]: 每条记录含 origin_id, memory_id, title, recorded_at
+
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         old = []
         for did in self._store.get_all_ids():
             if did.startswith("_") or did == "_seq":
@@ -149,7 +157,7 @@ class OriginLog:
             try:
                 recorded = datetime.fromisoformat(recorded_str)
                 if recorded.tzinfo is None:
-                    recorded = recorded.replace(tzinfo=timezone.utc)
+                    recorded = recorded.replace(tzinfo=UTC)
             except (ValueError, TypeError):
                 continue
             if recorded < cutoff:
@@ -163,7 +171,7 @@ class OriginLog:
         return old
 
     def delete_origin(self, origin_id: str) -> bool:
-        """删除单条原始记录（仅限过期清理调用）。"""
+        """删除单条原始记录（仅限过期清理调用）。."""
         with self._lock:
             item = self._store.get(origin_id)
             if not item:
@@ -173,7 +181,8 @@ class OriginLog:
             return True
 
     def backup_origins(self, origin_ids: list[str], backup_dir: str) -> str:
-        """将指定原始记录导出为 JSON 备份文件。
+        """
+        将指定原始记录导出为 JSON 备份文件。.
 
         Args:
             origin_ids: 要备份的 origin_id 列表
@@ -181,11 +190,12 @@ class OriginLog:
 
         Returns:
             备份文件路径；无数据返回空字符串
+
         """
         if not origin_ids:
             return ""
         os.makedirs(backup_dir, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         filename = f"origin_backup_{timestamp}.json"
         filepath = os.path.join(backup_dir, filename)
 
@@ -200,7 +210,7 @@ class OriginLog:
 
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump({
-                "backup_time": datetime.now(timezone.utc).isoformat(),
+                "backup_time": datetime.now(UTC).isoformat(),
                 "count": len(records),
                 "records": records,
             }, f, ensure_ascii=False, indent=2)
@@ -209,7 +219,8 @@ class OriginLog:
 
     def cleanup_expired(self, days: int = 365,
                         backup_dir: str = "/data/origin_backups") -> dict:
-        """清理超过保留期的原始记忆：先备份再删除（防删策略）。
+        """
+        清理超过保留期的原始记忆：先备份再删除（防删策略）。.
 
         备份失败则中止删除，保护数据安全。
         days <= 0 表示不清理（默认防删：原始记忆永久保留归档，
@@ -221,6 +232,7 @@ class OriginLog:
 
         Returns:
             操作结果统计
+
         """
         if days is None or days <= 0:
             # 防删：原始归档永久保留，不清理（显式手动清理仍可传正数天数）

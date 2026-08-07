@@ -7,7 +7,6 @@
   - 索引层展示 observation_type + concepts，让 agent 只看标题/类型即可判断
   - LLM 语义压缩标题：规则保底（截断），LLM 可用时增强
 """
-import os
 import sys
 import tempfile
 import unittest
@@ -17,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root

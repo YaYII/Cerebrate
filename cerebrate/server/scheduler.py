@@ -1,4 +1,5 @@
-"""脑虫后台调度器 v5 — 自动进化 + 原始记忆清理 + 自动经验提取
+"""
+脑虫后台调度器 v5 — 自动进化 + 原始记忆清理 + 自动经验提取.
 
 四个独立后台线程：
   - evolve_loop:  每 30 分钟检查蒸馏窗口（默认本地 0:00-1:00，低谷期），自动触发进化
@@ -11,14 +12,13 @@
 
 import logging
 import threading
-import time
-from typing import Optional
 
 logger = logging.getLogger("cerebrate.scheduler")
 
 
 class CerebrateScheduler:
-    """脑虫后台任务调度器。
+    """
+    脑虫后台任务调度器。.
 
     在 BrainAPI 初始化后调用 start() 启动三个守护线程。
     """
@@ -33,15 +33,15 @@ class CerebrateScheduler:
             from cerebrate.config import config
             verify_interval_hours = config.profile_verify_interval_hours
         self._verify_interval = verify_interval_hours * 3600  # 秒
-        self._evolve_thread: Optional[threading.Thread] = None
-        self._cleanup_thread: Optional[threading.Thread] = None
-        self._extract_thread: Optional[threading.Thread] = None
-        self._verify_thread: Optional[threading.Thread] = None
+        self._evolve_thread: threading.Thread | None = None
+        self._cleanup_thread: threading.Thread | None = None
+        self._extract_thread: threading.Thread | None = None
+        self._verify_thread: threading.Thread | None = None
         self._running = False
         self._stop_event = threading.Event()
 
     def start(self):
-        """启动后台调度器（守护线程）。"""
+        """启动后台调度器（守护线程）。."""
         if self._running:
             return
         self._running = True
@@ -76,7 +76,7 @@ class CerebrateScheduler:
             pass
 
     def stop(self):
-        """停止后台调度器。"""
+        """停止后台调度器。."""
         self._stop_event.set()
         self._running = False
         logger.info("脑虫调度器已停止")
@@ -84,12 +84,12 @@ class CerebrateScheduler:
     # ── 进化调度 ─────────────────────────────────────────
 
     def _in_evolution_window(self) -> bool:
-        """当前时间是否在蒸馏窗口内（统一判断，本地时区 0:00-1:00 默认）。"""
+        """当前时间是否在蒸馏窗口内（统一判断，本地时区 0:00-1:00 默认）。."""
         from cerebrate.config import in_evolution_window
         return in_evolution_window()
 
     def _evolve_loop(self):
-        """进化调度主循环：每 N 分钟检查一次。"""
+        """进化调度主循环：每 N 分钟检查一次。."""
         while not self._stop_event.is_set():
             try:
                 if self._in_evolution_window():
@@ -114,7 +114,7 @@ class CerebrateScheduler:
     # ── 清理调度 ─────────────────────────────────────────
 
     def _cleanup_loop(self):
-        """原始记忆清理主循环：每天检查一次（保留策略可配置，默认永久保留不清理）。"""
+        """原始记忆清理主循环：每天检查一次（保留策略可配置，默认永久保留不清理）。."""
         # 首次启动延迟 60 秒，避免与服务初始化冲突
         self._stop_event.wait(60)
 
@@ -144,7 +144,7 @@ class CerebrateScheduler:
     # ── 自动经验提取调度 ─────────────────────────────
 
     def _extract_loop(self):
-        """自动经验提取冷路径：每 N 分钟扫描未处理的 usage，兜底提取经验。"""
+        """自动经验提取冷路径：每 N 分钟扫描未处理的 usage，兜底提取经验。."""
         # 首次启动延迟 30 秒，等服务完全就绪
         self._stop_event.wait(30)
 
@@ -166,7 +166,7 @@ class CerebrateScheduler:
     # ── 画像一致性校验调度 ─────────────────────────────
 
     def _verify_loop(self):
-        """画像 vs 代码仓一致性校验：每 N 小时跑一次，漂移记日志+事件告警。"""
+        """画像 vs 代码仓一致性校验：每 N 小时跑一次，漂移记日志+事件告警。."""
         # 首次启动延迟 120 秒，等服务与代码仓就绪
         self._stop_event.wait(120)
         while not self._stop_event.is_set():
@@ -177,7 +177,7 @@ class CerebrateScheduler:
             self._stop_event.wait(self._verify_interval)
 
     def _run_verify_all(self) -> dict:
-        """校验所有有画像的项目，返回汇总（漂移项目进 events + 日志告警）。"""
+        """校验所有有画像的项目，返回汇总（漂移项目进 events + 日志告警）。."""
         from cerebrate.tools.project_profile import ProfileStore
         store = ProfileStore(self._api.mm)
         projects = store.list_projects()
@@ -217,11 +217,11 @@ class CerebrateScheduler:
 
 # ── 模块级便捷函数 ──────────────────────────────────────
 
-_scheduler: Optional[CerebrateScheduler] = None
+_scheduler: CerebrateScheduler | None = None
 
 
 def start_scheduler(api) -> CerebrateScheduler:
-    """启动全局调度器（幂等）。"""
+    """启动全局调度器（幂等）。."""
     global _scheduler
     if _scheduler is not None and _scheduler._running:
         return _scheduler

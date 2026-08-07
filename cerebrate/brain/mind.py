@@ -1,19 +1,18 @@
-"""脑虫自我意识 v5 — ChromaDB 持久化 + 元认知"""
+"""脑虫自我意识 v5 — ChromaDB 持久化 + 元认知."""
 import json
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from cerebrate.config import config
 
 
 class CerebrateMind:
-    """Cerebrate 的自我意识：知道自己的状态、能力和进化方向"""
+    """Cerebrate 的自我意识：知道自己的状态、能力和进化方向."""
 
     STATE_DOC_ID = "cerebrate_state"
 
     def __init__(self, memory_manager):
         self.mm = memory_manager
-        self.birth_time = datetime.now(timezone.utc).isoformat()
+        self.birth_time = datetime.now(UTC).isoformat()
         self.generation = 1
         self.mission = "管理虫族记忆，让所有 AI 智能体共享战斗经验"
         self.state = {
@@ -58,11 +57,17 @@ class CerebrateMind:
             "generation": str(self.generation),
             "birth_time": self.birth_time,
             "state": json.dumps(self.state, ensure_ascii=False),
-            "updated": datetime.now(timezone.utc).isoformat(),
+            "updated": datetime.now(UTC).isoformat(),
         }
         store.upsert(self.STATE_DOC_ID, "cerebrate brain state", meta)
 
     def sense(self) -> dict:
+        """
+        感知虫群当前状态，返回健康度概览 dict。.
+
+        汇总记忆总量/scope 分布/活跃智能体/隔离与进化状态/向量索引模式，
+        并基于记忆是否为空、智能体数量等规则给出 health 与 warnings。
+        """
         stats = self.mm.get_all_stats()
         swarm_stats = stats.get("swarm", {})
         total_memories = swarm_stats.get("total", 0)
@@ -104,7 +109,8 @@ class CerebrateMind:
         }
 
     def _recent_index(self, limit: int = 10) -> list[dict]:
-        """最近记忆紧凑索引（含 token 成本），供 sense 展示。
+        """
+        最近记忆紧凑索引（含 token 成本），供 sense 展示。.
 
         Phase 5（对齐 claude-mem）：会话开始即见"存在什么 + 取它要花多少 token"。
         FTS 索引未就绪时返回空列表，不阻塞 sense。
@@ -133,13 +139,19 @@ class CerebrateMind:
         return ""
 
 class Metacognition:
-    """元认知：反思自身思维过程，检测偏见，提出改进"""
+    """元认知：反思自身思维过程，检测偏见，提出改进."""
 
     def __init__(self, memory_manager):
         self.mm = memory_manager
         self.assessment_history: list[dict] = []
 
     def assess(self) -> dict:
+        """
+        元认知评估虫群健康度，返回评估报告 dict。.
+
+        计算查询命中率/效率，分析类别、智能体、项目三个维度的健康度，
+        生成改进建议并附加偏见检测结果；评估历史保留最近 100 条。
+        """
         stats = self.mm.get_all_stats()
         swarm = stats.get("swarm", {})
 
@@ -253,6 +265,11 @@ class Metacognition:
         return health
 
     def detect_biases(self) -> list[str]:
+        """
+        检测虫群偏见，返回偏见描述列表。.
+
+        检查：类别/主题是否单一、智能体是否过少、是否存在单一来源贡献占比过高的记忆。
+        """
         biases = []
         swarm = self.mm.swarm
         cats = swarm.list_categories()

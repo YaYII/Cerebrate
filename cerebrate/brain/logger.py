@@ -1,4 +1,5 @@
-"""虫群运行日志 — 结构化的 JSON 行日志
+"""
+虫群运行日志 — 结构化的 JSON 行日志.
 
 写入路径: {logs_path}/cerebrate.log
 每行一个 JSON 对象，包含:
@@ -15,13 +16,13 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 
 class CerebrateLogger:
-    """虫群结构化日志写入器。
+    """
+    虫群结构化日志写入器。.
 
     线程安全，每写一行 flush一次，确保容器崩溃不丢最后几行。
     """
@@ -34,9 +35,9 @@ class CerebrateLogger:
         self._std_logger = logging.getLogger("cerebrate.log")
 
     def _write(self, level: str, module: str, action: str, message: str,
-               details: Optional[dict] = None):
+               details: dict | None = None):
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": level,
             "module": module,
             "action": action,
@@ -54,26 +55,29 @@ class CerebrateLogger:
             except OSError as e:
                 self._std_logger.error(f"日志写入失败: {e}")
 
-    def info(self, module: str, action: str, message: str, details: Optional[dict] = None):
+    def info(self, module: str, action: str, message: str, details: dict | None = None):
+        """写入 INFO 级别结构化日志条目。."""
         self._write("INFO", module, action, message, details)
 
-    def warning(self, module: str, action: str, message: str, details: Optional[dict] = None):
+    def warning(self, module: str, action: str, message: str, details: dict | None = None):
+        """写入 WARNING 级别结构化日志条目。."""
         self._write("WARNING", module, action, message, details)
 
-    def error(self, module: str, action: str, message: str, details: Optional[dict] = None):
+    def error(self, module: str, action: str, message: str, details: dict | None = None):
+        """写入 ERROR 级别结构化日志条目。."""
         self._write("ERROR", module, action, message, details)
 
     def read_tail(self, lines: int = 50,
-                  level: Optional[str] = None,
-                  module: Optional[str] = None) -> list[dict]:
-        """读取最近的日志条目，支持按级别/模块过滤。"""
+                  level: str | None = None,
+                  module: str | None = None) -> list[dict]:
+        """读取最近的日志条目，支持按级别/模块过滤。."""
         if not self._file_path.exists():
             return []
 
         results = []
         try:
             with self._lock:
-                with open(self._file_path, "r", encoding="utf-8") as f:
+                with open(self._file_path, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if not line:
@@ -94,12 +98,12 @@ class CerebrateLogger:
 
 
 # 全局单例
-_logger: Optional[CerebrateLogger] = None
+_logger: CerebrateLogger | None = None
 _lock = threading.Lock()
 
 
-def get_logger(log_path: Optional[Path] = None) -> CerebrateLogger:
-    """获取全局日志器单例。"""
+def get_logger(log_path: Path | None = None) -> CerebrateLogger:
+    """获取全局日志器单例。."""
     global _logger
     if _logger is None:
         with _lock:

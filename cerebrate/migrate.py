@@ -1,4 +1,5 @@
-"""数据迁移工具 — ChromaDB 内部 reindex。
+"""
+数据迁移工具 — ChromaDB 内部 reindex。.
 
 用法:
     python3 cerebrate.py migrate              # 重建所有 collection 索引
@@ -6,7 +7,6 @@
     python3 cerebrate.py migrate --swarm-only # 仅重建虫群
 """
 
-from datetime import datetime, timezone
 
 from cerebrate.config import config
 from cerebrate.core.embedding import get_embedding_engine
@@ -14,8 +14,10 @@ from cerebrate.core.storage import ChromaStore
 
 
 def _migrate_collection(collection_name: str, dry_run: bool) -> int:
-    """将 collection 内的所有文档用当前 embedding 模式重新索引。
-    本质是读旧 doc → 删旧 → 用当前 engine 写回，消除 hash/bge 切换时的模式漂移。
+    """
+    将 collection 内的所有文档用当前 embedding 模式重新索引。.
+
+    本质是读旧 doc → 删旧 → 用当前 engine 写回，消除 hash/bge 切换时的模式漂移。.
     """
     engine = get_embedding_engine(config.embedding_model, config.embedding_device)
     store = ChromaStore(config.chroma_path, collection_name, engine)
@@ -57,18 +59,22 @@ def _migrate_collection(collection_name: str, dry_run: bool) -> int:
 
 
 def migrate_swarm(dry_run: bool = False) -> int:
+    """迁移 swarm_memories 集合（dry_run=True 时仅预览），返回迁移条数。."""
     return _migrate_collection("swarm_memories", dry_run)
 
 
 def migrate_knowledge(dry_run: bool = False) -> int:
+    """迁移 knowledge_base 集合（dry_run=True 时仅预览），返回迁移条数。."""
     return _migrate_collection("knowledge_base", dry_run)
 
 
 def migrate_personal(dry_run: bool = False) -> int:
+    """迁移 personal_memories 集合（dry_run=True 时仅预览），返回迁移条数。."""
     return _migrate_collection("personal_memories", dry_run)
 
 
 def migrate_all(dry_run: bool = False) -> dict:
+    """迁移全部集合（swarm/knowledge/personal），返回各集合迁移结果 dict。."""
     results = {
         "swarm": migrate_swarm(dry_run),
         "knowledge": migrate_knowledge(dry_run),
@@ -78,12 +84,14 @@ def migrate_all(dry_run: bool = False) -> dict:
 
 
 def reindex_from_seeds(dry_run: bool = False) -> dict:
-    """reindex: 直接对 swarm_memories 做一次读-删-写周期，用当前 embedding 模式重建。"""
+    """reindex: 直接对 swarm_memories 做一次读-删-写周期，用当前 embedding 模式重建。."""
     return {"reindexed": migrate_swarm(dry_run), "embedding_mode": get_embedding_engine().mode, "dry_run": dry_run}
 
 
 def export_seeds() -> dict:
-    """v5 不再需要导出 JSONL 种子——所有数据在 ChromaDB 中。
-    用 `migrate` 做 reindex 即可，不需要文件中间层。
+    """
+    v5 不再需要导出 JSONL 种子——所有数据在 ChromaDB 中。.
+
+    用 `migrate` 做 reindex 即可，不需要文件中间层。.
     """
     return {"message": "v5: 数据已在 ChromaDB。用 migrate --reindex 重建索引即可。", "exported": 0}

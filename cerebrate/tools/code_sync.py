@@ -1,4 +1,5 @@
-"""代码同步：把本地项目完整代码同步到脑虫服务器（企业级画像的真实代码源）。
+"""
+代码同步：把本地项目完整代码同步到脑虫服务器（企业级画像的真实代码源）。.
 
 问题: 脑虫运行在服务器（Docker 容器），用户代码在本地，harvest 无法直接读取。
 方案: 本地 CLI 打包上传 → 服务器解压到 {memory_root}/code_repos/{project_id}/ → 自动 harvest（AST）。
@@ -17,9 +18,8 @@ import os
 import re
 import subprocess
 import tarfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 
@@ -32,7 +32,7 @@ SYNC_EXCLUDE_DIRS = {
     "data", "profiles", "harvest", "context", "chroma_data", "docstore",
     "knowledge_files", "knowledge", "logs", "events", "personal", "agents",
     "evolution", "swarm", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".next", ".nuxt", "target", "build", "out",
+    ".next", ".nuxt", "target", "out",
 }
 # 同步排除：敏感文件（含通配匹配前缀）
 SYNC_EXCLUDE_FILES = {
@@ -63,7 +63,7 @@ def _safe_branch(branch: str) -> str:
 
 
 def _git_branch(root: Path) -> str:
-    """从 git 仓库推断当前分支；非 git 仓库返回 default。"""
+    """从 git 仓库推断当前分支；非 git 仓库返回 default。."""
     try:
         out = subprocess.run(
             ["git", "-C", str(root), "branch", "--show-current"],
@@ -76,7 +76,7 @@ def _git_branch(root: Path) -> str:
 
 
 def _repo_root(project_id: str, branch: str = "") -> Path:
-    """代码仓根：分支版 code_repos/{project_id}/{branch}；无分支兼容旧路径。"""
+    """代码仓根：分支版 code_repos/{project_id}/{branch}；无分支兼容旧路径。."""
     base = config.memory_root / "code_repos" / project_id
     if not branch:
         return base
@@ -114,8 +114,8 @@ def _save_meta(project_id: str, meta: dict) -> None:
     tmp.replace(p)
 
 
-def _is_sensitive_path(rel: str) -> Optional[str]:
-    """返回敏感原因（None=安全）。文件名级判断。"""
+def _is_sensitive_path(rel: str) -> str | None:
+    """返回敏感原因（None=安全）。文件名级判断。."""
     parts = rel.replace("\\", "/").split("/")
     name = parts[-1].lower()
     for d in parts[:-1]:
@@ -144,7 +144,7 @@ def _manifest_path(project_id: str) -> Path:
     return SYNC_CACHE_DIR / f"{project_id}.json"
 
 
-def _load_manifest(project_id: str) -> Optional[dict]:
+def _load_manifest(project_id: str) -> dict | None:
     p = _manifest_path(project_id)
     if not p.exists():
         return None
@@ -163,7 +163,7 @@ def _save_manifest(project_id: str, manifest: dict) -> None:
 
 
 def _scan_files_with_hash(root: Path) -> tuple[list[tuple[str, int]], list[dict]]:
-    """扫描目录，返回 (files: [(rel, size)], excluded)。"""
+    """扫描目录，返回 (files: [(rel, size)], excluded)。."""
     files, excluded = [], []
     for filepath in sorted(root.rglob("*")):
         if not filepath.is_file():
@@ -184,7 +184,7 @@ def _scan_files_with_hash(root: Path) -> tuple[list[tuple[str, int]], list[dict]
 def build_package(root: Path, project_id: str = "",
                   max_bytes: int = 0, incremental: bool = True,
                   branch: str = "") -> dict:
-    """本地打包：扫描目录生成 tar.gz（排除敏感），支持增量（只传变更文件）。"""
+    """本地打包：扫描目录生成 tar.gz（排除敏感），支持增量（只传变更文件）。."""
     root = root.resolve()
     branch = _safe_branch(branch or _git_branch(root))
     max_bytes = max_bytes or config.code_sync_max_bytes
@@ -225,7 +225,7 @@ def build_package(root: Path, project_id: str = "",
         "project_id": project_id,
         "root": str(root),
         "files": current_hash,
-        "synced_at": datetime.now(timezone.utc).isoformat(),
+        "synced_at": datetime.now(UTC).isoformat(),
     })
     return {
         "project_id": project_id,
@@ -247,7 +247,7 @@ def build_package(root: Path, project_id: str = "",
 
 
 def _safe_extract(tar_bytes: bytes, dest: Path) -> int:
-    """安全解压：拒绝绝对路径/../、符号链接逃逸，跳过敏感文件。"""
+    """安全解压：拒绝绝对路径/../、符号链接逃逸，跳过敏感文件。."""
     dest = dest.resolve()
     dest.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -287,7 +287,7 @@ def _safe_extract(tar_bytes: bytes, dest: Path) -> int:
 
 
 def _safe_remove(repo_root: Path, rel: str) -> bool:
-    """安全删除代码仓内文件（拒绝路径穿越）。"""
+    """安全删除代码仓内文件（拒绝路径穿越）。."""
     target = (repo_root / rel).resolve()
     if not str(target).startswith(str(repo_root) + "/"):
         logger.warning("拒绝删除越界路径: %s", rel)
@@ -300,9 +300,9 @@ def _safe_remove(repo_root: Path, rel: str) -> bool:
 
 def receive_package(project_id: str, package_b64: str,
                     branch: str = "",
-                    delete_list: Optional[list] = None,
+                    delete_list: list | None = None,
                     auto_harvest: bool = True) -> dict:
-    """服务端接收：解压代码仓（增量应用删除清单）→ 可选自动 harvest。"""
+    """服务端接收：解压代码仓（增量应用删除清单）→ 可选自动 harvest。."""
     branch = _safe_branch(branch)
     try:
         tar_bytes = base64.b64decode(package_b64)
@@ -326,8 +326,7 @@ def receive_package(project_id: str, package_b64: str,
         "received_bytes": len(tar_bytes),
     }
     if auto_harvest:
-        from cerebrate.tools.code_harvest import (
-            harvest_project, save_harvest)
+        from cerebrate.tools.code_harvest import harvest_project, save_harvest
         try:
             h = harvest_project(repo_root, project_id=project_id)
             save_harvest(h, branch=branch)
@@ -338,7 +337,7 @@ def receive_package(project_id: str, package_b64: str,
     meta = _load_meta(project_id)
     meta.setdefault("default_branch", branch)
     meta["branches"][branch] = {
-        "last_synced": datetime.now(timezone.utc).isoformat(),
+        "last_synced": datetime.now(UTC).isoformat(),
         "files": written,
         "harvest": result.get("harvest", {}),
     }
@@ -351,7 +350,7 @@ def receive_package(project_id: str, package_b64: str,
     for b, info in branches:
         if b == default_b or len(keep) < SYNC_MAX_BRANCHES:
             keep.append((b, info))
-    for b, info in branches[len(keep):]:
+    for b, _info in branches[len(keep):]:
         if b != default_b:
             meta["branches"].pop(b, None)
             # 删除该分支代码仓与 harvest
@@ -364,7 +363,7 @@ def receive_package(project_id: str, package_b64: str,
 
 
 def _remove_tree(path: Path) -> None:
-    """安全递归删除目录（分支清理用）。"""
+    """安全递归删除目录（分支清理用）。."""
     if not path.exists():
         return
     for child in sorted(path.rglob("*"), reverse=True):
@@ -374,7 +373,7 @@ def _remove_tree(path: Path) -> None:
 
 
 def list_branches(project_id: str) -> dict:
-    """列出项目已同步分支 + 各自 harvest 统计。"""
+    """列出项目已同步分支 + 各自 harvest 统计。."""
     meta = _load_meta(project_id)
     branches = []
     for b, info in sorted(meta.get("branches", {}).items()):

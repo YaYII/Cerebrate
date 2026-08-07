@@ -1,4 +1,5 @@
-"""多人协作感知：工作声明（谁在哪个项目/分支处理哪个功能）+ 冲突检测。
+"""
+多人协作感知：工作声明（谁在哪个项目/分支处理哪个功能）+ 冲突检测。.
 
 背景（用户认知）:
   - 多人对同一功能处理 → 脑虫应知晓并告知，利于解决代码冲突
@@ -10,9 +11,8 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 
@@ -36,7 +36,7 @@ def _load(project_id: str) -> dict:
 
 
 def _save(project_id: str, data: dict) -> None:
-    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    data["updated_at"] = datetime.now(UTC).isoformat()
     p = _claims_path(project_id)
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1),
@@ -47,11 +47,11 @@ def _save(project_id: str, data: dict) -> None:
 def claim(project_id: str, agent_id: str, branch: str = "",
           module: str = "", intent: str = "",
           session_id: str = "") -> dict:
-    """声明正在处理某功能。返回冲突检测结果（同模块已被他人声明）。"""
+    """声明正在处理某功能。返回冲突检测结果（同模块已被他人声明）。."""
     if not project_id or not agent_id:
         raise ValueError("project_id and agent_id are required")
     data = _load(project_id)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     # 冲突检测：同模块其他 active claim（排除自己）
     conflicts = []
     for c in data.get("claims", []):
@@ -85,7 +85,7 @@ def claim(project_id: str, agent_id: str, branch: str = "",
         if c.get("status") == "active" and c.get("claimed_at"):
             try:
                 t = datetime.fromisoformat(c["claimed_at"])
-                if (datetime.now(timezone.utc) - t).total_seconds() > 86400:
+                if (datetime.now(UTC) - t).total_seconds() > 86400:
                     c["status"] = "released"
                     c["released_reason"] = "auto-expired"
             except Exception:
@@ -105,7 +105,7 @@ def claim(project_id: str, agent_id: str, branch: str = "",
 
 def release(project_id: str, agent_id: str, module: str = "",
             claim_id: str = "") -> dict:
-    """释放工作声明。"""
+    """释放工作声明。."""
     data = _load(project_id)
     released = 0
     for c in data.get("claims", []):
@@ -116,7 +116,7 @@ def release(project_id: str, agent_id: str, module: str = "",
         elif c.get("agent_id") == agent_id and (
                 not module or c.get("module") == module):
             c["status"] = "released"
-            c["released_at"] = datetime.now(timezone.utc).isoformat()
+            c["released_at"] = datetime.now(UTC).isoformat()
             released += 1
     if released:
         _save(project_id, data)
@@ -124,7 +124,7 @@ def release(project_id: str, agent_id: str, module: str = "",
 
 
 def list_active(project_id: str) -> dict:
-    """列出项目活跃工作声明（按分支/模块）。"""
+    """列出项目活跃工作声明（按分支/模块）。."""
     data = _load(project_id)
     claims = [c for c in data.get("claims", [])
               if c.get("status") == "active"]

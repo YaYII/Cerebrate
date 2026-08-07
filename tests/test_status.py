@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -80,8 +80,7 @@ class StatusTests(unittest.TestCase):
         self.assertIs(first, second)  # 5s TTL 内命中同一缓存对象
 
     def test_query_cache_stats_counts_hits_and_misses(self):
-        from cerebrate.core.embedding import (
-            get_embedding_engine, query_cache_stats)
+        from cerebrate.core.embedding import get_embedding_engine, query_cache_stats
         engine = get_embedding_engine()
         # 两次相同查询 → 1 miss + 1 hit
         engine.encode_query("调度信号查询")

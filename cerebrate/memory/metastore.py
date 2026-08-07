@@ -1,4 +1,5 @@
-"""PostgreSQL 元数据存储层 — 文档元数据的关系型持久化
+"""
+PostgreSQL 元数据存储层 — 文档元数据的关系型持久化.
 
 与 DocumentStore（文件系统存内容）、ChromaDB（向量索引）组成三层存储架构：
   - PostgreSQL = 文档元数据（标题/标签/状态/版本/作者...）
@@ -11,7 +12,6 @@ import json
 import logging
 import os
 import threading
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ _pool_ready = False
 
 
 def _get_connection():
-    """获取 PostgreSQL 连接（惰性初始化连接池）"""
+    """获取 PostgreSQL 连接（惰性初始化连接池）."""
     global _pool, _pool_ready
     if not _pool_ready:
         return None
@@ -30,7 +30,6 @@ def _get_connection():
         with _pool_lock:
             if _pool is None:
                 try:
-                    import psycopg2
                     from psycopg2 import pool as pg_pool
                     dsn = os.environ.get("CEREBRATE_DATABASE_URL", "")
                     if not dsn:
@@ -56,7 +55,7 @@ def _get_connection():
 
 
 def _put_conn(conn):
-    """归还连接到池"""
+    """归还连接到池."""
     global _pool
     if _pool and conn:
         try:
@@ -66,7 +65,7 @@ def _put_conn(conn):
 
 
 def init_db():
-    """初始化数据库：创建表（幂等）"""
+    """初始化数据库：创建表（幂等）."""
     global _pool_ready
     conn = _get_connection()
     if not conn:
@@ -129,7 +128,8 @@ def init_db():
 
 
 class MetaStore:
-    """PostgreSQL 元数据存储
+    """
+    PostgreSQL 元数据存储.
 
     所有写操作自动更新 updated_at。
     版本控制：每次 put 增加版本号，旧版本存档到 document_versions。
@@ -141,7 +141,7 @@ class MetaStore:
 
     @property
     def available(self) -> bool:
-        """PostgreSQL 是否可用"""
+        """PostgreSQL 是否可用."""
         global _pool_ready
         if self._ready is None:
             with self._init_lock:
@@ -153,13 +153,13 @@ class MetaStore:
                      content_path: str = "", file_type: str = "json",
                      author: str = "", source_agent: str = "",
                      physical_user: str = "", category: str = "",
-                     tags: Optional[list[str]] = None,
+                     tags: list[str] | None = None,
                      project_id: str = "", language: str = "",
                      life_stage: str = "memory", outcome: str = "success",
                      confidence: float = 1.0, total_chunks: int = 1,
-                     metadata: Optional[dict] = None,
+                     metadata: dict | None = None,
                      change_log: str = "", created_by: str = "") -> bool:
-        """插入或更新文档元数据（幂等，自动递增版本）"""
+        """插入或更新文档元数据（幂等，自动递增版本）."""
         if not self.available:
             return False
         conn = _get_connection()
@@ -233,8 +233,8 @@ class MetaStore:
         finally:
             _put_conn(conn)
 
-    def get_document(self, doc_id: str) -> Optional[dict]:
-        """获取文档元数据"""
+    def get_document(self, doc_id: str) -> dict | None:
+        """获取文档元数据."""
         if not self.available:
             return None
         conn = _get_connection()
@@ -287,9 +287,9 @@ class MetaStore:
             _put_conn(conn)
 
     def update_lifecycle(self, doc_id: str, life_stage: str,
-                         confidence: Optional[float] = None,
+                         confidence: float | None = None,
                          evidence: str = "") -> bool:
-        """更新生命周期状态"""
+        """更新生命周期状态."""
         if not self.available:
             return False
         conn = _get_connection()
@@ -320,7 +320,7 @@ class MetaStore:
 
     def mark_reused(self, doc_id: str, success: bool = True,
                     feedback: str = "") -> bool:
-        """标记复用"""
+        """标记复用."""
         if not self.available:
             return False
         conn = _get_connection()
@@ -361,7 +361,7 @@ class MetaStore:
             _put_conn(conn)
 
     def delete_document(self, doc_id: str) -> bool:
-        """软删除：将状态设为 archived"""
+        """软删除：将状态设为 archived."""
         if not self.available:
             return False
         conn = _get_connection()
@@ -384,7 +384,7 @@ class MetaStore:
     def list_documents(self, status: str = "active", category: str = "",
                        project_id: str = "", limit: int = 100,
                        offset: int = 0) -> list[dict]:
-        """查询文档列表"""
+        """查询文档列表."""
         if not self.available:
             return []
         conn = _get_connection()
@@ -434,7 +434,7 @@ class MetaStore:
             _put_conn(conn)
 
     def get_versions(self, doc_id: str, limit: int = 20) -> list[dict]:
-        """获取文档历史版本"""
+        """获取文档历史版本."""
         if not self.available:
             return []
         conn = _get_connection()
@@ -468,7 +468,7 @@ class MetaStore:
             _put_conn(conn)
 
     def get_stats(self) -> dict:
-        """获取元数据统计"""
+        """获取元数据统计."""
         if not self.available:
             return {"available": False}
         conn = _get_connection()
@@ -495,12 +495,12 @@ class MetaStore:
 
 
 # 全局单例
-_metastore: Optional[MetaStore] = None
+_metastore: MetaStore | None = None
 _metastore_lock = threading.Lock()
 
 
 def get_metastore() -> MetaStore:
-    """获取 MetaStore 单例"""
+    """获取 MetaStore 单例."""
     global _metastore
     if _metastore is None:
         with _metastore_lock:

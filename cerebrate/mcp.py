@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务
+Cerebrate MCP Server v5 — 虫群记忆系统 MCP 服务.
 
 通过 HTTP 访问独立运行的脑虫 Brain Server（可在 Docker 容器中），
 而非本地实例化 BrainAPI。连接地址与鉴权令牌通过环境变量配置：
@@ -16,16 +16,16 @@ TOTP 6 位码），token 保存到本地文件（chmod 600，唯一凭证，长�
 实体（本地 MCP 决策 2026-08-06）：实体抽取/衍生在本地执行（cerebrate_entity_extract），
 实体数据不离开本地，服务端只接收实体名/标签等轻量结构作为记忆 tags/索引增强。
 """
-import sys
-import os
-import json
-import getpass
 import argparse
-from datetime import datetime, timezone
-from pathlib import Path
-import urllib.request
+import getpass
+import json
+import os
+import sys
 import urllib.error
 import urllib.parse
+import urllib.request
+from datetime import UTC, datetime
+from pathlib import Path
 
 # ── 修复：MCP 以绝对路径启动时 sys.path[0] 落在 cerebrate/ 目录，
 #    导致 harvest-push 本地分析时 `import cerebrate` 失败
@@ -50,7 +50,7 @@ _MCP_ENV_FILE = os.environ.get("CEREBRATE_MCP_ENV", "").strip() or str(
 
 
 def _load_env_file() -> dict:
-    """读取 MCP 本地配置 env 文件（KEY=VALUE，# 注释，支持引号）。"""
+    """读取 MCP 本地配置 env 文件（KEY=VALUE，# 注释，支持引号）。."""
     try:
         path = Path(_MCP_ENV_FILE)
         if path.exists():
@@ -83,7 +83,7 @@ _ENTITY_STORE = Path(_ENV_ENTITY_STORE) if _ENV_ENTITY_STORE else (
 
 
 def _read_token_file() -> dict:
-    """读取本地持久化 token（JSON: {token, user_id, saved_at}）。"""
+    """读取本地持久化 token（JSON: {token, user_id, saved_at}）。."""
     try:
         if _TOKEN_FILE.exists():
             return json.loads(_TOKEN_FILE.read_text(encoding="utf-8"))
@@ -93,12 +93,12 @@ def _read_token_file() -> dict:
 
 
 def _save_token(token: str, user_id: str = "") -> None:
-    """持久化 token 到本地文件（chmod 600，仅本用户可读）。"""
+    """持久化 token 到本地文件（chmod 600，仅本用户可读）。."""
     _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "token": token,
         "user_id": user_id,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_at": datetime.now(UTC).isoformat(),
     }
     _TOKEN_FILE.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -117,7 +117,7 @@ def _clear_token() -> None:
 
 
 def _load_effective_token() -> str:
-    """优先环境变量，其次本地 env 文件，最后登录持久化 token。"""
+    """优先环境变量，其次本地 env 文件，最后登录持久化 token。."""
     env = os.environ.get("CEREBRATE_SERVER_TOKEN", "").strip()
     if env:
         return env
@@ -128,7 +128,8 @@ def _load_effective_token() -> str:
 
 
 def _request(method: str, path: str, body: dict = None) -> dict:
-    """向脑虫 Brain Server 发起 HTTP 请求，返回 v5 协议 JSON 信封。
+    """
+    向脑虫 Brain Server 发起 HTTP 请求，返回 v5 协议 JSON 信封。.
 
     token 每次请求时动态解析（_load_effective_token）：登录后保存的 token
     在同一 MCP 进程内立即生效，无需重启（修复静态 _SERVER_TOKEN 陈旧问题）。
@@ -914,8 +915,8 @@ def _handle_call(name: str, args: dict) -> dict:
                 })
             # 有 dir：本地 AST 分析（代码不离开本地），只把结构 push 给脑虫
             from pathlib import Path
-            from cerebrate.tools.code_harvest import (
-                harvest_project, _safe_branch)
+
+            from cerebrate.tools.code_harvest import _safe_branch, harvest_project
             from cerebrate.tools.code_sync import _git_branch
             root = Path(dir_raw).resolve()
             if not root.is_dir():
@@ -1150,7 +1151,7 @@ def _send(msg: dict):
 
 
 def _cli_login(args) -> int:
-    """用户名 + Authenticator TOTP 码登录，token 持久化到本地。"""
+    """用户名 + Authenticator TOTP 码登录，token 持久化到本地。."""
     username = (args.username or "").strip()
     if not username:
         username = input("用户名: ").strip()
@@ -1177,7 +1178,7 @@ def _cli_login(args) -> int:
 
 
 def _cli_logout(args) -> int:
-    """删除本地持久化 token（服务端 token 仍有效，下次登录复用）。"""
+    """删除本地持久化 token（服务端 token 仍有效，下次登录复用）。."""
     if _read_token_file().get("token"):
         _clear_token()
         print("已退出登录（本地 token 已删除）")
@@ -1187,7 +1188,7 @@ def _cli_logout(args) -> int:
 
 
 def _cli_status(args) -> int:
-    """查看登录态与生效 token 来源。"""
+    """查看登录态与生效 token 来源。."""
     info = _read_token_file()
     env = os.environ.get("CEREBRATE_SERVER_TOKEN", "").strip()
     if env:
@@ -1228,6 +1229,12 @@ def _run_cli(argv: list) -> int:
 
 
 def main():
+    """
+    MCP 服务器入口（stdio 协议）。.
+
+    支持 login/logout/status 作为独立 CLI 命令；否则按 MCP 标准 stdio
+    逐行处理 initialize 等请求，握手前不主动发消息。
+    """
     # 客户端 CLI 分发：python3 -m cerebrate.mcp login|logout|status
     if len(sys.argv) > 1 and sys.argv[1] in ("login", "logout", "status"):
         sys.exit(_run_cli(sys.argv[1:]))

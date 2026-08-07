@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Cerebrate v6 — 30 项生产级测试."""
-import subprocess, time, json, sys, threading, urllib.request, urllib.error
+import json
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
 
 proc = subprocess.Popen(
     [sys.executable, 'cerebrate.py', 'serve', '--host', '127.0.0.1',

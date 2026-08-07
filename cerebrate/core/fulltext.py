@@ -1,4 +1,5 @@
-"""FTS5 全文索引 — 补充向量检索的精确关键词短板（v5.3 Phase 3）
+"""
+FTS5 全文索引 — 补充向量检索的精确关键词短板（v5.3 Phase 3）.
 
 对齐 claude-mem search-architecture 的 FTS5 设计:
   - SQLite FTS5 虚拟表（trigram tokenizer，中英文都支持子串匹配）
@@ -16,13 +17,13 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 def _escape_fts(query: str) -> str:
-    """FTS5 注入转义：剥离 FTS5 运算符，token 加双引号短语匹配。
+    """
+    FTS5 注入转义：剥离 FTS5 运算符，token 加双引号短语匹配。.
 
     对齐 claude-mem 的 escapeFTS5Query（双引号加倍），但更严格：
     只保留词元（unicode 字母/数字/中文），其余字符全部剥离。
@@ -36,7 +37,8 @@ def _escape_fts(query: str) -> str:
 
 
 class FullTextIndex:
-    """SQLite FTS5 全文索引（线程安全）。
+    """
+    SQLite FTS5 全文索引（线程安全）。.
 
     table_prefix: 表名前缀，用于隔离不同数据域（如 memories / knowledge）。
     同一 db 文件可用多个 prefix；不同 prefix 各自独立 FTS5 表。
@@ -61,22 +63,23 @@ class FullTextIndex:
 
     @property
     def available(self) -> bool:
+        """返回 FTS 索引是否已初始化就绪。."""
         return self._ready
 
     def _init_db(self):
         with self._lock, sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS {fts} USING fts5(
+                f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS {self._fts_table} USING fts5(
                     title, content, tags, category, scope, project_id,
                     doc_id UNINDEXED,
                     tokenize='trigram'
                 )
-                """.format(fts=self._fts_table)
+                """
             )
             conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS {meta} (
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._meta_table} (
                     doc_id TEXT PRIMARY KEY,
                     title TEXT, content TEXT, tags TEXT,
                     category TEXT, scope TEXT, project_id TEXT,
@@ -85,23 +88,21 @@ class FullTextIndex:
                     physical_user TEXT,
                     life_stage TEXT
                 )
-                """.format(meta=self._meta_table)
+                """
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_{p}_meta_scope ON {meta}(scope, project_id)".format(
-                    p=self._prefix, meta=self._meta_table)
+                f"CREATE INDEX IF NOT EXISTS idx_{self._prefix}_meta_scope ON {self._meta_table}(scope, project_id)"
             )
             # 迁移：旧表无 observation_type 列时补充（CREATE IF NOT EXISTS 不会加列）
             cols = [r[1] for r in conn.execute(
-                "PRAGMA table_info({meta})".format(meta=self._meta_table)).fetchall()]
+                f"PRAGMA table_info({self._meta_table})").fetchall()]
             # 幂等迁移：并发初始化时列可能已被其他实例添加，重复 ALTER 会报
             # duplicate column，这里捕获忽略（保证任何并发下不炸）
             for _col in ("observation_type", "physical_user", "life_stage"):
                 if _col not in cols:
                     try:
                         conn.execute(
-                            "ALTER TABLE {meta} ADD COLUMN {col} TEXT".format(
-                                meta=self._meta_table, col=_col))
+                            f"ALTER TABLE {self._meta_table} ADD COLUMN {_col} TEXT")
                     except sqlite3.OperationalError:
                         pass
             conn.commit()
@@ -116,21 +117,21 @@ class FullTextIndex:
                project_id: str = "", created: str = "", updated: str = "",
                observation_type: str = "", physical_user: str = "",
                life_stage: str = "memory") -> bool:
-        """写入/更新一条记忆的全文索引。"""
+        """写入/更新一条记忆的全文索引。."""
         if not self._ready or not doc_id:
             return False
         tags = tags or ""
         try:
             with self._lock, self._conn() as conn:
                 conn.execute(
-                    "DELETE FROM {fts} WHERE doc_id = ?".format(fts=self._fts_table), (doc_id,))
+                    f"DELETE FROM {self._fts_table} WHERE doc_id = ?", (doc_id,))
                 conn.execute(
-                    "INSERT INTO {fts}(title, content, tags, category, scope, project_id, doc_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)".format(fts=self._fts_table),
+                    f"INSERT INTO {self._fts_table}(title, content, tags, category, scope, project_id, doc_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (title, content, tags, category, scope, project_id, doc_id))
                 conn.execute(
-                    """
-                    INSERT INTO {meta}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type, physical_user, life_stage)
+                    f"""
+                    INSERT INTO {self._meta_table}(doc_id, title, content, tags, category, scope, project_id, created, updated, observation_type, physical_user, life_stage)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(doc_id) DO UPDATE SET
                         title=excluded.title, content=excluded.content,
@@ -140,7 +141,7 @@ class FullTextIndex:
                         observation_type=excluded.observation_type,
                         physical_user=excluded.physical_user,
                         life_stage=excluded.life_stage
-                    """.format(meta=self._meta_table),
+                    """,
                     (doc_id, title, content, tags, category, scope,
                      project_id, created, updated, observation_type,
                      physical_user, life_stage))
@@ -150,9 +151,10 @@ class FullTextIndex:
             logger.warning(f"FTS upsert 失败 ({doc_id}): {e}")
             return False
 
-    def _scope_conditions(self, scope: Optional[str],
-                          project_id: Optional[str], prefix: str = "m") -> str:
-        """scope 隔离过滤条件（与向量层语义一致）。
+    def _scope_conditions(self, scope: str | None,
+                          project_id: str | None, prefix: str = "m") -> str:
+        """
+        Scope 隔离过滤条件（与向量层语义一致）。.
 
         prefix: 表别名（memories_meta 别名为 m，FTS 查询中 m 已 JOIN）。
         """
@@ -170,9 +172,10 @@ class FullTextIndex:
         return f" AND {pfx}scope = 'general'"
 
     def search(self, query: str, limit: int = 20,
-               scope: Optional[str] = None, project_id: Optional[str] = None,
-               category: Optional[str] = None) -> list[dict]:
-        """FTS5 全文检索（精确关键词优先） + LIKE 回退（中文短词兜底）。
+               scope: str | None = None, project_id: str | None = None,
+               category: str | None = None) -> list[dict]:
+        """
+        FTS5 全文检索（精确关键词优先） + LIKE 回退（中文短词兜底）。.
 
         返回按相关度排序的文档索引，字段与向量层 index 对齐：
         doc_id/title/category/scope/project_id/created/token_estimate/source
@@ -260,20 +263,21 @@ class FullTextIndex:
             return []
 
     def count(self) -> int:
+        """返回已索引文档总数（索引未就绪时为 0）。."""
         if not self._ready:
             return 0
         try:
             with self._conn() as conn:
                 return conn.execute(
-                    "SELECT COUNT(*) FROM {meta}".format(
-                        meta=self._meta_table)).fetchone()[0]
+                    f"SELECT COUNT(*) FROM {self._meta_table}").fetchone()[0]
         except Exception:
             return 0
 
     def recent(self, limit: int = 10,
-               scope: Optional[str] = None,
-               project_id: Optional[str] = None) -> list[dict]:
-        """最近写入的文档紧凑索引（按 created 倒序）。
+               scope: str | None = None,
+               project_id: str | None = None) -> list[dict]:
+        """
+        最近写入的文档紧凑索引（按 created 倒序）。.
 
         Phase 5：sense 返回"最近记忆紧凑索引"（含 token 成本），
         让会话开始即见"存在什么 + 取它要花多少 token"。
@@ -286,7 +290,7 @@ class FullTextIndex:
                 rows = conn.execute(
                     "SELECT doc_id, title, category, scope, project_id, created, "
                     "observation_type, physical_user, length(content) AS content_len "
-                    "FROM {meta} m WHERE 1=1".format(meta=self._meta_table)
+                    f"FROM {self._meta_table} m WHERE 1=1"
                     + scope_cond + " ORDER BY created DESC LIMIT ?",
                     (limit,)).fetchall()
             result = []
@@ -308,12 +312,13 @@ class FullTextIndex:
             return []
 
     def clear(self) -> bool:
+        """清空 FTS 索引与元数据表，成功返回 True。."""
         if not self._ready:
             return False
         try:
             with self._lock, self._conn() as conn:
-                conn.execute("DELETE FROM {fts}".format(fts=self._fts_table))
-                conn.execute("DELETE FROM {meta}".format(meta=self._meta_table))
+                conn.execute(f"DELETE FROM {self._fts_table}")
+                conn.execute(f"DELETE FROM {self._meta_table}")
                 conn.commit()
             return True
         except Exception as e:

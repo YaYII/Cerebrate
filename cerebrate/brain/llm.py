@@ -1,4 +1,5 @@
-"""LLM 客户端 — 脑虫的记忆管理者（Chief Memory Curator）
+"""
+LLM 客户端 — 脑虫的记忆管理者（Chief Memory Curator）.
 
 核心职责:
 1. 验证虫群记忆质量，过滤有毒/低质内容
@@ -13,13 +14,13 @@ import json
 import os
 import re
 import time
-from typing import Optional
 
 from cerebrate.config import config
 
 
 class CerebrateLLM:
-    """脑虫的记忆管理者（Chief Memory Curator）
+    """
+    脑虫的记忆管理者（Chief Memory Curator）.
 
     智能增强层。无 API Key 时回退到规则引擎。
 
@@ -41,7 +42,7 @@ class CerebrateLLM:
         self._immune_threshold = config.immune_threshold
 
     def is_available(self) -> bool:
-        """检查 LLM 是否可用（仅检查 API Key 是否存在）"""
+        """检查 LLM 是否可用（仅检查 API Key 是否存在）."""
         if self._available is not None:
             return self._available
         if self._provider == "anthropic":
@@ -55,7 +56,7 @@ class CerebrateLLM:
         return self._available
 
     def _sdk_ready(self) -> bool:
-        """检查 SDK 是否可正常导入和初始化（失败后有 5 分钟冷却期）。"""
+        """检查 SDK 是否可正常导入和初始化（失败后有 5 分钟冷却期）。."""
         if self._sdk_available is not None:
             age = time.time() - self._sdk_checked_at if hasattr(self, '_sdk_checked_at') else 999
             if self._sdk_available or age < 300:
@@ -86,7 +87,7 @@ class CerebrateLLM:
         return self._sdk_available
 
     def status(self) -> dict:
-        """返回 LLM/免疫层状态，用于服务端自检和客户端排障。"""
+        """返回 LLM/免疫层状态，用于服务端自检和客户端排障。."""
         api_key_present = self.is_available()
         sdk_available = self._sdk_ready() if api_key_present else False
         llm_available = api_key_present and sdk_available
@@ -113,7 +114,7 @@ class CerebrateLLM:
         }
 
     def _get_client(self):
-        """获取 LLM 客户端，SDK 不可用时返回 None"""
+        """获取 LLM 客户端，SDK 不可用时返回 None."""
         if self._client is not None:
             return self._client
         if not self._sdk_ready():
@@ -122,7 +123,8 @@ class CerebrateLLM:
 
     @property
     def _is_thinking_model(self) -> bool:
-        """当前模型是否支持/需要思考（推理）模式。
+        """
+        当前模型是否支持/需要思考（推理）模式。.
 
         DeepSeek: v4-pro 和 reasoner 都支持思考模式
         """
@@ -131,7 +133,8 @@ class CerebrateLLM:
         return "v4-pro" in self._model or "reasoner" in self._model
 
     def _deepseek_thinking_kwargs(self) -> dict:
-        """返回 DeepSeek 思考模式专属参数。
+        """
+        返回 DeepSeek 思考模式专属参数。.
 
         - temperature: 思考模式下不支持
         - reasoning_effort: high 表示最大推理深度
@@ -145,13 +148,15 @@ class CerebrateLLM:
     # ==================== 免疫系统 ====================
 
     def validate_memory(self, content: str, source_agent: str = "unknown") -> dict:
-        """验证记忆质量，检测有毒/低质内容，评估知识价值
+        """
+        验证记忆质量，检测有毒/低质内容，评估知识价值.
 
         Returns:
             {"safe": bool, "quality": float, "issues": list[str],
              "suggested_tags": list[str], "has_knowledge_value": bool,
              "is_duplicate_likely": bool, "curator_note": str,
              "suggested_category": str}
+
         """
         issues = []
         quality = 1.0
@@ -190,7 +195,7 @@ class CerebrateLLM:
         }
 
     def _rule_validate(self, content: str, source_agent: str) -> dict:
-        """规则引擎验证 — 无 LLM 时的基础防护"""
+        """规则引擎验证 — 无 LLM 时的基础防护."""
         issues = []
         quality = 1.0
         content_lower = content.lower()
@@ -239,7 +244,8 @@ class CerebrateLLM:
         }
 
     def _llm_validate(self, content: str, source_agent: str) -> dict:
-        """使用 LLM 进行深度记忆管理审核
+        """
+        使用 LLM 进行深度记忆管理审核.
 
         升级为「记忆管理者」角色，不仅做安全检查，
         还评估知识价值、归档建议、去重提示等图书管理员职责。
@@ -316,9 +322,10 @@ class CerebrateLLM:
 
     # ==================== 自动经验提取（人人为我） ====================
 
-    def extract_lesson_from_usage(self, problem: str, original_memory: Optional[dict],
-                                   outcome: str, feedback: str, agent_id: str) -> Optional[dict]:
-        """从记忆复用场景中自动提取完整经验教训，用于自动同步到虫群。
+    def extract_lesson_from_usage(self, problem: str, original_memory: dict | None,
+                                   outcome: str, feedback: str, agent_id: str) -> dict | None:
+        """
+        从记忆复用场景中自动提取完整经验教训，用于自动同步到虫群。.
 
         铁律：输出信息密度不降低——提取的是完整经验，不是压缩摘要。
         """
@@ -326,9 +333,9 @@ class CerebrateLLM:
             return self._llm_extract_lesson(problem, original_memory, outcome, feedback, agent_id)
         return self._rule_extract_lesson(problem, original_memory, outcome, feedback)
 
-    def _rule_extract_lesson(self, problem: str, original_memory: Optional[dict],
+    def _rule_extract_lesson(self, problem: str, original_memory: dict | None,
                               outcome: str, feedback: str) -> dict:
-        """规则回退：用模板构建经验文档，确保信息完整性。"""
+        """规则回退：用模板构建经验文档，确保信息完整性。."""
         content_parts = [f"## 问题场景\n{problem}"]
         if original_memory:
             content_parts.append(f"## 参考记忆\n标题: {original_memory.get('title', '')}")
@@ -346,9 +353,9 @@ class CerebrateLLM:
             "category": "coding",
         }
 
-    def _llm_extract_lesson(self, problem: str, original_memory: Optional[dict],
-                             outcome: str, feedback: str, agent_id: str) -> Optional[dict]:
-        """LLM驱动的自动经验提取——从使用上下文中提取完整、可复用的经验教训。"""
+    def _llm_extract_lesson(self, problem: str, original_memory: dict | None,
+                             outcome: str, feedback: str, agent_id: str) -> dict | None:
+        """LLM驱动的自动经验提取——从使用上下文中提取完整、可复用的经验教训。."""
         client = self._get_client()
         if not client:
             return self._rule_extract_lesson(problem, original_memory, outcome, feedback)
@@ -434,7 +441,8 @@ class CerebrateLLM:
     # ==================== 结构化字段增强（Phase 4） ====================
 
     def compress_title(self, title: str, content: str = "") -> str:
-        """语义压缩标题：让索引层"只看标题即可判断相关性"。
+        """
+        语义压缩标题：让索引层"只看标题即可判断相关性"。.
 
         对齐 claude-mem 的语义压缩原则：
           好标题 = 具体、可检索、自包含（🔴 Hook timeout: 60s too short for npm install）
@@ -452,7 +460,7 @@ class CerebrateLLM:
         compressed = self._llm_compress_title(title, content)
         return compressed or title
 
-    def _llm_compress_title(self, title: str, content: str = "") -> Optional[str]:
+    def _llm_compress_title(self, title: str, content: str = "") -> str | None:
         client = self._get_client()
         if not client:
             return None
@@ -487,9 +495,10 @@ class CerebrateLLM:
 
     def extract_facts_concepts(self, content: str, solution: str = "",
                                problem_solved: str = "",
-                               tags: Optional[list[str]] = None,
+                               tags: list[str] | None = None,
                                category: str = "") -> dict:
-        """提取结构化 facts/concepts（LLM 可用时增强，否则返回空由规则层兜底）。
+        """
+        提取结构化 facts/concepts（LLM 可用时增强，否则返回空由规则层兜底）。.
 
         返回: {"facts": [...], "concepts": [...]}
         """
@@ -545,8 +554,9 @@ class CerebrateLLM:
     # ==================== 知识蒸馏(链式多轮) ====================
 
     def _chat_completion(self, messages: list[dict], max_tokens: int = 8192,
-                         temperature: float = 0.2) -> Optional[str]:
-        """统一的 LLM 对话补全调用，兼容 anthropic / openai / deepseek。
+                         temperature: float = 0.2) -> str | None:
+        """
+        统一的 LLM 对话补全调用，兼容 anthropic / openai / deepseek。.
 
         思考模式模型（如 deepseek-v4-pro）自动启用 thinking 参数。
         """
@@ -577,7 +587,7 @@ class CerebrateLLM:
 
     @staticmethod
     def _format_memory_block(memories: list[dict], offset: int = 0) -> str:
-        """将记忆列表格式化为 LLM 可读的文本块，每条标注序号。"""
+        """将记忆列表格式化为 LLM 可读的文本块，每条标注序号。."""
         blocks = []
         for i, m in enumerate(memories):
             idx = offset + i + 1
@@ -597,7 +607,7 @@ class CerebrateLLM:
         return "\n".join(blocks)
 
     def _build_initial_prompt(self, topic: str, batch_mems: list[dict]) -> str:
-        """第一轮 prompt：从首批记忆中构建初始知识结构。"""
+        """第一轮 prompt：从首批记忆中构建初始知识结构。."""
         memory_block = self._format_memory_block(batch_mems)
         return f"""你是一位计算机科学领域的高级研究员（清华大学博士水平）。请根据以下工程实战记忆，**综合整合**为一份符合学术规范的结构化知识文档。
 
@@ -683,7 +693,7 @@ class CerebrateLLM:
     def _build_update_prompt(self, topic: str, new_batch: list[dict],
                               previous_draft: dict, round_num: int,
                               total_so_far: int) -> list[dict]:
-        """后续轮次 prompt：将新批次的记忆融入已有知识结构。"""
+        """后续轮次 prompt：将新批次的记忆融入已有知识结构。."""
         new_block = self._format_memory_block(new_batch, offset=total_so_far)
         import json as _json
         draft_json = _json.dumps(previous_draft, ensure_ascii=False, indent=2)
@@ -717,8 +727,9 @@ class CerebrateLLM:
         ]
 
     def chain_distill_knowledge(self, memories: list[dict], topic: str,
-                                 batch_size: Optional[int] = None) -> Optional[dict]:
-        """链式多轮知识整合：分批消化记忆，逐轮累加构建完整的结构化知识文档。
+                                 batch_size: int | None = None) -> dict | None:
+        """
+        链式多轮知识整合：分批消化记忆，逐轮累加构建完整的结构化知识文档。.
 
         每轮：
         1. 将一批新记忆送入 LLM
@@ -735,6 +746,7 @@ class CerebrateLLM:
 
         Returns:
             完整的结构化知识文档 dict，或 None（数据不足）
+
         """
         if not self.is_available() or not self._sdk_ready():
             return None
@@ -764,8 +776,8 @@ class CerebrateLLM:
         template_tokens = estimate_tokens(_template)
         overhead_tokens = template_tokens - sample_tokens  # 模板固定开销
 
-        def _calc_batch_size(remaining: int, draft: Optional[dict] = None) -> int:
-            """动态计算当前轮次可以安全处理的记忆数量。"""
+        def _calc_batch_size(remaining: int, draft: dict | None = None) -> int:
+            """动态计算当前轮次可以安全处理的记忆数量。."""
             if remaining <= 0:
                 return 0
             current_overhead = overhead_tokens
@@ -787,7 +799,7 @@ class CerebrateLLM:
             return min(n, remaining)
 
         # ── 自适应分轮 ──
-        accumulated: Optional[dict] = None
+        accumulated: dict | None = None
         processed_count = 0
         round_num = 0
 
@@ -853,8 +865,9 @@ class CerebrateLLM:
 
         return accumulated
 
-    def distill_knowledge(self, memories: list[dict], topic: str) -> Optional[dict]:
-        """将多条相关实战记忆综合整合为学术级结构化知识文档（自动链式多轮）。
+    def distill_knowledge(self, memories: list[dict], topic: str) -> dict | None:
+        """
+        将多条相关实战记忆综合整合为学术级结构化知识文档（自动链式多轮）。.
 
         采用四层知识架构：概念 → 原理 → 方法 → 实践。
         铁律：信息密度只增不减。
@@ -865,7 +878,8 @@ class CerebrateLLM:
         return self.chain_distill_knowledge(memories, topic)
 
     def filter_relevant(self, query: str, title: str, content: str) -> dict:
-        """判断一段内容是否与查询相关
+        """
+        判断一段内容是否与查询相关.
 
         用于检索后过滤，移除不相关的结果块。
 
@@ -876,6 +890,7 @@ class CerebrateLLM:
 
         Returns:
             {"relevant": bool, "relevance_score": float, "reason": str}
+
         """
         if not self.is_available() or not self._sdk_ready():
             return self._rule_filter_relevant(query, title, content)
@@ -930,7 +945,7 @@ class CerebrateLLM:
 
     def _rule_filter_relevant(self, query: str, title: str,
                               content: str) -> dict:
-        """规则降级：关键词匹配判断相关性"""
+        """规则降级：关键词匹配判断相关性."""
         query_lower = query.lower()
         content_lower = content.lower()
         title_lower = title.lower()
@@ -954,9 +969,10 @@ class CerebrateLLM:
                 "reason": "关键词匹配不足"}
 
     def generate_scene_mmd(self, events: list[dict],
-                           existing_mmd: Optional[str] = None,
-                           task_goal: str = "") -> Optional[dict]:
-        """生成/更新场景 Mermaid 认知状态机（借鉴 TencentDB Agent Memory L2）。
+                           existing_mmd: str | None = None,
+                           task_goal: str = "") -> dict | None:
+        """
+        生成/更新场景 Mermaid 认知状态机（借鉴 TencentDB Agent Memory L2）。.
 
         把短期场景的原始事件流压缩为一张 Mermaid flowchart TD 认知状态机：
           - taskGoal / progress / status（done/doing/paused/blocked）
@@ -1026,8 +1042,9 @@ class CerebrateLLM:
         except Exception:
             return None
 
-    def distill_scene_to_skill(self, scene: dict) -> Optional[dict]:
-        """把短期场景蒸馏为结构化技能（借鉴 TencentDB Agent Memory 场景→技能沉淀）。
+    def distill_scene_to_skill(self, scene: dict) -> dict | None:
+        """
+        把短期场景蒸馏为结构化技能（借鉴 TencentDB Agent Memory 场景→技能沉淀）。.
 
         输入场景（事件流 + Mermaid 图 + 元数据），输出 SKILL.md 结构化技能：
           {title, skill_markdown, problem, solution}

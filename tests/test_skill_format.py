@@ -6,7 +6,6 @@
   - 非 SKILL.md（无 frontmatter）返回 None → 按普通记忆处理（零破坏）
   - propose 带 skill_markdown → 写入结构化字段 → 详情/索引层可见
 """
-import os
 import sys
 import tempfile
 import unittest
@@ -21,8 +20,8 @@ from cerebrate.core.skill_format import (  # noqa: E402
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root

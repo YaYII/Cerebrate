@@ -1,4 +1,5 @@
-"""查询重写器 — 将用户原始查询扩展为多个角度的检索语句
+"""
+查询重写器 — 将用户原始查询扩展为多个角度的检索语句.
 
 查询重写能大幅提升召回率：同一问题从不同角度检索，找到不同表述方式的相关文档。
 
@@ -8,9 +9,6 @@
 """
 import logging
 import re
-from typing import Optional
-
-from cerebrate.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +16,8 @@ logger = logging.getLogger(__name__)
 def rewrite_query(query: str,
                   max_variations: int = 3,
                   enabled: bool = True) -> list[str]:
-    """将用户查询重写为多个角度的检索语句
+    """
+    将用户查询重写为多个角度的检索语句.
 
     Args:
         query: 用户原始查询
@@ -27,6 +26,7 @@ def rewrite_query(query: str,
 
     Returns:
         [原始查询, 变体1, 变体2, ...]
+
     """
     if not enabled or not query.strip():
         return [query]
@@ -50,8 +50,8 @@ def rewrite_query(query: str,
     return [query] + _rule_variants(query, max_variations - 1)
 
 
-def _rewrite_with_llm(query: str, count: int) -> Optional[list[str]]:
-    """用 LLM 生成查询变体"""
+def _rewrite_with_llm(query: str, count: int) -> list[str] | None:
+    """用 LLM 生成查询变体."""
     if count <= 0:
         return None
     try:
@@ -93,11 +93,11 @@ def _rewrite_with_llm(query: str, count: int) -> Optional[list[str]]:
         if not raw:
             return None
         lines = []
-        for l in raw.split("\n"):
-            l = l.strip().strip('"\'')
-            l = l.lstrip("0123456789.-)•· ").strip()
-            if l and len(l) > 5:
-                lines.append(l)
+        for line in raw.split("\n"):
+            line = line.strip().strip('"\'')
+            line = line.lstrip("0123456789.-)•· ").strip()
+            if line and len(line) > 5:
+                lines.append(line)
         return lines[:count]
     except Exception as e:
         logger.warning(f"LLM 查询重写失败 ({e})，使用规则保底")
@@ -105,7 +105,7 @@ def _rewrite_with_llm(query: str, count: int) -> Optional[list[str]]:
 
 
 def _rule_variants(query: str, count: int) -> list[str]:
-    """基于规则的查询变体生成"""
+    """基于规则的查询变体生成."""
     if count <= 0:
         return []
     variants = []
@@ -138,14 +138,14 @@ def _rule_variants(query: str, count: int) -> list[str]:
 
 
 def _tokenize(text: str) -> list[str]:
-    """分词：中文按字/词，英文按空格"""
+    """分词：中文按字/词，英文按空格."""
     # 中文字符作为一个词
     tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z_]+', text)
     return [t for t in tokens if t.strip()]
 
 
 def _reorder_tokens(tokens: list[str]) -> str:
-    """重排序：把末尾的核心词提到前面"""
+    """重排序：把末尾的核心词提到前面."""
     if len(tokens) <= 2:
         return " ".join(tokens)
     # 把最后一个词提前
@@ -153,7 +153,7 @@ def _reorder_tokens(tokens: list[str]) -> str:
 
 
 def _extract_core(text: str) -> str:
-    """提取核心内容：去掉常见的前缀词"""
+    """提取核心内容：去掉常见的前缀词."""
     prefixes = ["请问", "如何", "怎么", "怎样", "什么是", "有没有",
                 "能不能", "在哪里", "哪个"]
     for p in prefixes:
@@ -162,8 +162,8 @@ def _extract_core(text: str) -> str:
     return text
 
 
-def _add_english_fallback(text: str) -> Optional[str]:
-    """对中文技术查询添加英文关键词"""
+def _add_english_fallback(text: str) -> str | None:
+    """对中文技术查询添加英文关键词."""
     # 常见技术术语的中英映射
     mapping = {
         "接口": "API",

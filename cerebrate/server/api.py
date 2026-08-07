@@ -1,4 +1,5 @@
-"""Authoritative Cerebrate Brain Server API.
+"""
+Authoritative Cerebrate Brain Server API.
 
 Clients submit observations and requests. The server alone writes group
 memory, appends durable events, and controls memory promotion.
@@ -7,18 +8,17 @@ memory, appends durable events, and controls memory promotion.
 import json
 import logging
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html import escape as html_escape
 from pathlib import Path
-from typing import Optional
 
-from cerebrate.brain.mind import CerebrateMind, Metacognition
 from cerebrate.brain.decision import DecisionRouter
-from cerebrate.brain.llm import CerebrateLLM
 from cerebrate.brain.events import EventLog
+from cerebrate.brain.llm import CerebrateLLM
+from cerebrate.brain.mind import CerebrateMind, Metacognition
 from cerebrate.config import config
 from cerebrate.memory import EvolutionEngine, MemoryManager
 from cerebrate.server.auth import UserAuth
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_manager() -> MemoryManager:
+    """按默认路径构造并返回 MemoryManager 实例。."""
     return MemoryManager(config.personal_path, config.swarm_path, config.knowledge_path)
 
 
@@ -37,23 +38,26 @@ class BrainAPI:
 
     @staticmethod
     def _prioritize_own(items: list[dict], user: str) -> list[dict]:
-        """查询优先自己的记忆：owner==user 的条目排到前面（保持原相对顺序）。
-        避免被其他人的记忆影响，同时保留共享读取。"""
+        """
+        查询优先自己的记忆：owner==user 的条目排到前面（保持原相对顺序）。.
+
+        避免被其他人的记忆影响，同时保留共享读取。.
+        """
         if not user or not items:
             return items
         mine = [r for r in items if (r.get("physical_user") or "").strip() == user]
         others = [r for r in items if (r.get("physical_user") or "").strip() != user]
         return mine + others
 
-    def __init__(self, manager: Optional[MemoryManager] = None,
-                 events: Optional[EventLog] = None):
+    def __init__(self, manager: MemoryManager | None = None,
+                 events: EventLog | None = None):
         self.mm = manager or get_manager()
         self.events = events or EventLog(config.events_path)
         # 人人为我：已自动提取经验的 usage_id 集合，避免重复提取
         self._auto_extracted_usages: set[str] = set()
         # 会话开始高频读接口 TTL 缓存（sense/doctrines 全库统计慢，
         # 团队并发会话开始会排队；缓存后 10 并发几乎即时命中）
-        self._sense_cache: Optional[dict] = None
+        self._sense_cache: dict | None = None
         self._sense_cache_ts: float = 0.0
         self._sense_ttl: float = 60.0
         # sense 重建锁：缓存过期瞬间防并发风暴（healthcheck 30s + 客户端并发，
@@ -61,17 +65,17 @@ class BrainAPI:
         self._sense_lock = threading.Lock()
         self._sense_building = False
         # 轻量服务状态缓存（调度信号）：5s TTL，无全库统计，AI 感知脑虫状况用
-        self._status_cache: Optional[dict] = None
+        self._status_cache: dict | None = None
         self._status_cache_ts: float = 0.0
         self._status_ttl: float = 5.0
-        self._doctrines_cache: Optional[dict] = None
+        self._doctrines_cache: dict | None = None
         self._doctrines_cache_ts: float = 0.0
         self._doctrines_ttl: float = 10.0
         # 蒸馏异步任务队列：串行执行器（单 worker，避免并发蒸馏争抢 LLM/存储锁），
         # 任务状态存内存（任务生命周期短，重启重提即可）。
         self._distill_tasks: dict[str, dict] = {}
         self._distill_lock = threading.Lock()
-        self._distill_executor: Optional[ThreadPoolExecutor] = None
+        self._distill_executor: ThreadPoolExecutor | None = None
         # 蒸馏任务保留时长（秒）：完成后保留 1 小时供客户端查询，超时清理防内存泄漏
         self._distill_task_ttl = 3600.0
         # 用户认证（TOTP 登录 + 长期 user token）
@@ -84,7 +88,7 @@ class BrainAPI:
         return self._distill_executor
 
     def _cleanup_distill_tasks(self):
-        """清理已完成/失败且超过 TTL 的蒸馏任务，防止内存无限增长。"""
+        """清理已完成/失败且超过 TTL 的蒸馏任务，防止内存无限增长。."""
         now = time.monotonic()
         with self._distill_lock:
             stale = [tid for tid, t in self._distill_tasks.items()
@@ -94,6 +98,12 @@ class BrainAPI:
                 del self._distill_tasks[tid]
 
     def sense(self) -> dict:
+        """
+        感知虫群状态（TTL 缓存，防并发全量统计）。.
+
+        返回 CerebrateMind.sense() 结果，并附加 latest_event_id/server_role/llm/consensus；
+        缓存 TTL 内直接返回，过期时加锁重建（不并发）。
+        """
         now = time.monotonic()
         if self._sense_cache is not None and now - self._sense_cache_ts < self._sense_ttl:
             return self._sense_cache
@@ -114,7 +124,8 @@ class BrainAPI:
             return data
 
     def status(self) -> dict:
-        """轻量服务状态（调度信号）：AI 据此决定查询时机与方式。
+        """
+        轻量服务状态（调度信号）：AI 据此决定查询时机与方式。.
 
         与 sense 的区别：不返回 recent_index 等重内容，5 秒 TTL 缓存；
         供 AI「感知脑虫状况 → 综合调度」——可先查代码再查记忆交叉印证，
@@ -181,15 +192,18 @@ class BrainAPI:
         return data
 
     def assess(self) -> dict:
+        """元认知评估：健康度 + LLM 状态 + 共识概览。."""
         assessment = Metacognition(self.mm).assess()
         assessment["llm"] = CerebrateLLM().status()
         assessment["consensus"] = self.consensus_overview()
         return assessment
 
     def llm_status(self) -> dict:
+        """返回服务端 LLM 可用状态。."""
         return CerebrateLLM().status()
 
     def register_agent(self, payload: dict) -> dict:
+        """注册智能体到虫群，返回注册档案。."""
         agent_id = payload.get("agent_id") or payload.get("id")
         if not agent_id:
             raise ValueError("agent_id is required")
@@ -207,8 +221,11 @@ class BrainAPI:
         return info
 
     def register_user(self, payload: dict) -> dict:
-        """注册用户（TOTP）：返回 otpauth URI 供 Authenticator 添加。
-        username 即用户标识（物理用户概念）。"""
+        """
+        注册用户（TOTP）：返回 otpauth URI 供 Authenticator 添加。.
+
+        username 即用户标识（物理用户概念）。.
+        """
         username = payload.get("username") or payload.get("agent_id") or ""
         result = self.auth.register(username)
         if result.get("registered"):
@@ -217,8 +234,11 @@ class BrainAPI:
         return result
 
     def auth_bind_page(self, token: str) -> str:
-        """渲染绑定页 HTML：内联 qrcode JS（无外部 CDN 依赖），
-        通过短时效 bind_token 换取 otpauth_uri 生成二维码。"""
+        """
+        渲染绑定页 HTML：内联 qrcode JS（无外部 CDN 依赖）。.
+
+        通过短时效 bind_token 换取 otpauth_uri 生成二维码。
+        """
         session = self.auth.consume_bind_session(token)
         if not session:
             return ("<!DOCTYPE html><html><head><meta charset='utf-8'>"
@@ -242,13 +262,14 @@ class BrainAPI:
         return html
 
     def login_user(self, payload: dict) -> dict:
-        """用户登录：验证 TOTP → 返回长期 user token。"""
+        """用户登录：验证 TOTP → 返回长期 user token。."""
         username = payload.get("username") or ""
         code = payload.get("code") or payload.get("totp") or ""
         return self.auth.login(username, code)
 
     def rebind_user(self, payload: dict) -> dict:
-        """管理员为已注册用户重新生成绑定链接（bind_token，30 分钟有效）。
+        """
+        管理员为已注册用户重新生成绑定链接（bind_token，30 分钟有效）。.
 
         用于：注册后未及时扫码链接过期 / 换设备重新绑定。
         不重置 TOTP secret（secret 与绑定会话解耦；重置属另需的安全操作）。
@@ -264,10 +285,15 @@ class BrainAPI:
         }
 
     def auth_users(self) -> dict:
-        """列出已注册用户（管理员）。"""
+        """列出已注册用户（管理员）。."""
         return {"users": self.auth.list_users()}
 
     def query(self, payload: dict) -> dict:
+        """
+        语义查询记忆（应用用户 Loadout 默认装配）。.
+
+        query 必填；按 user/agent 确定查询身份，结合 project_id/scope 检索并返回结果。
+        """
         payload = self._apply_loadout_defaults(payload)
         query = payload.get("query", "")
         if not query:
@@ -360,7 +386,8 @@ class BrainAPI:
         return data
 
     def search(self, payload: dict) -> dict:
-        """渐进式披露第 1 层：紧凑索引（不加载全文）。
+        """
+        渐进式披露第 1 层：紧凑索引（不加载全文）。.
 
         对齐 claude-mem search 工具：只返回 memory_id/标题/类型/时间/评分/token成本，
         让 agent 先扫描"存在什么 + 取它要花多少 token"，再决定取哪几条详情。
@@ -440,7 +467,7 @@ class BrainAPI:
         }
 
     def rebuild_fulltext(self) -> dict:
-        """全量重建 FTS5 全文索引（从 DocStore + ChromaDB）。"""
+        """全量重建 FTS5 全文索引（从 DocStore + ChromaDB）。."""
         result = self.mm.rebuild_fulltext()
         return {
             "status": result.get("status", "ok"),
@@ -453,7 +480,7 @@ class BrainAPI:
     # ==================== 短期场景（v5.2，借鉴 TencentDB Agent Memory L2） ====================
 
     def scene_ingest(self, payload: dict) -> dict:
-        """短期场景：追加原始事件（零 LLM 成本，实时可用）。"""
+        """短期场景：追加原始事件（零 LLM 成本，实时可用）。."""
         session_id = payload.get("session_id", "").strip()
         if not session_id:
             raise ValueError("session_id is required")
@@ -468,7 +495,7 @@ class BrainAPI:
         return result
 
     def scene_get(self, payload: dict) -> dict:
-        """短期场景：读取场景（最近 50 条事件 + Mermaid 压缩图 + 元数据）。"""
+        """短期场景：读取场景（最近 50 条事件 + Mermaid 压缩图 + 元数据）。."""
         session_id = payload.get("session_id", "").strip()
         if not session_id:
             raise ValueError("session_id is required")
@@ -484,7 +511,7 @@ class BrainAPI:
         }
 
     def scene_compress(self, payload: dict) -> dict:
-        """短期场景：LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口约束省钱）。"""
+        """短期场景：LLM 生成/更新 Mermaid 认知状态机（受蒸馏窗口约束省钱）。."""
         session_id = payload.get("session_id", "").strip()
         if not session_id:
             raise ValueError("session_id is required")
@@ -522,7 +549,7 @@ class BrainAPI:
         }
 
     def scene_list(self, payload: dict = None) -> dict:
-        """短期场景：列出活跃场景。"""
+        """短期场景：列出活跃场景。."""
         try:
             limit = min(int((payload or {}).get("limit", 100)), 500)
         except (TypeError, ValueError):
@@ -530,7 +557,7 @@ class BrainAPI:
         return {"sessions": self.mm.scene.list_sessions(limit=limit)}
 
     def scene_delete(self, payload: dict) -> dict:
-        """短期场景：删除场景（任务结束后清理）。"""
+        """短期场景：删除场景（任务结束后清理）。."""
         session_id = payload.get("session_id", "").strip()
         if not session_id:
             raise ValueError("session_id is required")
@@ -538,7 +565,8 @@ class BrainAPI:
         return {"session_id": session_id, "deleted": deleted}
 
     def scene_distill(self, payload: dict) -> dict:
-        """短期场景 → 长期技能：把完成任务场景蒸馏为 SKILL.md 结构化技能入库。
+        """
+        短期场景 → 长期技能：把完成任务场景蒸馏为 SKILL.md 结构化技能入库。.
 
         接蒸馏窗口约束（0-1 点省钱，force 逃生门）——蒸馏是 LLM 调用。
         蒸馏成功后可选删除场景（cleanup=true，默认保留供核查）。
@@ -600,7 +628,8 @@ class BrainAPI:
     # ==================== Skill 版本化（v5.2，借鉴 TencentDB Agent Memory appendNextVersion） ====================
 
     def skill_append_version(self, payload: dict) -> dict:
-        """Skill 版本化：给已有技能记忆追加新版本（幂等）。
+        """
+        Skill 版本化：给已有技能记忆追加新版本（幂等）。.
 
         payload:
           memory_id    必填，技能记忆 ID
@@ -621,8 +650,7 @@ class BrainAPI:
         skill_fields = None
         skill_markdown = payload.get("skill_markdown", "")
         if skill_markdown:
-            from cerebrate.core.skill_format import (
-                parse_skill_markdown, validate_skill_fields)
+            from cerebrate.core.skill_format import parse_skill_markdown, validate_skill_fields
             skill_fields = parse_skill_markdown(skill_markdown)
             if skill_fields:
                 ok, issues = validate_skill_fields(skill_fields)
@@ -642,7 +670,7 @@ class BrainAPI:
         return result
 
     def skill_versions(self, payload: dict) -> dict:
-        """Skill 版本化：读取技能版本历史。"""
+        """Skill 版本化：读取技能版本历史。."""
         memory_id = payload.get("memory_id", "").strip()
         if not memory_id:
             raise ValueError("memory_id is required")
@@ -657,7 +685,7 @@ class BrainAPI:
         }
 
     def skill_diff(self, payload: dict) -> dict:
-        """Skill 版本化：对比两个版本的全文差异（difflib 行级）。"""
+        """Skill 版本化：对比两个版本的全文差异（difflib 行级）。."""
         memory_id = payload.get("memory_id", "").strip()
         if not memory_id:
             raise ValueError("memory_id is required")
@@ -696,10 +724,10 @@ class BrainAPI:
                 "memory_id": memory_id,
                 "from_version": from_v,
                 "to_version": to_v,
-                "added": sum(1 for l in diff_lines if l.startswith("+")
-                             and not l.startswith("+++")),
-                "removed": sum(1 for l in diff_lines if l.startswith("-")
-                               and not l.startswith("---")),
+                "added": sum(1 for line in diff_lines if line.startswith("+")
+                             and not line.startswith("+++")),
+                "removed": sum(1 for line in diff_lines if line.startswith("-")
+                               and not line.startswith("---")),
                 "diff": diff_lines[:200],
             }
         except ValueError:
@@ -711,7 +739,7 @@ class BrainAPI:
     # ==================== Loadout 装配（v5.2，借鉴 TencentDB Agent Memory Loadout） ====================
 
     def loadout_set(self, payload: dict) -> dict:
-        """用户 Loadout 装配：设置绑定项目/偏好 scope/绑定标签。"""
+        """用户 Loadout 装配：设置绑定项目/偏好 scope/绑定标签。."""
         user = (payload.get("_current_user") or ""
                 or payload.get("user") or payload.get("user_id") or "")
         if not user:
@@ -732,7 +760,7 @@ class BrainAPI:
         return {"user": user, "loadout": loadout}
 
     def loadout_get(self, payload: dict = None) -> dict:
-        """用户 Loadout 装配：读取。"""
+        """用户 Loadout 装配：读取。."""
         user = (payload or {}).get("user") or (payload or {}).get("user_id") or ""
         if not user:
             user = (payload or {}).get("_current_user") or ""
@@ -744,7 +772,8 @@ class BrainAPI:
                 "loadout": self.mm.get_user_loadout(user)}
 
     def _apply_loadout_defaults(self, payload: dict) -> dict:
-        """检索时应用 Loadout：未显式传 project_id/scope/tags 时用装配值。
+        """
+        检索时应用 Loadout：未显式传 project_id/scope/tags 时用装配值。.
 
         装配的项目作为 project_id 默认、preferred_scope 作为 scope 默认、
         bound_tags 并入 tags（不覆盖显式传入）。返回补齐后的 payload。
@@ -777,7 +806,8 @@ class BrainAPI:
         return out
 
     def _apply_loadout_boost(self, items: list[dict], user: str) -> list[dict]:
-        """Loadout 检索加权：装配项目/标签命中的记忆排前（v5.2.1）。
+        """
+        Loadout 检索加权：装配项目/标签命中的记忆排前（v5.2.1）。.
 
         在 _prioritize_own（优先自己的记忆）之后应用：
           - 装配绑定的项目命中 → score +0.15
@@ -813,7 +843,8 @@ class BrainAPI:
         return [r for _, r in boosted]
 
     def timeline(self, payload: dict) -> dict:
-        """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文。
+        """
+        渐进式披露第 2 层：围绕 anchor 记忆的时序上下文。.
 
         基于 EventLog 事件流构建"这个方案的前因后果"，
         对齐 claude-mem timeline 工具（anchor + depth_before/depth_after）。
@@ -922,7 +953,7 @@ class BrainAPI:
     def _link_to_knowledge(self, memory_id: str, title: str, content: str,
                            category: str, tags: list, source_agent: str,
                            physical_user: str, project_id: str):
-        """检查新记忆与已有知识库的关联，自动增量追加入库。"""
+        """检查新记忆与已有知识库的关联，自动增量追加入库。."""
         try:
             kb_results = self.mm.lookup_knowledge(
                 f"{title} {content[:200]}", project_id=project_id)
@@ -958,9 +989,9 @@ class BrainAPI:
 
     @staticmethod
     def _generate_memory_id(title: str, category: str) -> str:
-        """预生成 memory_id，与 swarm.share() 中默认逻辑一致。"""
+        """预生成 memory_id，与 swarm.share() 中默认逻辑一致。."""
         import hashlib
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         return hashlib.sha256(
             f"{title}{category}{now}".encode()
         ).hexdigest()[:16]
@@ -973,7 +1004,7 @@ class BrainAPI:
         if all_matches and len(all_matches) > 1:
             others = [m for m in all_matches if (m.get("memory_id") or m.get("id")) != memory_id]
             if others:
-                lines = ["虫群返回了多条匹配（共 {} 条），除最佳匹配外还有：".format(len(all_matches))]
+                lines = [f"虫群返回了多条匹配（共 {len(all_matches)} 条），除最佳匹配外还有："]
                 for m in others[:10]:
                     mid = m.get("memory_id") or m.get("id", "?")
                     title = m.get("title", "无标题")
@@ -1027,7 +1058,7 @@ class BrainAPI:
                 inst.insert(0, "0. 【多结果警告】" + other_matches_hint)
             inst.extend([
                 "4. 根据验证结果调整并执行",
-                f"5. 完成后调用 POST /v1/memories/propose 提交新记忆",
+                "5. 完成后调用 POST /v1/memories/propose 提交新记忆",
                 f"6. 可选: 调用 POST /v1/usages/start 记录参考 (memory_id={memory_id}, agent={agent_id})"
             ])
             return {
@@ -1063,7 +1094,7 @@ class BrainAPI:
 
     def read_logs(self, lines: int = 50, level: str = "",
                    module: str = "") -> dict:
-        """读取虫群运行日志。"""
+        """读取虫群运行日志。."""
         try:
             from cerebrate.brain.logger import get_logger
             log = get_logger()
@@ -1081,6 +1112,7 @@ class BrainAPI:
             return {"entries": [], "total": 0, "error": str(e)}
 
     def help(self) -> dict:
+        """返回协议帮助文档 dict（端点/生命周期/连接策略）。."""
         return {
             "server": "Cerebrate Brain Server v5",
             "description": "Memory hub for AI coding agents",
@@ -1274,6 +1306,12 @@ class BrainAPI:
         }
 
     def propose_memory(self, payload: dict) -> dict:
+        """
+        提交候选记忆到虫群，返回入库结果 dict。.
+
+        可选 skill_markdown（SKILL.md）解析为结构化技能字段；
+        返回 memory_id/origin_id/life_stage/validation 等，并追加事件与知识关联。
+        """
         title = payload.get("title", "")
         content = payload.get("content", "")
 
@@ -1427,6 +1465,7 @@ class BrainAPI:
         return data
 
     def start_usage(self, payload: dict) -> dict:
+        """开始跟踪一次记忆复用（memory_id/agent/problem 必填），返回 usage 记录。."""
         memory_id = payload.get("memory_id")
         agent_id = payload.get("agent") or payload.get("agent_id")
         problem = payload.get("problem", "")
@@ -1441,6 +1480,7 @@ class BrainAPI:
         return record
 
     def finish_usage(self, payload: dict) -> dict:
+        """结束记忆复用跟踪并回报 outcome/feedback，返回更新后的 usage 记录。."""
         usage_id = payload.get("usage_id")
         outcome = payload.get("outcome")
         if not usage_id or not outcome:
@@ -1464,8 +1504,9 @@ class BrainAPI:
 
         return record
 
-    def _auto_extract_and_propose(self, usage_record: dict) -> Optional[dict]:
-        """人人为我核心：从一次记忆复用中自动提取经验教训并同步到虫群。
+    def _auto_extract_and_propose(self, usage_record: dict) -> dict | None:
+        """
+        人人为我核心：从一次记忆复用中自动提取经验教训并同步到虫群。.
 
         热路径——在 finish_usage 完成后立即执行。
         - 获取原始记忆和 usage 上下文
@@ -1558,7 +1599,8 @@ class BrainAPI:
             return None
 
     def _auto_lesson_exists(self, title: str) -> bool:
-        """检查同标题的 [自动经验] 是否已存在（排除 archived）。
+        """
+        检查同标题的 [自动经验] 是否已存在（排除 archived）。.
 
         用 ChromaDB metadata 精确匹配 title，避免每次 finish_usage 全库遍历。
         失败时保守返回 False（不拦截提取，保证主流程可用）。
@@ -1579,8 +1621,8 @@ class BrainAPI:
 
     @staticmethod
     def _augment_lesson_content(content: str, usage_record: dict,
-                                 original_memory: Optional[dict]) -> str:
-        """当 LLM 产出内容不足质量门槛时，用原始数据补全以确保信息完整性。"""
+                                 original_memory: dict | None) -> str:
+        """当 LLM 产出内容不足质量门槛时，用原始数据补全以确保信息完整性。."""
         parts = [content]
         parts.append("\n\n## 补充上下文\n")
         problem = usage_record.get("problem", "")
@@ -1600,7 +1642,8 @@ class BrainAPI:
         return "\n".join(parts)
 
     def process_pending_usages(self, limit: int = 20) -> dict:
-        """冷路径：扫描已完成的 usage 记录，对未自动提取经验的进行兜底处理。
+        """
+        冷路径：扫描已完成的 usage 记录，对未自动提取经验的进行兜底处理。.
 
         scheduler 每 10 分钟调用一次，作为热路径的补充。
         通过检查 usage 是否已有 auto_lesson_memory_id 来避免重复处理。
@@ -1656,6 +1699,7 @@ class BrainAPI:
         }
 
     def consensus_vote(self, payload: dict) -> dict:
+        """提交一条共识投票（support/oppose/abstain），返回投票事件。."""
         memory_id = payload.get("memory_id")
         agent_id = payload.get("agent") or payload.get("agent_id")
         vote = payload.get("vote")
@@ -1677,7 +1721,8 @@ class BrainAPI:
         return event
 
     def consensus_overview(self) -> dict:
-        """共识总览：单次扫描 events 聚合所有投票快照（v5.2.1 修复 O(N²)）。
+        """
+        共识总览：单次扫描 events 聚合所有投票快照（v5.2.1 修复 O(N²)）。.
 
         旧实现：对每个 vote event 调 consensus_snapshot，而 consensus_snapshot
         内部又全量扫描 events → O(N²) 且每次都是 ChromaDB 全表扫描，
@@ -1732,6 +1777,11 @@ class BrainAPI:
         }
 
     def consensus_snapshot(self, memory_id: str, apply: bool = False) -> dict:
+        """
+        聚合某条记忆的共识快照（pending/accepted/rejected/split）。.
+
+        apply=True 时按快照结果自动晋升/隔离记忆；返回含权重/法定人数/阈值/投票人列表。
+        """
         memory = self.mm.get_swarm_memory(memory_id)
         if not memory:
             raise KeyError(f"memory not found: {memory_id}")
@@ -1866,14 +1916,14 @@ class BrainAPI:
                 }, memory.get("project_id", ""))
 
     def get_origin(self, origin_id: str) -> dict:
-        """读取不可变原始记忆完整内容。"""
+        """读取不可变原始记忆完整内容。."""
         origin = self.mm.origin.get(origin_id)
         if not origin:
             raise KeyError(f"原始记忆不存在: {origin_id}")
         return origin
 
     def get_memory_origins(self, memory_id: str) -> dict:
-        """查询共享记忆的原始来源列表。"""
+        """查询共享记忆的原始来源列表。."""
         memory = self.mm.get_swarm_memory(memory_id)
         if not memory:
             raise KeyError(f"共享记忆不存在: {memory_id}")
@@ -1890,13 +1940,15 @@ class BrainAPI:
         }
 
     def get_memory(self, memory_id: str) -> dict:
+        """按 memory_id 读取记忆详情，不存在抛 KeyError。."""
         memory = self.mm.get_swarm_memory(memory_id)
         if not memory:
             raise KeyError(f"memory not found: {memory_id}")
         return memory
 
     def memory_detail(self, payload: dict) -> dict:
-        """渐进式披露第 3 层：按 ids 批量取完整详情。
+        """
+        渐进式披露第 3 层：按 ids 批量取完整详情。.
 
         对齐 claude-mem get_observations（POST /api/observations/batch）。
         """
@@ -1924,6 +1976,7 @@ class BrainAPI:
         }
 
     def doctrines(self) -> dict:
+        """读取脑虫教条列表（TTL 缓存）。."""
         now = time.monotonic()
         if self._doctrines_cache is not None and now - self._doctrines_cache_ts < self._doctrines_ttl:
             return self._doctrines_cache
@@ -1938,7 +1991,8 @@ class BrainAPI:
         return result
 
     def soul_set(self, payload: dict) -> dict:
-        """写入虫群灵魂（服务端权威操作，绕过客户端白名单限制）。
+        """
+        写入虫群灵魂（服务端权威操作，绕过客户端白名单限制）。.
 
         灵魂 = 工程化思维行为准则（life_stage=doctrine, scope=general，
         跨项目对每个接入虫群的 AI 生效）。客户端 propose 不能提交 doctrine，
@@ -2020,7 +2074,7 @@ class BrainAPI:
         return data
 
     def soul_get(self) -> dict:
-        """读取虫群灵魂（权威教条中标记为 soul 的 doctrine）。"""
+        """读取虫群灵魂（权威教条中标记为 soul 的 doctrine）。."""
         souls = []
         for d in self.doctrines().get("doctrines", []):
             tags = d.get("tags") or []
@@ -2035,8 +2089,9 @@ class BrainAPI:
             "current": souls[0] if souls else None,
         }
 
-    def dedup_check(self, payload: Optional[dict] = None) -> dict:
-        """记忆去重检查（只读，安全）：
+    def dedup_check(self, payload: dict | None = None) -> dict:
+        """
+        记忆去重检查（只读，安全）：.
 
         按「独立文档」维度统计同标题重复——分块（doc_group_id 关联、id 以 _cN 结尾）
         不算独立文档；只有同一标题存在 >1 个独立文档（父文档或普通记忆）才算重复。
@@ -2119,13 +2174,15 @@ class BrainAPI:
         return {"processed": processed, "limit": limit, "dry_run": dry_run}
 
     def evolve(self, force: bool = False) -> dict:
+        """触发进化引擎执行蒸馏（force 可绕过窗口/间隔检查），返回进化结果。."""
         result = EvolutionEngine(config.evolution_path, self.mm).evolve(force=force)
         self.events.append("brain.evolved", "brain-server", result)
         # 运行日志由 EvolutionEngine.evolve() 内部写入
         return result
 
     def answer(self, payload: dict) -> dict:
-        """生成带引用标注的回答
+        """
+        生成带引用标注的回答.
 
         流程:
           1. 完整检索管线（重写→搜索→扩展→过滤→重排序）
@@ -2172,7 +2229,7 @@ class BrainAPI:
                     "relevance_score": best.get("_relevance", best.get("score", 0)),
                 }
 
-        for i, r in enumerate(related):
+        for r in related:
             if len(contexts) >= 5:
                 break
             content = r.get("_expanded_context") or r.get("content", "")
@@ -2243,14 +2300,14 @@ class BrainAPI:
 
     def search_knowledge(self, query: str, topic: str = "",
                          project_id: str = "", scope: str = "") -> list[dict]:
-        """向量语义搜索权威知识库。"""
+        """向量语义搜索权威知识库。."""
         t = topic.strip() if topic else None
         pid = project_id.strip() if project_id else None
         s = scope.strip() if scope else None
         return self.mm.lookup_knowledge(query, topic=t, project_id=pid, scope=s)
 
     def store_knowledge(self, payload: dict) -> dict:
-        """手动写入权威知识库。"""
+        """手动写入权威知识库。."""
         title = payload.get("title", "")
         content = payload.get("content", "")
         if not title or not content:
@@ -2275,7 +2332,8 @@ class BrainAPI:
         return {"doc_id": doc_id}
 
     def project_context(self, payload: dict) -> dict:
-        """生成/读取项目级上下文文件（Phase 5 第 2 项）。
+        """
+        生成/读取项目级上下文文件（Phase 5 第 2 项）。.
 
         action:
           - build（默认）: 聚合项目记忆生成浓缩上下文文件
@@ -2302,7 +2360,8 @@ class BrainAPI:
         return ctx.build(project_id, limit=limit)
 
     def project_profile(self, payload: dict) -> dict:
-        """业务画像（数据世界）：项目的领域树 + 实体关系 + 依赖导航。
+        """
+        业务画像（数据世界）：项目的领域树 + 实体关系 + 依赖导航。.
 
         action:
           - read（默认）: 读取已确认画像（未生成返回 found=False）
@@ -2396,13 +2455,13 @@ class BrainAPI:
         raise ValueError(f"unknown action: {action}")
 
     def project_harvest(self, payload: dict) -> dict:
-        """代码结构养料收割（真实代码 AST → 结构图谱）。
+        """
+        代码结构养料收割（真实代码 AST → 结构图谱）。.
 
         - dir 必传：扫描该目录生成代码结构（存 {memory_root}/harvest/{project_id}.json）
         - 不传 dir：读取已生成的代码结构
         """
-        from cerebrate.tools.code_harvest import (
-            harvest_project, save_harvest, load_harvest)
+        from cerebrate.tools.code_harvest import harvest_project, load_harvest, save_harvest
         project_id = payload.get("project") or payload.get("project_id") or ""
         if not project_id:
             raise ValueError("project_id is required")
@@ -2443,8 +2502,11 @@ class BrainAPI:
         return result
 
     def code_sync(self, payload: dict) -> dict:
-        """代码同步：接收本地项目代码包（含增量删除清单），解压到代码仓，
-        自动 harvest；auto_profile=True 时自动生成画像草稿（不覆盖人工确认版）。"""
+        """
+        代码同步：接收本地项目代码包（含增量删除清单），解压到代码仓。.
+
+        自动 harvest；auto_profile=True 时自动生成画像草稿（不覆盖人工确认版）。
+        """
         from cerebrate.tools.code_sync import receive_package
         project_id = payload.get("project") or payload.get("project_id") or ""
         package_b64 = payload.get("package_b64") or ""
@@ -2459,8 +2521,8 @@ class BrainAPI:
                 and (result.get("files_written", 0) > 0
                      or result.get("files_removed", 0) > 0)):
             try:
-                from cerebrate.tools.project_profile import ProfileStore
                 from cerebrate.tools.code_harvest import load_harvest
+                from cerebrate.tools.project_profile import ProfileStore
                 h = load_harvest(project_id, branch=result.get("branch", ""))
                 store = ProfileStore(self.mm)
                 draft = store.build_draft(
@@ -2476,16 +2538,17 @@ class BrainAPI:
         return result
 
     def harvest_push(self, payload: dict) -> dict:
-        """结构 push（代码不离开本地）：接收本地 AST 分析结果（harvest 结构），
-        存 harvest/{project_id}/{branch}.json，供画像构建/校验使用。
+        """
+        结构 push（代码不离开本地）：接收本地 AST 分析结果（harvest 结构）。.
+
+        存 harvest/{project_id}/{branch}.json 供画像构建/校验使用。
 
         服务端只接收「结构元数据」（类名/函数名/端点路径/字段），不接收源代码。
         """
-        from cerebrate.tools.code_harvest import (
-            save_harvest, load_harvest, _safe_branch)
-        from cerebrate.tools.code_sync import (
-            _load_meta, _save_meta, SYNC_MAX_BRANCHES)
-        from datetime import datetime, timezone as _tz
+        from datetime import datetime
+
+        from cerebrate.tools.code_harvest import _safe_branch, load_harvest, save_harvest
+        from cerebrate.tools.code_sync import _load_meta, _save_meta
         project_id = payload.get("project") or payload.get("project_id") or ""
         harvest = payload.get("harvest") or {}
         branch = _safe_branch(payload.get("branch", ""))
@@ -2508,7 +2571,7 @@ class BrainAPI:
         if not meta.get("default_branch"):
             meta["default_branch"] = branch or "default"
         meta["branches"][branch or "default"] = {
-            "last_synced": datetime.now(_tz.utc).isoformat(),
+            "last_synced": datetime.now(UTC).isoformat(),
             "files": len(harvest.get("modules", [])),
             "harvest": harvest.get("stats", {}),
             "source": "local_push",
@@ -2534,15 +2597,15 @@ class BrainAPI:
         return result
 
     def project_work(self, payload: dict) -> dict:
-        """多人协作感知：工作声明（谁在处理哪个功能）+ 冲突检测。
+        """
+        多人协作感知：工作声明（谁在处理哪个功能）+ 冲突检测。.
 
         action:
           - claim: 声明正在处理某模块（返回冲突检测）
           - release: 释放声明
           - list: 列出项目活跃工作（按分支）
         """
-        from cerebrate.tools.work_claims import (
-            claim, release, list_active)
+        from cerebrate.tools.work_claims import claim, list_active, release
         action = payload.get("action", "list")
         project_id = payload.get("project") or payload.get("project_id") or ""
         if not project_id:
@@ -2568,7 +2631,7 @@ class BrainAPI:
         raise ValueError(f"unknown action: {action}")
 
     def branch_diff(self, payload: dict) -> dict:
-        """分支差异感知：比较两分支代码结构（harvest），告知冲突点。"""
+        """分支差异感知：比较两分支代码结构（harvest），告知冲突点。."""
         from cerebrate.tools.code_harvest import load_harvest
         project_id = payload.get("project") or payload.get("project_id") or ""
         from_b = payload.get("from_branch") or payload.get("from") or ""
@@ -2605,7 +2668,7 @@ class BrainAPI:
         }
 
     def project_navigate(self, payload: dict) -> dict:
-        """在业务画像中定位目标域/实体（导航），返回路径 + 挂载记忆 + 依赖。"""
+        """在业务画像中定位目标域/实体（导航），返回路径 + 挂载记忆 + 依赖。."""
         from cerebrate.tools.project_profile import ProfileStore
         store = ProfileStore(self.mm)
         project_id = payload.get("project") or payload.get("project_id") or ""
@@ -2616,7 +2679,7 @@ class BrainAPI:
         return store.navigate(project_id, target, branch=branch)
 
     def distill_knowledge_on_demand(self, payload: dict) -> dict:
-        """按需蒸馏：根据 topic 搜索记忆，LLM 生成知识文档并入库。"""
+        """按需蒸馏：根据 topic 搜索记忆，LLM 生成知识文档并入库。."""
         topic = payload.get("topic", "").strip()
         if not topic:
             raise ValueError("topic is required")
@@ -2679,7 +2742,8 @@ class BrainAPI:
                 "source_count": len(full_memories), "confidence": confidence}
 
     def distill(self, payload: dict) -> dict:
-        """按需蒸馏（异步）：提交任务，立即返回 task_id。
+        """
+        按需蒸馏（异步）：提交任务，立即返回 task_id。.
 
         蒸馏耗时数分钟（LLM 链式整合），HTTP 同步会阻塞客户端。
         改为异步：POST 只入队，GET /v1/distill/{task_id} 查询进度与结果。
@@ -2700,7 +2764,7 @@ class BrainAPI:
                           "管理员可传 force=true 显式强制。",
             }
         task_id = uuid.uuid4().hex
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         task = {
             "task_id": task_id,
             "topic": topic,
@@ -2719,7 +2783,7 @@ class BrainAPI:
         return {"task_id": task_id, "topic": topic, "status": "queued"}
 
     def distill_status(self, task_id: str) -> dict:
-        """查询蒸馏任务状态；完成后返回完整结果。"""
+        """查询蒸馏任务状态；完成后返回完整结果。."""
         self._cleanup_distill_tasks()
         with self._distill_lock:
             task = self._distill_tasks.get(task_id)
@@ -2739,24 +2803,25 @@ class BrainAPI:
         return result
 
     def _run_distill_task(self, task: dict):
-        """后台执行蒸馏任务并写回状态（串行执行器调用）。"""
+        """后台执行蒸馏任务并写回状态（串行执行器调用）。."""
         with self._distill_lock:
             task["status"] = "running"
-            task["updated"] = datetime.now(timezone.utc).isoformat()
+            task["updated"] = datetime.now(UTC).isoformat()
         try:
             result = self._run_distill(task["payload"])
             with self._distill_lock:
                 task["result"] = result
                 task["status"] = "done"
-                task["updated"] = datetime.now(timezone.utc).isoformat()
+                task["updated"] = datetime.now(UTC).isoformat()
         except Exception as e:
             with self._distill_lock:
                 task["error"] = str(e)
                 task["status"] = "error"
-                task["updated"] = datetime.now(timezone.utc).isoformat()
+                task["updated"] = datetime.now(UTC).isoformat()
 
     def _run_distill(self, payload: dict) -> dict:
-        """按需蒸馏 + 自动投票（执行体，供后台任务与测试直接调用）。
+        """
+        按需蒸馏 + 自动投票（执行体，供后台任务与测试直接调用）。.
 
         把相似记忆蒸馏为一个细节完整的新记忆/技能候选（营养池），自动发起支持投票，
         返回共识快照；信息不足以形成完整技能时跳过（LLM skip 判断）。
@@ -2913,12 +2978,12 @@ class BrainAPI:
         return result
 
     def list_knowledge_topics(self) -> dict:
-        """列出知识库所有主题。"""
+        """列出知识库所有主题。."""
         return {"topics": self.mm.knowledge.list_topics(),
                 "policies": self.mm.knowledge.list_policies()}
 
     def list_all_knowledge(self) -> list[dict]:
-        """列出知识库全部文档（含完整内容），用于导出/人工浏览。"""
+        """列出知识库全部文档（含完整内容），用于导出/人工浏览。."""
         kb = self.mm.knowledge
         docs = []
         for did in kb._store.get_all_ids():
@@ -2947,7 +3012,7 @@ class BrainAPI:
 
     def cleanup_expired_origins(self, days: int = 365,
                                 backup_dir: str = "/data/origin_backups") -> dict:
-        """清理超过保留期的原始记忆：先备份再删除。"""
+        """清理超过保留期的原始记忆：先备份再删除。."""
         result = self.mm.origin.cleanup_expired(days=days, backup_dir=backup_dir)
         self.events.append("origin.cleanup", "brain-server",
                            {"cleaned": result["deleted"],

@@ -11,7 +11,6 @@
   8. 架构约束（chunking.py 偏移量 / embedding.py 截断警告 / 嵌入摘要）
 """
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -24,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 def configure_temp_env(tmp_name):
     """配置临时内存路径用于测试"""
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -55,15 +54,15 @@ def configure_temp_env(tmp_name):
 
 def create_swarm(tmp_name):
     """快捷创建 SwarmMemory 实例"""
-    from cerebrate.memory.swarm import SwarmMemory
     from cerebrate.config import config
+    from cerebrate.memory.swarm import SwarmMemory
     return SwarmMemory(config.swarm_path)
 
 
 def create_docstore(tmp_name):
     """快捷创建 DocumentStore 实例"""
-    from cerebrate.memory.docstore import DocumentStore
     from cerebrate.config import config
+    from cerebrate.memory.docstore import DocumentStore
     return DocumentStore(config.docstore_path)
 
 
@@ -600,8 +599,8 @@ class EmbeddingSummaryTests(unittest.TestCase):
         设计说明（v5）：短记忆（不分块）全文直接入向量库是刻意行为，
         长文档分块后父条目 ChromaDB 只存标题（摘要），全文在 DocumentStore。
         """
-        from cerebrate.memory.swarm import SwarmMemory
         from cerebrate.config import config
+        from cerebrate.memory.swarm import SwarmMemory
 
         # 暂时移到 swarm_path
         config.swarm_path = Path(self.tmp.name) / "swarm"
@@ -1086,7 +1085,7 @@ class MemoryMinLengthTests(unittest.TestCase):
         short_content = "架构设计说明。" * 33  # ~198 字 ≈ 300 token
         from cerebrate.core.chunking import estimate_tokens
         self.assertLess(estimate_tokens(short_content), 500,
-                        f"测试前提不成立：内容应有 <500 token")
+                        "测试前提不成立：内容应有 <500 token")
         with self.assertRaises(ValueError):
             self.api.propose_memory({
                 "title": "中等长度记忆",
@@ -1118,8 +1117,8 @@ class MemoryMinLengthTests(unittest.TestCase):
 
     def test_exactly_500_tokens_accepted(self):
         """恰好 500 token 通过"""
-        from cerebrate.core.chunking import estimate_tokens
         from cerebrate.config import config
+        from cerebrate.core.chunking import estimate_tokens
         config.memory_min_tokens = 500
         # 333 汉字 ≈ 500 token
         exact_content = "设计说明。" * 84  # 336 字

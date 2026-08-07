@@ -1,16 +1,15 @@
-"""进化引擎 v5 — ChromaDB 持久化 + 服务端驱动的技能沉淀"""
+"""进化引擎 v5 — ChromaDB 持久化 + 服务端驱动的技能沉淀."""
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
+from cerebrate.brain.llm import CerebrateLLM
 from cerebrate.config import config
 from cerebrate.core.decay import calculate_decay, should_archive
-from cerebrate.brain.llm import CerebrateLLM
 
 
 class EvolutionEngine:
-    """记忆进化引擎：定期综合整理虫群经验，升级为高阶知识（信息密度只增不减）"""
+    """记忆进化引擎：定期综合整理虫群经验，升级为高阶知识（信息密度只增不减）."""
 
     EVO_LOG_DOC = "evolution_log"
 
@@ -45,13 +44,19 @@ class EvolutionEngine:
         store = self._get_store()
         meta = {
             "history": json.dumps(self._history, ensure_ascii=False),
-            "updated": datetime.now(timezone.utc).isoformat(),
+            "updated": datetime.now(UTC).isoformat(),
             "count": len(self._history),
         }
         store.upsert(self.EVO_LOG_DOC, "evolution history log", meta)
 
     def evolve(self, force: bool = False) -> dict:
-        now = datetime.now(timezone.utc)
+        """
+        执行一次进化：聚类关联、技能蒸馏、教条固化、过期归档、冲突检查。.
+
+        非 force 时先检查蒸馏窗口与距上次进化间隔，未满足则返回 skipped 结果。
+        返回包含 timestamp/actions/insights/stats 的结果 dict，并追加到进化历史。
+        """
+        now = datetime.now(UTC)
 
         # ── 蒸馏窗口检查（v5.1.1）：默认仅本地 0:00-1:00（低谷 API 费用）运行 ──
         # force=True（管理员显式/测试）保留逃生门；自动调度严格走窗口。
@@ -136,7 +141,8 @@ class EvolutionEngine:
         return result
 
     def _cluster_semantic(self, threshold: float = 0.88) -> int:
-        """语义聚类：发现相似记忆并标记为同一 cluster，不删除任何记忆。
+        """
+        语义聚类：发现相似记忆并标记为同一 cluster，不删除任何记忆。.
 
         每条记忆独立保留、独立检索，通过 cluster_id 元数据关联同类解。
         检索时可通过 diversity_rerank 混合不同 cluster 的结果。
@@ -193,7 +199,7 @@ class EvolutionEngine:
                 if mem2.get("cluster_id"):
                     continue  # 已在其他簇中
                 emb2 = embeddings[mid2]
-                sim = sum(a * b for a, b in zip(emb1, emb2))
+                sim = sum(a * b for a, b in zip(emb1, emb2, strict=False))
                 if sim >= threshold:
                     cluster_members.append(mid2)
 
@@ -209,7 +215,7 @@ class EvolutionEngine:
                 mem = swarm._load_memory(mid)
                 if mem:
                     mem["cluster_id"] = cid
-                    mem["updated"] = datetime.now(timezone.utc).isoformat()
+                    mem["updated"] = datetime.now(UTC).isoformat()
                     text = f"{mem.get('title', '')}\n{mem.get('content', '')}\n{mem.get('problem_solved', '')}\n{mem.get('solution', '')}"
                     swarm._store.upsert(mid, text, mem)
                 processed.add(mid)
@@ -342,8 +348,11 @@ class EvolutionEngine:
         return created
 
     def _distill_doctrines(self) -> int:
-        """跨项目知识综合整合：将已验证的技能综合为脑虫教条。
-        信息密度只增不减——所有源记忆的完整内容保留在教条文档中。"""
+        """
+        跨项目知识综合整合：将已验证的技能综合为脑虫教条。.
+
+        信息密度只增不减——所有源记忆的完整内容保留在教条文档中。.
+        """
         swarm = self.manager.swarm
         created = 0
 
@@ -496,14 +505,15 @@ class EvolutionEngine:
 
         return conflicts
 
-    def get_last_evolution_time(self) -> Optional[str]:
+    def get_last_evolution_time(self) -> str | None:
+        """返回最近一次进化时间（ISO 字符串），无历史时返回 None。."""
         if self._history:
             return self._history[-1].get("timestamp")
         return None
 
     @staticmethod
     def _build_source_appendix(mems: list[dict]) -> str:
-        """构建原始数据附录：完整保留每条源记忆的原始内容，确保信息零丢失。"""
+        """构建原始数据附录：完整保留每条源记忆的原始内容，确保信息零丢失。."""
         parts = ["## 附录：原始数据全集"]
         parts.append("")
         for i, m in enumerate(mems):
@@ -536,8 +546,11 @@ class EvolutionEngine:
 
     @staticmethod
     def _build_knowledge_document(doc: dict, topic: str) -> str:
-        """将 LLM 综合整合返回的完整四级结构序列化为论文级 Markdown 文档。
-        所有源记忆的原始内容保留在附录中，实现信息零丢失。"""
+        """
+        将 LLM 综合整合返回的完整四级结构序列化为论文级 Markdown 文档。.
+
+        所有源记忆的原始内容保留在附录中，实现信息零丢失。.
+        """
         parts = []
 
         meta = doc.get("meta", {})
@@ -683,11 +696,12 @@ class EvolutionEngine:
         return "\n".join(parts)
 
     def should_evolve(self, interval_hours: int = 24) -> bool:
+        """判断是否已达到进化间隔：无历史或距上次进化超过 interval_hours 返回 True。."""
         last = self.get_last_evolution_time()
         if not last:
             return True
         try:
             last_time = datetime.fromisoformat(last)
-            return (datetime.now(timezone.utc) - last_time.replace(tzinfo=timezone.utc)).total_seconds() > interval_hours * 3600
+            return (datetime.now(UTC) - last_time.replace(tzinfo=UTC)).total_seconds() > interval_hours * 3600
         except (ValueError, TypeError):
             return True

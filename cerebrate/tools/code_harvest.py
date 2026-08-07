@@ -1,4 +1,5 @@
-"""代码结构养料收割器（企业级精度核心）。
+"""
+代码结构养料收割器（企业级精度核心）。.
 
 从真实代码 AST 提取项目结构，作为业务画像（数据世界+流程世界）的**真实骨架**：
   - modules: 模块树（文件 → 类 → 函数/方法）
@@ -21,9 +22,8 @@ import ast
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 
@@ -51,7 +51,7 @@ def _decorator_names(node) -> list[str]:
 
 
 def _class_fields(node: ast.ClassDef) -> list[dict]:
-    """提取类字段：类体注解赋值 + __init__ 中 self.x: T 注解。"""
+    """提取类字段：类体注解赋值 + __init__ 中 self.x: T 注解。."""
     fields: dict[str, dict] = {}
     for child in node.body:
         if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
@@ -108,7 +108,9 @@ def _function_entry(node, file_rel: str) -> dict:
 
 
 def _extract_endpoints(module: ast.Module, file_rel: str) -> list[dict]:
-    """识别 API 端点：
+    """
+    识别 API 端点（装饰器风格与路由风格两种）。.
+
     1) 装饰器风格 @app.route("/path", methods=["POST"]) / @bp.post("/path")
     2) Cerebrate http.py 风格: if method == "POST" and path == "/v1/query":
     """
@@ -139,7 +141,13 @@ def _extract_endpoints(module: ast.Module, file_rel: str) -> list[dict]:
     return endpoints
 
 
-def harvest_file(filepath: Path, root: Path) -> Optional[dict]:
+def harvest_file(filepath: Path, root: Path) -> dict | None:
+    """
+    按文件扩展名分发解析单个文件，返回结构摘要 dict。.
+
+    .py 走 AST 解析，.php/.java/.kt 走正则解析，其余走文本解析；
+    解析失败返回 None。
+    """
     file_rel = str(filepath.relative_to(root))
     ext = filepath.suffix.lower()
     if ext == ".py":
@@ -151,7 +159,7 @@ def harvest_file(filepath: Path, root: Path) -> Optional[dict]:
     return _harvest_text(filepath, root, file_rel)
 
 
-def _harvest_python(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
+def _harvest_python(filepath: Path, root: Path, file_rel: str) -> dict | None:
     try:
         tree = ast.parse(filepath.read_text(encoding="utf-8", errors="replace"))
     except Exception as e:
@@ -174,8 +182,8 @@ def _harvest_python(filepath: Path, root: Path, file_rel: str) -> Optional[dict]
     }
 
 
-def _harvest_php(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
-    """PHP 正则解析：namespace/class/function + Laravel 风格 Route::。"""
+def _harvest_php(filepath: Path, root: Path, file_rel: str) -> dict | None:
+    """PHP 正则解析：namespace/class/function + Laravel 风格 Route::。."""
     try:
         text = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception:
@@ -220,9 +228,12 @@ def _harvest_php(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
 
 
 def _strip_java_comments(text: str) -> str:
-    """剥离 Java 注释（// 行注释、/* */ 块注释），避免注释中的类名/方法名
+    """
+    剥离 Java 注释（// 行注释、/* */ 块注释），避免注释中的类名/方法名。.
+
     被结构正则误识别（如 Javadoc 里 @see MpayController 会把类名算进该文件）。
-    字符串字面量原样保留（不处理其中的 // 与 /*）。"""
+    字符串字面量原样保留（不处理其中的 // 与 /*）。.
+    """
     out = []
     i, n = 0, len(text)
     while i < n:
@@ -260,8 +271,8 @@ def _strip_java_comments(text: str) -> str:
     return "".join(out)
 
 
-def _harvest_java(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
-    """Java/Kotlin 正则解析：class/interface/method + Spring 注解端点。"""
+def _harvest_java(filepath: Path, root: Path, file_rel: str) -> dict | None:
+    """Java/Kotlin 正则解析：class/interface/method + Spring 注解端点。."""
     try:
         text = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception:
@@ -301,8 +312,8 @@ def _harvest_java(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
     }
 
 
-def _harvest_text(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
-    """通用文本兜底：提取 #!/注释标题/一级标题（用于配置类文档）。"""
+def _harvest_text(filepath: Path, root: Path, file_rel: str) -> dict | None:
+    """通用文本兜底：提取 #!/注释标题/一级标题（用于配置类文档）。."""
     try:
         raw = filepath.read_bytes()[:4000]
     except Exception:
@@ -325,8 +336,9 @@ def _harvest_text(filepath: Path, root: Path, file_rel: str) -> Optional[dict]:
 
 
 def harvest_project(root: Path, project_id: str = "",
-                    exts: Optional[tuple] = None, limit_files: int = 2000) -> dict:
-    """扫描项目目录，AST 提取代码结构。
+                    exts: tuple | None = None, limit_files: int = 2000) -> dict:
+    """
+    扫描项目目录，AST 提取代码结构。.
 
     exts=None 表示任意文件都收割：.py/.php/.java/.kt 走精确解析器，
     其余文本文件走通用兜底（提取标题/模块名）；二进制文件自动跳过。
@@ -379,7 +391,7 @@ def harvest_project(root: Path, project_id: str = "",
     return {
         "project_id": project_id,
         "root": str(root),
-        "harvested_at": datetime.now(timezone.utc).isoformat(),
+        "harvested_at": datetime.now(UTC).isoformat(),
         "files_scanned": file_count,
         "modules": modules,
         "data_models": data_models,
@@ -394,15 +406,18 @@ def harvest_project(root: Path, project_id: str = "",
 
 
 def _safe_branch(branch: str) -> str:
-    """清洗分支名（feature/dob → feature-dob），避免路径穿越。"""
+    """清洗分支名（feature/dob → feature-dob），避免路径穿越。."""
     b = re.sub(r"[^0-9a-zA-Z._-]+", "-", str(branch or "").strip())
     b = b.strip(".-")
     return b or "default"
 
 
 def _harvest_target(project_id: str, branch: str = "") -> Path:
-    """harvest 文件路径：分支版 harvest/{project_id}/{branch}.json；
-    无分支时兼容旧路径 harvest/{project_id}.json。"""
+    """
+    Harvest 文件路径：分支版 harvest/{project_id}/{branch}.json。.
+
+    无分支时兼容旧路径 harvest/{project_id}.json。.
+    """
     d = config.memory_root / "harvest"
     if not branch:
         return d / f"{project_id}.json"
@@ -410,7 +425,7 @@ def _harvest_target(project_id: str, branch: str = "") -> Path:
 
 
 def save_harvest(harvest: dict, branch: str = "") -> dict:
-    """写入 harvest（支持按分支）。"""
+    """写入 harvest（支持按分支）。."""
     project_id = harvest.get("project_id") or "unknown"
     target = _harvest_target(project_id, branch)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -424,7 +439,8 @@ def save_harvest(harvest: dict, branch: str = "") -> dict:
             "stats": harvest.get("stats", {})}
 
 
-def load_harvest(project_id: str, branch: str = "") -> Optional[dict]:
+def load_harvest(project_id: str, branch: str = "") -> dict | None:
+    """读取已保存的 harvest 结构（按项目/分支定位），不存在返回 None。."""
     p = _harvest_target(project_id, branch)
     if not p.exists():
         return None

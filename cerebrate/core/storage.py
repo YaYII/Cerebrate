@@ -1,10 +1,9 @@
-"""存储层 - ChromaDB 向量存储（纯向量 + SQLite busy 自动重试 + 并发控制）"""
+"""存储层 - ChromaDB 向量存储（纯向量 + SQLite busy 自动重试 + 并发控制）."""
 import logging as _logging
 import os as _chroma_os
 import threading
 import time as _time
 from pathlib import Path
-from typing import Optional
 
 _chroma_logger = _logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ def _retry_busy(op, max_retries=5, delay=0.2):
 
 
 class _CerebrateEmbeddingFunction:
-    """ChromaDB custom embedding function bridging EmbeddingEngine"""
+    """ChromaDB custom embedding function bridging EmbeddingEngine."""
 
     def __init__(self, engine):
         self._engine = engine
@@ -40,18 +39,19 @@ class _CerebrateEmbeddingFunction:
 
 
 class ChromaStore:
-    """Vector storage wrapper managing a single ChromaDB collection.
+    """
+    Vector storage wrapper managing a single ChromaDB collection.
 
     Concurrency: _db_semaphore limits concurrent DB operations to prevent
     SQLite connection exhaustion under ThreadingHTTPServer load.
     """
 
-    _db_semaphore: Optional[threading.BoundedSemaphore] = None
+    _db_semaphore: threading.BoundedSemaphore | None = None
     _sem_lock = threading.Lock()
 
     @classmethod
     def _semaphore(cls) -> threading.BoundedSemaphore:
-        """惰性初始化 DB 并发信号量（值来自 config.db_semaphore，可配置调大）。"""
+        """惰性初始化 DB 并发信号量（值来自 config.db_semaphore，可配置调大）。."""
         if cls._db_semaphore is None:
             with cls._sem_lock:
                 if cls._db_semaphore is None:
@@ -73,6 +73,7 @@ class ChromaStore:
 
     @property
     def embedding_mode(self) -> str:
+        """返回底层 embedding 引擎模式（无引擎时为 unknown）。."""
         return self._engine.mode if self._engine else "unknown"
 
     def _init(self):
@@ -115,7 +116,13 @@ class ChromaStore:
     # ==================== Write ====================
 
     def add(self, doc_id: str, text: str, metadata: dict,
-            embedding: Optional[list[float]] = None) -> str:
+            embedding: list[float] | None = None) -> str:
+        """
+        新增一条文档到集合。.
+
+        doc_id 重复会抛异常（去重由调用方保证）；返回 doc_id。
+        受并发信号量与写锁保护，ChromaDB 繁忙时自动重试。
+        """
         embeddings = None
         if embedding:
             embeddings = [embedding]
@@ -132,7 +139,12 @@ class ChromaStore:
         return _retry_busy(_add)
 
     def upsert(self, doc_id: str, text: str, metadata: dict,
-               embedding: Optional[list[float]] = None):
+               embedding: list[float] | None = None):
+        """
+        新增或覆盖一条文档（doc_id 已存在则更新）。.
+
+        受并发信号量与写锁保护，ChromaDB 繁忙时自动重试。
+        """
         embeddings = None
         if embedding:
             embeddings = [embedding]
@@ -150,8 +162,14 @@ class ChromaStore:
     # ==================== Query ====================
 
     def search(self, query: str, top_k: int = 10,
-               where: Optional[dict] = None,
-               query_embedding: Optional[list[float]] = None) -> list[dict]:
+               where: dict | None = None,
+               query_embedding: list[float] | None = None) -> list[dict]:
+        """
+        语义检索集合，返回命中项列表（含 id/metadata/document/distance/embedding）。.
+
+        优先使用调用方传入的 query_embedding，其次引擎编码，最后回退文本查询；
+        where 用于元数据过滤，ChromaDB 繁忙时自动重试。
+        """
         def _search():
             with ChromaStore._semaphore():
                 if query_embedding:
@@ -199,7 +217,8 @@ class ChromaStore:
 
     # ==================== Read ====================
 
-    def get(self, doc_id: str) -> Optional[dict]:
+    def get(self, doc_id: str) -> dict | None:
+        """按 doc_id 读取文档（含元数据/文本/向量），不存在时返回 None。."""
         def _get():
             with ChromaStore._semaphore():
                 results = self._collection.get(
@@ -221,6 +240,7 @@ class ChromaStore:
         return _retry_busy(_get)
 
     def get_all_ids(self) -> list[str]:
+        """返回集合内全部 doc_id 列表。."""
         def _get_ids():
             with ChromaStore._semaphore():
                 results = self._collection.get(include=[])
@@ -231,6 +251,7 @@ class ChromaStore:
     # ==================== Delete ====================
 
     def delete(self, doc_id: str):
+        """按 doc_id 删除文档。."""
         def _del():
             with ChromaStore._semaphore(), self._write_lock:
                 self._collection.delete(ids=[doc_id])
@@ -239,14 +260,15 @@ class ChromaStore:
     # ==================== Stats ====================
 
     def count(self) -> int:
+        """返回集合内文档总数。."""
         def _count():
             with ChromaStore._semaphore():
                 return self._collection.count()
         return _retry_busy(_count)
 
-    def get_all_metadata(self, where: Optional[dict] = None,
+    def get_all_metadata(self, where: dict | None = None,
                          limit: int = 1000) -> list[dict]:
-        """批量读取元数据，受 _db_semaphore 和 _retry_busy 保护"""
+        """批量读取元数据，受 _db_semaphore 和 _retry_busy 保护."""
         def _get():
             with ChromaStore._semaphore():
                 results = self._collection.get(
@@ -257,7 +279,8 @@ class ChromaStore:
         return _retry_busy(_get)
 
     def get_items_by_where(self, where: dict, limit: int = 100) -> list[dict]:
-        """按元数据条件搜索完整条目（含文档文本），不进行向量搜索
+        """
+        按元数据条件搜索完整条目（含文档文本），不进行向量搜索.
 
         Args:
             where: ChromaDB 元数据过滤条件，如 {"doc_group_id": "abc123"}
@@ -265,6 +288,7 @@ class ChromaStore:
 
         Returns:
             [{"id": ..., "metadata": ..., "document": ..., "embedding": ...}, ...]
+
         """
         def _get():
             with ChromaStore._semaphore():

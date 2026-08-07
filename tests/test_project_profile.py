@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -272,8 +272,9 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_harvest_code_fusion(self):
         """代码养料收割：真实代码 AST → 画像骨架（数据模型字段/端点真实）。"""
-        import tempfile, textwrap
+        import textwrap
         from pathlib import Path
+
         from cerebrate.tools.code_harvest import harvest_project
         proj = Path(self.tmp.name) / "demo_project"
         (proj / "app").mkdir(parents=True)
@@ -350,8 +351,9 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_code_sync_roundtrip(self):
         """代码同步闭环：本地打包 → 服务器安全解压 → harvest → 画像。"""
-        import tempfile, textwrap
+        import textwrap
         from pathlib import Path
+
         from cerebrate.config import config
         from cerebrate.tools.code_sync import build_package, receive_package
         proj = Path(self.tmp.name) / "sync_project"
@@ -386,11 +388,10 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_code_sync_incremental(self):
         """增量同步：二次 sync 只传变更/新增，删除文件进入 delete_list。"""
-        import tempfile, textwrap
         from pathlib import Path
+
         from cerebrate.config import config
-        from cerebrate.tools.code_sync import (
-            build_package, receive_package)
+        from cerebrate.tools.code_sync import build_package, receive_package
         proj = Path(self.tmp.name) / "incr_project"
         (proj / "src").mkdir(parents=True)
         (proj / "src" / "a.py").write_text("A = 1", encoding="utf-8")
@@ -440,10 +441,9 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_verify_consistency(self):
         """一致性校验：code_hint 漂移检出；无 harvest 时提示。"""
-        import tempfile, textwrap
         from pathlib import Path
-        from cerebrate.tools.code_harvest import (
-            harvest_project, save_harvest)
+
+        from cerebrate.tools.code_harvest import harvest_project, save_harvest
         from cerebrate.tools.project_profile import ProfileStore
         proj = Path(self.tmp.name) / "verify_project"
         (proj / "app").mkdir(parents=True)
@@ -476,11 +476,11 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_multi_branch_isolation(self):
         """多分支同步隔离：同项目不同分支代码互不覆盖，harvest 按分支。"""
-        import tempfile, textwrap
         from pathlib import Path
+
         from cerebrate.config import config
-        from cerebrate.tools.code_sync import build_package, receive_package
         from cerebrate.tools.code_harvest import load_harvest
+        from cerebrate.tools.code_sync import build_package, receive_package
         proj = Path(self.tmp.name) / "branch_project"
         (proj / "src").mkdir(parents=True)
         (proj / "src" / "master_only.py").write_text(
@@ -516,9 +516,10 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_git_branch_inference(self):
         """git 分支自动推断：build_package 无 branch 时从 git 获取当前分支。"""
-        import subprocess, tempfile
+        import subprocess
         from pathlib import Path
-        from cerebrate.tools.code_sync import build_package, _safe_branch
+
+        from cerebrate.tools.code_sync import _safe_branch, build_package
         self.assertEqual(_safe_branch("feature/dob-v2"), "feature-dob-v2")
         proj = Path(self.tmp.name) / "git_project"
         proj.mkdir()
@@ -538,8 +539,10 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_harvest_push_no_code(self):
         """结构 push：本地 harvest → push 结构（不含源代码内容），服务端可 verify。"""
-        import json, tempfile, textwrap
+        import json
+        import textwrap
         from pathlib import Path
+
         from cerebrate.tools.code_harvest import harvest_project
         from cerebrate.tools.project_profile import ProfileStore
         proj = Path(self.tmp.name) / "push_project"
@@ -610,8 +613,8 @@ class ProjectProfileTests(unittest.TestCase):
 
     def test_branch_diff(self):
         """分支差异：两分支 harvest 结构差异告知冲突点。"""
-        import tempfile, textwrap
         from pathlib import Path
+
         from cerebrate.tools.code_harvest import harvest_project
         proj = Path(self.tmp.name) / "diff_project"
         (proj / "a").mkdir(parents=True)

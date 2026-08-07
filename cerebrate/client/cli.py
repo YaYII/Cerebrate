@@ -4,8 +4,8 @@ import argparse
 import json
 import os
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -35,16 +35,19 @@ def client_request(url: str, method: str, path: str, body: dict = None) -> dict:
 
 
 def output(result: dict):
+    """打印结果 JSON（格式化），status=error 时以退出码 1 结束。."""
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if result.get("status") == "error":
         sys.exit(1)
 
 
 def cmd_sense(args):
+    """感知虫群状态（GET /v1/sense）。."""
     output(client_request(args.url, "GET", "/v1/sense"))
 
 
 def cmd_query(args):
+    """语义查询记忆（POST /v1/query）。."""
     output(client_request(args.url, "POST", "/v1/query", {
         "query": args.query,
         "agent_id": args.agent_id or args.id or "cli",
@@ -56,7 +59,7 @@ def cmd_query(args):
 
 
 def cmd_search(args):
-    """渐进式披露第 1 层：紧凑索引（不含全文，含 token 成本）"""
+    """渐进式披露第 1 层：紧凑索引（不含全文，含 token 成本）."""
     output(client_request(args.url, "POST", "/v1/search", {
         "query": args.query,
         "agent_id": args.agent_id or args.id or "cli",
@@ -69,12 +72,12 @@ def cmd_search(args):
 
 
 def cmd_fulltext_rebuild(args):
-    """全量重建 FTS5 全文索引"""
+    """全量重建 FTS5 全文索引."""
     output(client_request(args.url, "POST", "/v1/fulltext/rebuild", {}))
 
 
 def cmd_project_context(args):
-    """生成/读取项目级上下文（Phase 5 第 2 项）"""
+    """生成/读取项目级上下文（Phase 5 第 2 项）."""
     output(client_request(args.url, "POST", "/v1/project/context", {
         "project": args.project,
         "action": args.action,
@@ -82,7 +85,7 @@ def cmd_project_context(args):
     }))
 
 def cmd_project_profile(args):
-    """业务画像（数据世界）：构建/读取项目领域树+依赖导航"""
+    """业务画像（数据世界）：构建/读取项目领域树+依赖导航."""
     body = {
         "project": args.project,
         "action": args.action,
@@ -93,14 +96,15 @@ def cmd_project_profile(args):
     output(client_request(args.url, "POST", "/v1/project/profile", body))
 
 def cmd_project_navigate(args):
-    """业务画像导航：定位目标域/实体，避免全量扫描代码"""
+    """业务画像导航：定位目标域/实体，避免全量扫描代码."""
     output(client_request(args.url, "POST", "/v1/project/navigate", {
         "project": args.project,
         "target": args.target,
     }))
 
 def cmd_project_harvest(args):
-    """代码结构养料收割（deprecated，兼容入口）。
+    """
+    代码结构养料收割（deprecated，兼容入口）。.
 
     旧实现把本地 dir 交给服务端扫描（代码离开本地），违反
     「代码不离开本地」架构红线；现转调 harvest-push（本地 AST → 只推结构）。
@@ -111,7 +115,7 @@ def cmd_project_harvest(args):
     cmd_harvest_push(args)
 
 def cmd_code_sync(args):
-    """代码同步：把本地完整项目代码打包上传到脑虫服务器（→代码仓→harvest）"""
+    """代码同步：把本地完整项目代码打包上传到脑虫服务器（→代码仓→harvest）."""
     from cerebrate.tools.code_sync import build_package
     root = Path(args.dir).resolve()
     if not root.is_dir():
@@ -141,8 +145,8 @@ def cmd_code_sync(args):
     output(resp)
 
 def cmd_harvest_push(args):
-    """结构 push（代码不离开本地）：本地 AST 分析 → 只把结构结果给脑虫"""
-    from cerebrate.tools.code_harvest import harvest_project, _safe_branch
+    """结构 push（代码不离开本地）：本地 AST 分析 → 只把结构结果给脑虫."""
+    from cerebrate.tools.code_harvest import _safe_branch, harvest_project
     from cerebrate.tools.code_sync import _git_branch
     root = Path(args.dir).resolve()
     if not root.is_dir():
@@ -169,7 +173,7 @@ def cmd_harvest_push(args):
     output(resp)
 
 def cmd_project_work(args):
-    """多人协作感知：工作声明/冲突检测"""
+    """多人协作感知：工作声明/冲突检测."""
     output(client_request(args.url, "POST", "/v1/project/work", {
         "project": args.project,
         "action": args.action,
@@ -181,7 +185,7 @@ def cmd_project_work(args):
 
 
 def cmd_timeline(args):
-    """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文"""
+    """渐进式披露第 2 层：围绕 anchor 记忆的时序上下文."""
     output(client_request(args.url, "POST", "/v1/timeline", {
         "anchor": args.anchor or None,
         "query": args.query or None,
@@ -193,6 +197,7 @@ def cmd_timeline(args):
 
 
 def cmd_propose(args):
+    """提交候选记忆到虫群（POST /v1/memories/propose）。."""
     body = {
         "title": args.title,
         "content": args.content,
@@ -210,10 +215,12 @@ def cmd_propose(args):
 
 
 def cmd_recall(args):
+    """读取个人偏好与上下文缓存（GET /v1/personal）。."""
     output(client_request(args.url, "GET", "/v1/personal"))
 
 
 def cmd_remember(args):
+    """写入个人偏好（POST /v1/personal）。."""
     output(client_request(args.url, "POST", "/v1/personal", {
         "user": args.user,
         "key": args.key,
@@ -223,10 +230,12 @@ def cmd_remember(args):
 
 
 def cmd_evolve(args):
+    """触发服务端进化（POST /v1/evolve）。."""
     output(client_request(args.url, "POST", "/v1/evolve"))
 
 
 def cmd_register(args):
+    """注册当前智能体到虫群（POST /v1/agents/register）。."""
     output(client_request(args.url, "POST", "/v1/agents/register", {
         "agent_id": args.agent_id or args.id,
         "agent_type": args.type,
@@ -235,30 +244,38 @@ def cmd_register(args):
 
 
 def cmd_auth_rebind(args):
-    """管理员：为已注册用户重新生成绑定链接（需 master token）。"""
+    """管理员：为已注册用户重新生成绑定链接（需 master token）。."""
     output(client_request(args.url, "POST", "/v1/auth/rebind", {
         "username": args.username,
     }))
 
 
 def cmd_events(args):
+    """读取事件日志（GET /v1/events，按 cursor/limit 分页）。."""
     output(client_request(args.url, "GET",
                           f"/v1/events?cursor={args.cursor}&limit={args.limit}"))
 
 
 def cmd_doctrines(args):
+    """读取脑虫教条（GET /v1/doctrines）。."""
     output(client_request(args.url, "GET", "/v1/doctrines"))
 
 
 def cmd_dedup(args):
+    """执行记忆去重检查（POST /v1/memories/dedup-check）。."""
     output(client_request(args.url, "POST", "/v1/memories/dedup-check",
                           {"limit": args.limit}))
 
 
 def cmd_soul(args):
+    """
+    读取或设置工程化思维灵魂（soul）。.
+
+    action=set 时校验内容非空并 POST /v1/soul/set；否则 GET /v1/soul 读取。
+    """
     if args.action == "set":
         if args.content_file:
-            with open(args.content_file, "r", encoding="utf-8") as f:
+            with open(args.content_file, encoding="utf-8") as f:
                 content = f.read()
         else:
             content = args.content or ""
@@ -279,6 +296,7 @@ def cmd_soul(args):
 
 
 def cmd_vote(args):
+    """对记忆进行共识投票（POST /v1/consensus/vote）。."""
     output(client_request(args.url, "POST", "/v1/consensus/vote", {
         "memory_id": args.memory_id,
         "agent": args.agent_id or args.id or "cli",
@@ -289,6 +307,7 @@ def cmd_vote(args):
 
 
 def cmd_distill(args):
+    """执行技能蒸馏（POST /v1/distill）。."""
     resp = client_request(args.url, "POST", "/v1/distill", {
         "topic": args.topic,
         "limit": args.limit,
@@ -322,6 +341,7 @@ def cmd_distill(args):
 
 
 def cmd_use_start(args):
+    """开始跟踪一次记忆复用（POST /v1/usages/start）。."""
     output(client_request(args.url, "POST", "/v1/usages/start", {
         "memory_id": args.memory_id,
         "agent": args.agent_id or args.id or "cli",
@@ -331,6 +351,7 @@ def cmd_use_start(args):
 
 
 def cmd_use_finish(args):
+    """结束记忆复用跟踪并回报结果（POST /v1/usages/finish）。."""
     output(client_request(args.url, "POST", "/v1/usages/finish", {
         "usage_id": args.usage_id,
         "outcome": args.outcome,
@@ -339,25 +360,29 @@ def cmd_use_finish(args):
 
 
 def cmd_llm_status(args):
+    """查看服务端 LLM 状态（GET /v1/llm/status）。."""
     output(client_request(args.url, "GET", "/v1/llm/status"))
 
 
 def cmd_brain_assess(args):
+    """触发元认知评估（GET /v1/brain/assess）。."""
     output(client_request(args.url, "GET", "/v1/brain/assess"))
 
 
 def cmd_consensus(args):
+    """查看某条记忆的共识状态（GET /v1/consensus/{memory_id}）。."""
     output(client_request(args.url, "GET", f"/v1/consensus/{args.memory_id}"))
 
 
 def cmd_memory_get(args):
+    """读取记忆完整详情（GET /v1/memories/{memory_id}）。."""
     output(client_request(args.url, "GET", f"/v1/memories/{args.memory_id}"))
 
 
 def cmd_ingest(args):
-    """知识蒸馏吸入：将本地文档批量吸入脑虫知识库。"""
-    from cerebrate.tools.ingest import ingest_directory
+    """知识蒸馏吸入：将本地文档批量吸入脑虫知识库。."""
     import cerebrate.tools.ingest as _ingest_mod
+    from cerebrate.tools.ingest import ingest_directory
     # 传递远程 URL 和 Token，使 ingest_directory 内部 _api_post 发到正确地址
     _ingest_mod._SERVER_URL = args.url
     if hasattr(args, 'token') and args.token:
@@ -380,6 +405,7 @@ def cmd_ingest(args):
 
 
 def main(argv=None):
+    """客户端 CLI 入口：argparse 定义子命令并分发执行。."""
     parser = argparse.ArgumentParser(
         description="Cerebrate v5 — HTTP Client CLI")
     parser.add_argument("--url", default="http://127.0.0.1:8765",

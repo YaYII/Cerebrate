@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Cerebrate v5 server CLI.
+"""
+Cerebrate v5 server CLI.
 
 This module belongs to the authoritative Brain Server project. Commands here
 may start the server or perform local server maintenance.
@@ -14,7 +15,10 @@ from cerebrate.protocol import err
 
 
 class CerebrateArgumentParser(argparse.ArgumentParser):
+    """服务端参数解析器：解析失败时输出协议 JSON 错误而非打印 usage。."""
+
     def error(self, message):
+        """参数错误处理：输出错误响应 JSON（code=400）并以退出码 1 结束。."""
         _out(err(message, code=400, protocol="v5"))
 
 
@@ -24,12 +28,14 @@ def _out(payload: dict):
 
 
 def cmd_serve(args):
+    """启动权威脑虫服务端（serve）。."""
     from cerebrate.server.http import serve
     serve(args.host, args.port, quiet=args.quiet)
 
 
 def cmd_migrate(args):
-    from cerebrate.migrate import migrate_all, export_seeds, reindex_from_seeds
+    """迁移命令分发：导出种子 / 重索引 / 指定集合迁移。."""
+    from cerebrate.migrate import export_seeds, migrate_all, reindex_from_seeds
     if args.export_seeds:
         result = export_seeds()
     elif args.reindex:
@@ -47,6 +53,7 @@ def _migrate_swarm(dry_run: bool) -> int:
 
 
 def main(argv=None):
+    """服务端 CLI 入口：定义 serve/migrate 子命令并分发。."""
     parser = CerebrateArgumentParser(description="Cerebrate v5 - Brain Server")
     sub = parser.add_subparsers(dest="command")
 

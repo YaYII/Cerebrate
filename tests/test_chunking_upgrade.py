@@ -7,16 +7,14 @@
   4. Swarm 旧行为不变 — 短文档不分块
   5. 端到端记忆管线 — 存储/检索/更新/删除
 """
-import importlib.util
-import os
 import tempfile
 import unittest
 from pathlib import Path
 
 
 def configure_temp_memory(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -605,9 +603,9 @@ class QueryRewritingTests(unittest.TestCase):
 
     def test_decision_router_calls_rewriter(self):
         """DecisionRouter 调用重写器"""
+        from cerebrate.brain.decision import DecisionRouter
         from cerebrate.config import config
         from cerebrate.memory.manager import MemoryManager
-        from cerebrate.brain.decision import DecisionRouter
 
         mm = MemoryManager(config.personal_path, config.swarm_path, config.knowledge_path)
         router = DecisionRouter(mm)
@@ -761,8 +759,9 @@ class MetaStoreTests(unittest.TestCase):
     def test_swarm_sync_no_pg(self):
         """swarm 操作在无 PG 时正常进行"""
         import tempfile
-        from cerebrate.config import config
+
         import cerebrate.core.embedding as embedding
+        from cerebrate.config import config
         from cerebrate.memory.swarm import SwarmMemory
 
         tmp = tempfile.TemporaryDirectory()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""cerebrate/tools/project_context.py — 项目级上下文生成（Phase 5 第 2 项）
+"""
+cerebrate/tools/project_context.py — 项目级上下文生成（Phase 5 第 2 项）.
 
 为 scope=project 的项目生成浓缩版上下文文件（对齐 claude-mem Folder Context）：
   - 聚合该项目的记忆 + 通用记忆（scope 隔离，绝不混入其他项目）
@@ -12,9 +13,8 @@
   - 只读项目记忆，不改写群体记忆
 """
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 
@@ -32,7 +32,7 @@ def _safe_split(val, separator=","):
 
 
 class ProjectContext:
-    """项目级上下文：聚合项目记忆生成浓缩文件（服务端侧）。"""
+    """项目级上下文：聚合项目记忆生成浓缩文件（服务端侧）。."""
 
     def __init__(self, manager):
         self.mm = manager
@@ -43,7 +43,7 @@ class ProjectContext:
         return ctx_dir
 
     def _collect(self, project_id: str, limit: int = 50) -> list[dict]:
-        """收集项目记忆 + 通用记忆（scope 隔离），按 created 倒序取最近。"""
+        """收集项目记忆 + 通用记忆（scope 隔离），按 created 倒序取最近。."""
         swarm = self.mm.swarm
         items = []
         for mid in swarm.get_all_memory_ids():
@@ -78,10 +78,9 @@ class ProjectContext:
         return items[:limit]
 
     def _render(self, project_id: str, items: list[dict]) -> str:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         lines = [
-            "<!-- 自动生成于 %s | Cerebrate Project Context（请勿手动编辑标签内内容） -->"
-            % now,
+            f"<!-- 自动生成于 {now} | Cerebrate Project Context（请勿手动编辑标签内内容） -->",
             f'<cerebrate-context project="{project_id}">',
             "",
             f"# 项目上下文: {project_id}",
@@ -110,7 +109,7 @@ class ProjectContext:
         return "\n".join(lines)
 
     def build(self, project_id: str, limit: int = 50) -> dict:
-        """生成（或更新）项目上下文文件，返回文件路径与统计。"""
+        """生成（或更新）项目上下文文件，返回文件路径与统计。."""
         if not project_id:
             raise ValueError("project_id is required")
         items = self._collect(project_id, limit=limit)
@@ -125,11 +124,11 @@ class ProjectContext:
             "path": str(target),
             "memory_count": len(items),
             "categories": sorted({it["category"] for it in items}),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
-    def read(self, project_id: str) -> Optional[dict]:
-        """读取已生成的项目上下文文件（不存在返回 None）。"""
+    def read(self, project_id: str) -> dict | None:
+        """读取已生成的项目上下文文件（不存在返回 None）。."""
         target = self._context_dir() / f"{project_id}.md"
         if not target.exists():
             return None
@@ -140,7 +139,7 @@ class ProjectContext:
         }
 
     def list_projects(self) -> list[str]:
-        """列出已有上下文文件的项目。"""
+        """列出已有上下文文件的项目。."""
         ctx_dir = self._context_dir()
         if not ctx_dir.exists():
             return []

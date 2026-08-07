@@ -1,4 +1,5 @@
-"""智能语义分块器 — 将长文档切分为语义完整的块
+r"""
+智能语义分块器 — 将长文档切分为语义完整的块.
 
 分块策略（三阶降级）:
   1. 按 Markdown 标题（## / ###）分割
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(text: str) -> int:
-    """粗略估计文本的 token 数（BGE-M3 中文约 1.5 字/token）"""
+    """粗略估计文本的 token 数（BGE-M3 中文约 1.5 字/token）."""
     # 中文字符
     cjk = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]', text))
     # 英文单词
@@ -28,7 +29,7 @@ def estimate_tokens(text: str) -> int:
 
 
 def split_by_headings(text: str, max_chars: int) -> list[str]:
-    """按 Markdown 二级标题分割（##），超过 max_chars 的段落在段落级再分"""
+    """按 Markdown 二级标题分割（##），超过 max_chars 的段落在段落级再分."""
     lines = text.split("\n")
     chunks = []
     current = []
@@ -73,7 +74,7 @@ def split_by_headings(text: str, max_chars: int) -> list[str]:
 
 
 def split_by_paragraphs(text: str, max_chars: int) -> list[str]:
-    """按段落（连续空行）分割，单个超长段落再等长切"""
+    """按段落（连续空行）分割，单个超长段落再等长切."""
     paragraphs = re.split(r'\n\s*\n', text)
     chunks = []
     current = []
@@ -112,7 +113,7 @@ def split_by_paragraphs(text: str, max_chars: int) -> list[str]:
 
 
 def split_equal(text: str, max_chars: int, overlap_chars: int = 100) -> list[str]:
-    """等长切割 + 尾部上下文重叠"""
+    """等长切割 + 尾部上下文重叠."""
     if len(text) <= max_chars:
         return [text]
 
@@ -139,7 +140,8 @@ def chunk_document(content: str,
                    max_chars: int = 8000,
                    min_chars: int = 200,
                    overlap_chars: int = 100) -> list[dict]:
-    """将文档内容分割为语义块，并追踪每块在原文中的字符偏移
+    """
+    将文档内容分割为语义块，并追踪每块在原文中的字符偏移.
 
     Args:
         content: 文档文本
@@ -150,6 +152,7 @@ def chunk_document(content: str,
     Returns:
         [{"index": 0, "text": "...", "total": N,
           "start_char": 0, "end_char": 200}, ...]
+
     """
     if not content or not content.strip():
         return [{"index": 0, "text": content or "", "total": 1,

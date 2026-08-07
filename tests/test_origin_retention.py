@@ -7,14 +7,15 @@
 import sys
 import tempfile
 import unittest
+from datetime import UTC
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_memory(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -88,12 +89,11 @@ class OriginRetentionTests(unittest.TestCase):
 
     def test_positive_days_old_records_backup_then_delete(self):
         # 把一条记录的时间改写成 400 天前，验证正数天数走「先备份再删除」
-        import json
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         item = self.origin._store.get(self.oid1)
         old_meta = dict(item["metadata"])
         old_meta["recorded_at"] = (
-            datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+            datetime.now(UTC) - timedelta(days=400)).isoformat()
         self.origin._store.upsert(self.oid1, item["document"], old_meta)
 
         result = self.origin.cleanup_expired(

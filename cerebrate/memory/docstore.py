@@ -1,4 +1,5 @@
-"""文档存储层 — 按类型分层 + 子目录 content/meta
+"""
+文档存储层 — 按类型分层 + 子目录 content/meta.
 
 目录结构:
   {storage_path}/
@@ -27,7 +28,6 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +43,13 @@ LIFE_STAGE_TO_TYPE = {
 
 
 def doc_type_for(life_stage: str) -> str:
-    """根据生命周期返回对应的子目录类型。"""
+    """根据生命周期返回对应的子目录类型。."""
     return LIFE_STAGE_TO_TYPE.get(life_stage, "memory")
 
 
 class DocumentStore:
-    """文件系统文档存储（按类型分层）
+    """
+    文件系统文档存储（按类型分层）.
 
     每篇文档存为两个文件：
       {type}/content/{doc_id}.md     ← 原始内容（纯文本，无 JSON 包裹）
@@ -121,12 +122,14 @@ class DocumentStore:
     # ═══════════════════════════════════════════════
 
     def put(self, doc_id: str, data: dict, doc_type: str = "memory") -> str:
-        """存储或更新文档。
+        """
+        存储或更新文档。.
 
         Args:
             doc_id: 文档 ID
             data: 数据字典（含 content / 元数据）
             doc_type: 子目录类型: memory / skill / evolution
+
         """
         content = self._pop_content(data)
         metadata = data
@@ -166,8 +169,9 @@ class DocumentStore:
     # 读
     # ═══════════════════════════════════════════════
 
-    def get(self, doc_id: str, doc_type: Optional[str] = None) -> Optional[dict]:
-        """读取文档。
+    def get(self, doc_id: str, doc_type: str | None = None) -> dict | None:
+        """
+        读取文档。.
 
         如果指定 doc_type，只查对应子目录。
         如果未指定，按 memory → skill → evolution → 扁平 顺序尝试。
@@ -220,8 +224,8 @@ class DocumentStore:
 
         return result if found else None
 
-    def get_content(self, doc_id: str, doc_type: Optional[str] = None) -> Optional[str]:
-        """仅读取 .md 内容。"""
+    def get_content(self, doc_id: str, doc_type: str | None = None) -> str | None:
+        """仅读取 .md 内容。."""
         if doc_type:
             return self._read_file(
                 self._type_dirs[doc_type]["content"] / f"{doc_id}.md")
@@ -236,8 +240,8 @@ class DocumentStore:
             return self._read_file(flat)
         return None
 
-    def get_metadata(self, doc_id: str, doc_type: Optional[str] = None) -> Optional[dict]:
-        """仅读取 .json 元数据。"""
+    def get_metadata(self, doc_id: str, doc_type: str | None = None) -> dict | None:
+        """仅读取 .json 元数据。."""
         if doc_type:
             return self._read_json(self._type_dirs[doc_type]["meta"] / f"{doc_id}.json")
 
@@ -255,8 +259,8 @@ class DocumentStore:
     # 删
     # ═══════════════════════════════════════════════
 
-    def delete(self, doc_id: str, doc_type: Optional[str] = None) -> bool:
-        """删除文档。"""
+    def delete(self, doc_id: str, doc_type: str | None = None) -> bool:
+        """删除文档。."""
         found = False
         paths_to_check = []
 
@@ -297,6 +301,7 @@ class DocumentStore:
         return found
 
     def exists(self, doc_id: str) -> bool:
+        """判断 doc_id 是否存在于任何类型目录（content/meta）或存储根目录。."""
         if (self._type_dirs["memory"]["content"] / f"{doc_id}.md").exists():
             return True
         for t in self.ALL_TYPES:
@@ -309,6 +314,7 @@ class DocumentStore:
         return False
 
     def get_available_ids(self) -> list[str]:
+        """扫描全部类型目录，返回可用的 doc_id 列表（去重后排序）。."""
         ids = set()
         for t in self.ALL_TYPES:
             content_dir = self._type_dirs[t]["content"]
@@ -327,13 +333,13 @@ class DocumentStore:
     # 内部方法
     # ═══════════════════════════════════════════════
 
-    def _read_file(self, path) -> Optional[str]:
+    def _read_file(self, path) -> str | None:
         if path is None or not path.exists():
             return None
         with self._lock:
             return path.read_text(encoding='utf-8')
 
-    def _read_json(self, path) -> Optional[dict]:
+    def _read_json(self, path) -> dict | None:
         if path is None or not path.exists():
             return None
         try:

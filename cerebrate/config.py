@@ -1,13 +1,12 @@
-"""Cerebrate 配置管理 — 支持 .env 文件加载"""
+"""Cerebrate 配置管理 — 支持 .env 文件加载."""
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 
 def _load_dotenv():
-    """加载 .env 文件到 os.environ (不覆盖已有环境变量)"""
+    """加载 .env 文件到 os.environ (不覆盖已有环境变量)."""
     candidates = [
         Path(os.path.dirname(os.path.abspath(__file__))) / ".env",
         Path.cwd() / ".env",
@@ -32,6 +31,13 @@ _load_dotenv()
 
 @dataclass
 class CerebrateConfig:
+    """
+    全局配置（dataclass），集中管理路径/模型/服务端口等运行参数。.
+
+    字段支持从环境变量或 .env 文件覆盖（如 CEREBRATE_MEMORY_ROOT / CEREBRATE_CHROMA_PATH），
+    并提供 ensure_dirs 等方法在启动时准备目录结构。
+    """
+
     # 记忆存储路径
     memory_root: Path = field(
         default_factory=lambda: Path(os.environ.get(
@@ -227,8 +233,9 @@ class CerebrateConfig:
 config = CerebrateConfig()
 
 
-def in_evolution_window(now: Optional[datetime] = None) -> bool:
-    """判断当前时间是否在蒸馏窗口内（本地时区，默认 Asia/Macau UTC+8）。
+def in_evolution_window(now: datetime | None = None) -> bool:
+    """
+    判断当前时间是否在蒸馏窗口内（本地时区，默认 Asia/Macau UTC+8）。.
 
     v5.1.1 用户要求：蒸馏仅在每天 0:00-1:00（低谷 API 费用时段）运行，
     其他时间禁止蒸馏。scheduler 自动调度与 evolution.evolve(force=False)
@@ -241,10 +248,11 @@ def in_evolution_window(now: Optional[datetime] = None) -> bool:
         window 关闭（evolution_window_enabled=False）→ True（逃生门）
         本地小时在 [start_hour, end_hour) 内 → True
         否则 → False
+
     """
     if not config.evolution_window_enabled:
         return True
-    local = (now or datetime.now(timezone.utc)) + timedelta(
+    local = (now or datetime.now(UTC)) + timedelta(
         hours=config.evolution_window_tz_offset_hours)
     start = config.evolution_window_start_hour % 24
     end = config.evolution_window_end_hour % 24

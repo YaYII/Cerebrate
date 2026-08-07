@@ -9,14 +9,13 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "cerebrate.py"
 
 
 def configure_temp_memory(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root

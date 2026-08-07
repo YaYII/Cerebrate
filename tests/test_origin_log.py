@@ -1,5 +1,4 @@
 """原始记忆日志 OriginLog 单元测试 + 集成测试。"""
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,8 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def configure_temp_memory(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root

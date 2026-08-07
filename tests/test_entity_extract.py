@@ -6,7 +6,6 @@
   - 本地实体图谱读写与合并（持久化）
   - 已知图谱类型复用
 """
-import json
 import sys
 import tempfile
 import unittest
@@ -14,11 +13,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cerebrate.entity import (
-    extract_entities, load_store, save_store, update_store, extract_and_update,
-)
 from unittest import mock
+
 import cerebrate.mcp as mcp
+from cerebrate.entity import (
+    extract_and_update,
+    extract_entities,
+    load_store,
+    save_store,
+    update_store,
+)
 
 
 class ExtractEntitiesTests(unittest.TestCase):

@@ -1,0 +1,48 @@
+[project]
+name = "cerebrate"
+version = "5.2.1"
+description = "Cerebrate v5 — 脑虫记忆中枢（团队长期记忆 + 业务画像 + 本地实体化）"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["clients/node", "docs/archive"]
+
+[tool.ruff.lint]
+# 教科书级规范基线（2026-08-07 建立）：
+#   E/F/W   pycodestyle + pyflakes（错误/空白）
+#   I       import 排序
+#   UP      pyupgrade 现代化注解
+#   D       docstring 强制（public 函数/类必须写）
+# 刻意忽略（项目防御性设计，非缺陷）：
+#   BLE001 盲 except（项目大量 try/except 兜底，属容错设计）
+#   S110   try-except-pass（同上）
+#   PL/SIM/PERF 等（部分自动修复会改变行为，风险大于收益）
+select = [
+    "E", "F", "W", "I", "UP", "D",
+    "B",
+]
+ignore = [
+    "E501",       # 行长>100：既有 121 处，多为长注释/字符串，改风险大收益小
+    "BLE001",     # 盲 except：容错设计，有意保留
+    "S110",       # try-except-pass：同上
+    "B904",       # raise ... from：兜底路径无需链式
+    "D104",       # 包 __init__ 不需 docstring
+    "D105",       # 魔法方法不需 docstring
+    "D107",       # __init__ 不需 docstring
+    "D401",       # docstring 首行不强制祈使句
+    "D203",       # 与 D211 冲突（空行位置）
+    "D212",       # 与 D213 冲突（首行位置）
+    "D415",       # docstring 结尾句号不强制
+]
+
+[tool.ruff.lint.per-file-ignores]
+# MCP 工具描述长、表驱动，允许超长行
+"cerebrate/mcp.py" = ["E501"]
+# 测试代码：以可读/紧凑为主，不强制 docstring（方法名即文档）、允许紧凑断言
+"tests/*" = ["D", "E701", "E702", "E712", "E722", "F841", "UP022", "BLE001", "S110"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

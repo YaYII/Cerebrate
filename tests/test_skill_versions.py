@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -140,7 +140,7 @@ class SkillVersionsTests(unittest.TestCase):
         mid = self._create_skill("old")
         # 直接构造一个无 content 的版本历史
         import json
-        from cerebrate.config import config
+
         item = self.api.mm.swarm._store.get(mid)
         meta = item["metadata"]
         meta["skill_versions"] = json.dumps([

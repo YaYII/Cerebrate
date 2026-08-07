@@ -1,4 +1,5 @@
-"""业务画像（数据世界）：项目的领域树 + 实体关系 + 依赖导航。
+"""
+业务画像（数据世界）：项目的领域树 + 实体关系 + 依赖导航。.
 
 设计文档: docs/DESIGN_BUSINESS_PROFILE_DATAWORLD_20260804.md
 
@@ -16,9 +17,8 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 
@@ -34,7 +34,7 @@ def _safe_split(val, separator=","):
 
 
 def _slug(text: str) -> str:
-    """转为安全的 id（小写字母数字连字符，支持中文保留）。"""
+    """转为安全的 id（小写字母数字连字符，支持中文保留）。."""
     import re
     s = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff_-]+", "-", str(text).strip().lower())
     s = re.sub(r"-{2,}", "-", s).strip("-")
@@ -57,7 +57,7 @@ def _match(node: dict, target: str) -> bool:
 
 
 class ProfileStore:
-    """业务画像存储：读写、构建草稿、导航、Markdown 渲染。"""
+    """业务画像存储：读写、构建草稿、导航、Markdown 渲染。."""
 
     def __init__(self, manager):
         self.mm = manager
@@ -78,7 +78,8 @@ class ProfileStore:
         return self._profile_dir() / f"{project_id}.draft.json"
 
     # ── CRUD ──
-    def read(self, project_id: str, level: str = "detail") -> Optional[dict]:
+    def read(self, project_id: str, level: str = "detail") -> dict | None:
+        """读取项目业务画像（JSON），不存在或解析失败返回 None。."""
         p = self._path(project_id)
         if not p.exists():
             return None
@@ -94,7 +95,8 @@ class ProfileStore:
         return profile
 
     def _render_level(self, profile: dict, level: str) -> dict:
-        """分层披露（渐进式披露思想）：
+        """
+        分层披露（渐进式披露思想）：.
 
         - summary（宏观）: 只含域级元数据（id/name/描述/实体数/记忆数/依赖），
           与实体细节完全解耦——微观调整不影响宏观走向，宏观可自由调控。
@@ -164,12 +166,12 @@ class ProfileStore:
         return result
 
     def save(self, project_id: str, profile: dict) -> dict:
-        """保存（人工确认版）画像：version+1，原子写 JSON + 渲染 Markdown。"""
+        """保存（人工确认版）画像：version+1，原子写 JSON + 渲染 Markdown。."""
         profile = self._sanitize(profile)
         profile.setdefault("project_id", project_id)
         profile["project_id"] = project_id
         profile["status"] = "confirmed"
-        profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+        profile["updated_at"] = datetime.now(UTC).isoformat()
         profile["version"] = int(profile.get("version", 0)) + 1
         target = self._path(project_id)
         tmp = target.with_suffix(".json.tmp")
@@ -190,7 +192,7 @@ class ProfileStore:
 
     @staticmethod
     def _sanitize(profile: dict) -> dict:
-        """规范化画像结构：LLM 输出可能含 None/非法类型，统一清洗防渲染崩溃。"""
+        """规范化画像结构：LLM 输出可能含 None/非法类型，统一清洗防渲染崩溃。."""
         profile = dict(profile or {})
         for f in profile.get("flows", []) or []:
             if not isinstance(f, dict):
@@ -222,6 +224,7 @@ class ProfileStore:
         return profile
 
     def list_projects(self) -> list[str]:
+        """列出已确认（非草稿）画像的项目 ID，按名称排序。."""
         d = self._profile_dir()
         if not d.exists():
             return []
@@ -229,7 +232,8 @@ class ProfileStore:
                       if not p.name.endswith(".draft.json"))
 
     # ── 草稿态（sync 自动生成，人工确认后才覆盖 confirmed）──
-    def read_draft(self, project_id: str) -> Optional[dict]:
+    def read_draft(self, project_id: str) -> dict | None:
+        """读取项目画像草稿（sync 自动生成，未确认版），不存在返回 None。."""
         p = self._draft_path(project_id)
         if not p.exists():
             return None
@@ -239,11 +243,11 @@ class ProfileStore:
             return None
 
     def save_draft(self, project_id: str, draft: dict) -> dict:
-        """保存草稿（不覆盖人工确认版）；promote 时才覆盖 confirmed。"""
+        """保存草稿（不覆盖人工确认版）；promote 时才覆盖 confirmed。."""
         draft = self._sanitize(draft)
         draft["project_id"] = project_id
         draft["status"] = "draft"
-        draft["updated_at"] = datetime.now(timezone.utc).isoformat()
+        draft["updated_at"] = datetime.now(UTC).isoformat()
         draft["version"] = int(draft.get("version", 0)) + 1
         target = self._draft_path(project_id)
         tmp = target.with_suffix(".json.tmp")
@@ -254,7 +258,7 @@ class ProfileStore:
                 "status": "draft", "path": str(target)}
 
     def promote(self, project_id: str) -> dict:
-        """把草稿提升为人工确认版（覆盖 confirmed）。"""
+        """把草稿提升为人工确认版（覆盖 confirmed）。."""
         draft = self.read_draft(project_id)
         if not draft:
             return {"ok": False, "reason": "no_draft", "project_id": project_id}
@@ -271,7 +275,8 @@ class ProfileStore:
         return {"ok": True, **result}
 
     def fix_drifted_hints(self, project_id: str, branch: str = "") -> dict:
-        """清洗漂移 code_hint（LLM 幻觉路径）：verify 报漂移的实体清空 code_hint。
+        """
+        清洗漂移 code_hint（LLM 幻觉路径）：verify 报漂移的实体清空 code_hint。.
 
         语义域实体（业务概念）无单一代码文件，清空后 verify 通过；
         真实代码域（harvest 生成，code_hint 为真实路径）不受影响。
@@ -293,14 +298,14 @@ class ProfileStore:
                     e["code_hint"] = ""
                     fixed += 1
         if fixed:
-            profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+            profile["updated_at"] = datetime.now(UTC).isoformat()
             profile["version"] = int(profile.get("version", 0))
             self.save(project_id, profile)
         return {"ok": True, "fixed": fixed, "remaining_issues": v.get("issue_count", 0) - fixed}
 
     # ── 画像输入收集 ──
     def _collect_memories(self, project_id: str, limit: int = 200) -> dict:
-        """收集业务记忆（scope=project + project_id）与通用技术记忆。"""
+        """收集业务记忆（scope=project + project_id）与通用技术记忆。."""
         swarm = self.mm.swarm
         business, tech = [], []
         for mid in swarm.get_all_memory_ids():
@@ -332,9 +337,10 @@ class ProfileStore:
 
     # ── Phase 2: 构建草稿 ──
     def build_draft(self, project_id: str, limit: int = 200,
-                    llm_refine: Optional[bool] = None,
-                    harvest: Optional[dict] = None) -> dict:
-        """从业务记忆生成画像草稿（真实代码骨架 + 规则兜底 + 可选 LLM 精炼）。
+                    llm_refine: bool | None = None,
+                    harvest: dict | None = None) -> dict:
+        """
+        从业务记忆生成画像草稿（真实代码骨架 + 规则兜底 + 可选 LLM 精炼）。.
 
         融合优先级（企业级精度）:
           1. harvest（真实代码 AST 结构）→ domains/entities/endpoints 骨架
@@ -349,7 +355,7 @@ class ProfileStore:
             "project_id": project_id,
             "version": 0,
             "status": "draft",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "domains": [],
             "flows": [],
             "shared_tech": {"stack": [], "tech_memories": []},
@@ -382,7 +388,7 @@ class ProfileStore:
 
     @staticmethod
     def _harvest_domains(harvest: dict) -> list[dict]:
-        """从真实代码 AST 构建画像骨架：模块目录 → 域，数据模型 → 实体，端点挂载。"""
+        """从真实代码 AST 构建画像骨架：模块目录 → 域，数据模型 → 实体，端点挂载。."""
         modules = harvest.get("modules", [])
         data_models = harvest.get("data_models", [])
         endpoints = harvest.get("endpoints", [])
@@ -463,7 +469,7 @@ class ProfileStore:
         return mapping.get(category, category or "general")
 
     def _rule_domains(self, business: list[dict]) -> list[dict]:
-        """规则骨架：按 category 分组为域，标题为实体候选并挂记忆。"""
+        """规则骨架：按 category 分组为域，标题为实体候选并挂记忆。."""
         by_cat: dict[str, list[dict]] = {}
         for m in business:
             by_cat.setdefault(m["category"] or "general", []).append(m)
@@ -500,7 +506,7 @@ class ProfileStore:
 
     @staticmethod
     def _extract_stack(tech: list[dict], top: int = 12) -> list[str]:
-        """从通用技术记忆 tags 提取高频技术栈关键词。"""
+        """从通用技术记忆 tags 提取高频技术栈关键词。."""
         from collections import Counter
         counter: Counter = Counter()
         for m in tech:
@@ -516,8 +522,8 @@ class ProfileStore:
         return [w for w, _ in counter.most_common(top)]
 
     def _llm_refine(self, project_id: str, skeleton: dict,
-                    business: list[dict]) -> Optional[dict]:
-        """LLM 精炼：从业务记忆提炼真实领域/实体/关系，输出 JSON。"""
+                    business: list[dict]) -> dict | None:
+        """LLM 精炼：从业务记忆提炼真实领域/实体/关系，输出 JSON。."""
         from cerebrate.brain.llm import CerebrateLLM
         llm = CerebrateLLM()
         if not llm.is_available():
@@ -616,8 +622,6 @@ class ProfileStore:
                     "depends_on": d.get("depends_on", []),
                     "memories": d.get("memories", [])[:20],
                 })
-        # 保留骨架中未被 LLM 覆盖的域（防丢失）
-        skeleton_ids = {d["id"] for d in skeleton.get("domains", [])}
         refined_ids = {d.get("id") for d in parsed["domains"]}
         for d in skeleton.get("domains", []):
             if d["id"] not in refined_ids:
@@ -625,11 +629,11 @@ class ProfileStore:
         parsed["project_id"] = project_id
         parsed["version"] = 0
         parsed["status"] = "draft"
-        parsed["updated_at"] = datetime.now(timezone.utc).isoformat()
+        parsed["updated_at"] = datetime.now(UTC).isoformat()
         return parsed
 
     @staticmethod
-    def _parse_json(text: str) -> Optional[dict]:
+    def _parse_json(text: str) -> dict | None:
         import re
         text = text.strip()
         # 去掉可能的 markdown 代码块围栏
@@ -651,7 +655,7 @@ class ProfileStore:
 
     # ── Phase 3: 导航 ──
     def _resolve_branch(self, project_id: str, branch: str = "") -> str:
-        """解析分支：显式分支优先，否则取项目默认/最近同步分支。"""
+        """解析分支：显式分支优先，否则取项目默认/最近同步分支。."""
         if branch:
             return branch
         try:
@@ -664,7 +668,7 @@ class ProfileStore:
         return ""
 
     def navigate(self, project_id: str, target: str, branch: str = "") -> dict:
-        """在画像中定位目标域/实体，返回路径 + 挂载记忆 + 依赖。"""
+        """在画像中定位目标域/实体，返回路径 + 挂载记忆 + 依赖。."""
         profile = self.read(project_id)
         if not profile:
             return {"found": False, "project_id": project_id,
@@ -711,7 +715,8 @@ class ProfileStore:
                 }}
 
     def verify(self, project_id: str, branch: str = "") -> dict:
-        """画像 vs 代码仓一致性校验（实事求是：画像必须对得上真实代码）。
+        """
+        画像 vs 代码仓一致性校验（实事求是：画像必须对得上真实代码）。.
 
         检查:
           1. 画像实体 code_hint 文件是否真实存在于代码仓（漂移）
@@ -747,8 +752,6 @@ class ProfileStore:
                 if hint and self._looks_like_code_path(hint) \
                         and hint not in code_files:
                     issues.append(f"code_hint 漂移: {name} → {hint}（代码仓不存在）")
-                for ep in e.get("relations", []):
-                    pass
             for ep in d.get("endpoints", []) or []:
                 # 端点格式 "METHOD /path" 或 "/path"
                 ep_path = ep.split(" ", 1)[-1] if isinstance(ep, str) else ""
@@ -764,12 +767,12 @@ class ProfileStore:
             "issues": issues[:20],
             "issue_count": len(issues),
             "missing_in_profile": missing_in_profile,
-            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "verified_at": datetime.now(UTC).isoformat(),
         }
 
     @staticmethod
     def _looks_like_code_path(hint: str) -> bool:
-        """判断 code_hint 是否形如代码文件路径（含扩展名或 / 分隔）。"""
+        """判断 code_hint 是否形如代码文件路径（含扩展名或 / 分隔）。."""
         code_exts = (".py", ".php", ".java", ".js", ".ts", ".go", ".rb",
                      ".cs", ".c", ".cpp", ".h", ".hpp", ".rs", ".kt",
                      ".swift", ".vue", ".jsx", ".tsx", ".sh", ".sql",
@@ -788,7 +791,7 @@ class ProfileStore:
     # ── Phase 4: 记忆挂载 ──
     def attach_memory(self, project_id: str, node_path: str,
                       memory_id: str) -> dict:
-        """把业务记忆挂到画像节点（node_path 形如 domain 或 domain/entity）。"""
+        """把业务记忆挂到画像节点（node_path 形如 domain 或 domain/entity）。."""
         profile = self.read(project_id)
         if not profile:
             return {"ok": False, "reason": "no_profile"}
@@ -870,7 +873,7 @@ class ProfileStore:
             lines.append("## 🧰 项目技术栈（通用参考）")
             lines.append(", ".join(tech["stack"]))
             if tech.get("tech_memories"):
-                lines.append(f"")
+                lines.append("")
                 lines.append(f"> 关联通用技术记忆 {len(tech['tech_memories'])} 条"
                              "（scope=general，跨项目可复用）")
             lines.append("")

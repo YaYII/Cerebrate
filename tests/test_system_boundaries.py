@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
     root = Path(tmp_name) / "memory"
     config.memory_root = root
     config.personal_path = root / "personal"
@@ -112,7 +112,10 @@ class BoundaryTests(unittest.TestCase):
     # ── 恶意/非法输入 ──
     def test_malicious_tar_path_traversal_rejected(self):
         """恶意 tar（../ 路径穿越）被拒绝，不写出越界文件。"""
-        import io, tarfile, base64
+        import base64
+        import io
+        import tarfile
+
         from cerebrate.tools.code_sync import receive_package
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tf:
@@ -133,9 +136,7 @@ class BoundaryTests(unittest.TestCase):
 
     def test_corrupt_manifest_falls_back_to_full(self):
         """损坏的本地 manifest 回退全量同步，不崩。"""
-        import os, textwrap
-        from cerebrate.tools.code_sync import (
-            build_package, _manifest_path)
+        from cerebrate.tools.code_sync import _manifest_path, build_package
         proj = Path(self.tmp.name) / "corrupt_project"
         (proj / "src").mkdir(parents=True)
         (proj / "src" / "a.py").write_text("A=1", encoding="utf-8")

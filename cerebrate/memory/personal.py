@@ -1,20 +1,19 @@
-"""个人记忆层 v5 — 服务端用户上下文 + ChromaDB 持久化"""
+"""个人记忆层 v5 — 服务端用户上下文 + ChromaDB 持久化."""
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
-from cerebrate.core.storage import ChromaStore
 from cerebrate.config import config
+from cerebrate.core.storage import ChromaStore
 
 
 class PersonalMemory:
-    """个人记忆：ChromaDB 后端 + 内存缓存"""
+    """个人记忆：ChromaDB 后端 + 内存缓存."""
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
         self._cache: dict[str, dict] = {}  # user_id → {key: {value, ...}}
-        self._store: Optional[ChromaStore] = None
+        self._store: ChromaStore | None = None
         self._index: dict = {"users": {}}  # 用户列表
         self._dirty_access: set[str] = set()  # access_count 变更待刷盘的 doc_id
         self._lock = threading.Lock()
@@ -29,7 +28,7 @@ class PersonalMemory:
             config.chroma_path, "personal_memories", engine)
 
     def _load_all_to_cache(self):
-        """启动时从 ChromaDB 全量加载到内存"""
+        """启动时从 ChromaDB 全量加载到内存."""
         for pid in self._store.get_all_ids():
             item = self._store.get(pid)
             if not item:
@@ -51,7 +50,7 @@ class PersonalMemory:
                 })
 
     def flush(self):
-        """将缓存的 access_count 变更批量写回 ChromaDB"""
+        """将缓存的 access_count 变更批量写回 ChromaDB."""
         with self._lock:
             if not self._dirty_access:
                 return
@@ -75,7 +74,12 @@ class PersonalMemory:
 
     def remember(self, user_id: str, key: str, value,
                  confidence: float = 1.0, project_id: str = "") -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        """
+        写入一条个人偏好 user_id/key → value。.
+
+        同时更新内存缓存与用户索引（first_seen/last_seen），覆盖同 key 旧值。
+        """
+        now = datetime.now(UTC).isoformat()
         doc_id = f"{user_id}:{key}"
         meta = {
             "user_id": user_id, "key": key, "value": str(value),
@@ -94,10 +98,11 @@ class PersonalMemory:
             self._index["users"][user_id] = {"first_seen": now}
         self._index["users"][user_id]["last_seen"] = now
 
-    def set_loadout(self, user_id: str, *, bound_projects: Optional[list[str]] = None,
+    def set_loadout(self, user_id: str, *, bound_projects: list[str] | None = None,
                     preferred_scope: str = "",
-                    bound_tags: Optional[list[str]] = None) -> dict:
-        """用户 Loadout 装配（v5.2，借鉴 TencentDB Agent Memory Loadout）。
+                    bound_tags: list[str] | None = None) -> dict:
+        """
+        用户 Loadout 装配（v5.2，借鉴 TencentDB Agent Memory Loadout）。.
 
         用户配置自己的记忆装配：绑定的项目 / 偏好 scope / 绑定标签。
         检索时自动应用（未显式传参时用装配值，且装配项目/标签优先召回）。
@@ -116,7 +121,7 @@ class PersonalMemory:
         return loadout
 
     def get_loadout(self, user_id: str) -> dict:
-        """读取用户 Loadout 装配（无则返回空装配）。"""
+        """读取用户 Loadout 装配（无则返回空装配）。."""
         raw = self._cache.get(user_id, {}).get("loadout", {}).get("value", {})
         if isinstance(raw, dict):
             return {
@@ -138,8 +143,8 @@ class PersonalMemory:
         return {"bound_projects": [], "preferred_scope": "",
                 "bound_tags": []}
 
-    def recall(self, user_id: str, key: Optional[str] = None) -> dict:
-        """纯内存读取"""
+    def recall(self, user_id: str, key: str | None = None) -> dict:
+        """纯内存读取."""
         data = self._cache.get(user_id, {})
         if key:
             entry = data.get(key, {})
@@ -154,7 +159,8 @@ class PersonalMemory:
             result[k] = v.get("value", "") if isinstance(v, dict) else v
         return result
 
-    def get_profile(self, user_id: str, project_id: Optional[str] = None) -> dict:
+    def get_profile(self, user_id: str, project_id: str | None = None) -> dict:
+        """组装用户画像 dict（偏好/事实/历史/统计），供会话开始注入上下文。."""
         data = self._cache.get(user_id, {})
         profile = {
             "user_id": user_id,
@@ -167,7 +173,6 @@ class PersonalMemory:
             if not isinstance(v, dict):
                 continue
             val = v.get("value", "")
-            pid = v.get("project_id", "")
 
             if k.startswith("pref_"):
                 profile["preferences"][k[5:]] = val
@@ -190,8 +195,10 @@ class PersonalMemory:
         return profile
 
     def get_tone(self, user_id: str) -> str:
+        """返回用户偏好语气（pref_tone），未设置时默认「专业简洁」。."""
         prefs = self.recall(user_id, "pref_tone")
         return prefs.get("pref_tone", "专业简洁")
 
     def list_users(self) -> list:
+        """返回已记录的用户 ID 列表。."""
         return list(self._index.get("users", {}).keys())

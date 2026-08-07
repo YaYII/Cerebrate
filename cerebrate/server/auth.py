@@ -1,4 +1,5 @@
-"""脑虫用户认证 — TOTP（Authenticator）登录 + 长期 user token。
+"""
+脑虫用户认证 — TOTP（Authenticator）登录 + 长期 user token。.
 
 设计（用户确定）:
   - 不用设备绑定（换设备无法用），改用 Authenticator（TOTP）登录绑定"人"
@@ -21,9 +22,8 @@ import struct
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +33,16 @@ _USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
 
 
 def generate_secret() -> str:
-    """生成 TOTP 共享密钥（20 字节随机 → Base32）。"""
+    """生成 TOTP 共享密钥（20 字节随机 → Base32）。."""
     return base64.b32encode(secrets.token_bytes(20)).decode("ascii")
 
 
 def totp_uri(username: str, secret: str) -> str:
-    """生成 otpauth URI（供 Authenticator 扫码/手动添加）。
-    issuer 用纯 ASCII「Cerebrate」（参照 TOTP 兼容性经验：避免非 ASCII issuer）。"""
+    """
+    生成 otpauth URI（供 Authenticator 扫码/手动添加）。.
+
+    issuer 用纯 ASCII「Cerebrate」（参照 TOTP 兼容性经验：避免非 ASCII issuer）。.
+    """
     import urllib.parse
     label = urllib.parse.quote(f"Cerebrate:{username}")
     return (f"otpauth://totp/{label}?secret={secret}"
@@ -56,7 +59,7 @@ def _hotp(secret_bytes: bytes, counter: int) -> str:
 
 
 def verify_totp(secret_b32: str, code: str, window: int = 1) -> bool:
-    """验证 TOTP 码：当前 30s 窗口 ±window 步。"""
+    """验证 TOTP 码：当前 30s 窗口 ±window 步。."""
     code = (code or "").strip()
     if not code or not code.isdigit():
         return False
@@ -72,9 +75,9 @@ def verify_totp(secret_b32: str, code: str, window: int = 1) -> bool:
 
 
 class UserAuth:
-    """用户注册/登录/token 管理（JSON 持久化，线程安全）。"""
+    """用户注册/登录/token 管理（JSON 持久化，线程安全）。."""
 
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(self, path: Path | None = None):
         self._path = Path(path) if path else None
         self._lock = threading.Lock()
         self._users: dict[str, dict] = {}
@@ -113,7 +116,7 @@ class UserAuth:
             logger.warning("UserAuth 保存失败: %s", e)
 
     def register(self, username: str) -> dict:
-        """注册用户：返回 otpauth URI + secret（secret 仅此一次展示）。"""
+        """注册用户：返回 otpauth URI + secret（secret 仅此一次展示）。."""
         username = (username or "").strip()
         if not _USERNAME_RE.match(username):
             raise ValueError(
@@ -129,7 +132,7 @@ class UserAuth:
             secret = generate_secret()
             self._users[username] = {
                 "secret": secret,
-                "created": datetime.now(timezone.utc).isoformat(),
+                "created": datetime.now(UTC).isoformat(),
             }
             self._save()
         return {
@@ -142,7 +145,8 @@ class UserAuth:
 
     def create_bind_session(self, username: str,
                             ttl_seconds: int = 1800) -> str:
-        """注册后生成一次性绑定 token（短时效，URL 不暴露 secret）。
+        """
+        注册后生成一次性绑定 token（短时效，URL 不暴露 secret）。.
 
         绑定页通过该 token 换取 otpauth_uri 生成二维码；过期/使用后失效。
         """
@@ -159,8 +163,8 @@ class UserAuth:
             }
             return token
 
-    def consume_bind_session(self, token: str) -> Optional[dict]:
-        """绑定页换取 otpauth_uri（无效/过期返回 None）。"""
+    def consume_bind_session(self, token: str) -> dict | None:
+        """绑定页换取 otpauth_uri（无效/过期返回 None）。."""
         if not token:
             return None
         with self._lock:
@@ -173,7 +177,7 @@ class UserAuth:
             return dict(s)
 
     def login(self, username: str, code: str) -> dict:
-        """登录：验证 TOTP → 下发/返回长期 user token。"""
+        """登录：验证 TOTP → 下发/返回长期 user token。."""
         username = (username or "").strip()
         code = (code or "").strip()
         with self._lock:
@@ -193,7 +197,7 @@ class UserAuth:
             token = uuid.uuid4().hex
             self._tokens[token] = {
                 "user_id": username,
-                "created": datetime.now(timezone.utc).isoformat(),
+                "created": datetime.now(UTC).isoformat(),
             }
             self._save()
         return {
@@ -202,8 +206,8 @@ class UserAuth:
             "message": "登录成功，请妥善保存 token（唯一凭证，长期有效）",
         }
 
-    def resolve(self, token: str) -> Optional[str]:
-        """token → user_id（鉴权用）；无效返回 None。"""
+    def resolve(self, token: str) -> str | None:
+        """Token → user_id（鉴权用）；无效返回 None。."""
         if not token:
             return None
         with self._lock:
@@ -211,6 +215,7 @@ class UserAuth:
             return info.get("user_id") if info else None
 
     def list_users(self) -> list[dict]:
+        """列出全部已注册用户（用户名 + 创建时间）。."""
         with self._lock:
             return [{"username": u, "created": d.get("created", "")}
                     for u, d in self._users.items()]

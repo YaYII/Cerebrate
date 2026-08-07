@@ -1,17 +1,18 @@
-"""BGE ReRanker 重排序 — 精排候选记忆
+"""
+BGE ReRanker 重排序 — 精排候选记忆.
 
 在 ChromaDB 向量粗搜后，用交叉编码器对 top-N 结果做精细排序。
 可选依赖，加载失败时自动降级（不重排）。
 """
 import logging
 import threading
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class ReRanker:
-    """交叉编码器重排序器
+    """
+    交叉编码器重排序器.
 
     使用 BAAI/bge-reranker-v2-m3（与 bge-m3 配对使用），对候选列表
     按 query 与每个候选的语义相关性重新打分排序。
@@ -27,7 +28,7 @@ class ReRanker:
         self._init_model()
 
     def _init_model(self):
-        """尝试加载 ReRanker 模型，失败则标记为不可用"""
+        """尝试加载 ReRanker 模型，失败则标记为不可用."""
         if not self._enabled:
             logger.info("ReRanker 已禁用（配置关闭）")
             return
@@ -45,11 +46,13 @@ class ReRanker:
 
     @property
     def available(self) -> bool:
+        """返回重排序模型是否已加载可用。."""
         return self._model is not None
 
     def rerank(self, query: str, candidates: list[dict],
                top_k: int = 5) -> list[dict]:
-        """对候选列表按 query 重排序
+        """
+        对候选列表按 query 重排序.
 
         Args:
             query: 查询文本
@@ -58,6 +61,7 @@ class ReRanker:
 
         Returns:
             按新得分降序排列的候选列表（追加 rerank_score 字段）
+
         """
         if not self._model or not candidates:
             return candidates
@@ -96,14 +100,14 @@ class ReRanker:
 
 
 # 全局单例
-_reranker: Optional[ReRanker] = None
+_reranker: ReRanker | None = None
 _reranker_lock = threading.Lock()
 
 
 def get_reranker(model_name: str = "BAAI/bge-reranker-v2-m3",
                  device: str = "cpu",
                  enabled: bool = True) -> ReRanker:
-    """获取 ReRanker 单例（线程安全）"""
+    """获取 ReRanker 单例（线程安全）."""
     global _reranker
     if _reranker is None and enabled:
         with _reranker_lock:

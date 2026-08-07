@@ -1,4 +1,5 @@
-"""MCP Streamable HTTP 传输层 — 标准 MCP 端点（/v1/mcp）。
+"""
+MCP Streamable HTTP 传输层 — 标准 MCP 端点（/v1/mcp）。.
 
 按 MCP 规范（2025-03-26 Streamable HTTP）实现：
   - POST /v1/mcp：JSON-RPC 消息（initialize / tools/list / tools/call）
@@ -11,8 +12,6 @@
 """
 
 import json
-
-from cerebrate.protocol import ok
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
 SERVER_INFO = {"name": "cerebrate-mcp", "version": "5.2.1"}
@@ -94,7 +93,7 @@ _WRITE_TOOLS = {
 
 
 def _auth_gate(current_user: str, is_admin: bool, name: str) -> dict | None:
-    """按身份把关工具调用：返回错误 dict 表示拒绝，None 表示放行。"""
+    """按身份把关工具调用：返回错误 dict 表示拒绝，None 表示放行。."""
     if name in _ADMIN_ONLY_TOOLS and not is_admin:
         return {"status": "error", "error": {
             "code": 403,
@@ -115,7 +114,7 @@ def _rpc_error(code: int, message: str, req_id=None) -> dict:
 
 
 def _call_result(data: dict) -> dict:
-    """MCP tools/call 结果（与 mcp.js 一致）。"""
+    """MCP tools/call 结果（与 mcp.js 一致）。."""
     return {
         "content": [{"type": "text",
                      "text": json.dumps(data, ensure_ascii=False, indent=2)}],
@@ -125,7 +124,7 @@ def _call_result(data: dict) -> dict:
 
 def handle_mcp_rpc(body: dict, api, current_user: str = "",
                    is_admin: bool = False) -> dict:
-    """处理单个 JSON-RPC 消息，返回 MCP 响应（dict 或 None=通知不响应）。"""
+    """处理单个 JSON-RPC 消息，返回 MCP 响应（dict 或 None=通知不响应）。."""
     method = body.get("method", "")
     req_id = body.get("id")
     params = body.get("params", {}) or {}
@@ -164,7 +163,7 @@ def handle_mcp_rpc(body: dict, api, current_user: str = "",
 
 def _invoke_tool(api, name: str, args: dict, current_user: str,
                  is_admin: bool) -> dict:
-    """MCP 工具 → 服务端 API（参数转换与 mcp.py/mcp.js 对齐）。"""
+    """MCP 工具 → 服务端 API（参数转换与 mcp.py/mcp.js 对齐）。."""
     try:
         denied = _auth_gate(current_user, is_admin, name)
         if denied:

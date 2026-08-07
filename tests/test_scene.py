@@ -10,7 +10,7 @@
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -108,7 +108,7 @@ class SceneApiTests(unittest.TestCase):
         # 模拟本地 12:00（窗口外）
         local_noon_utc = datetime(2026, 8, 7, 12) - timedelta(hours=8)
         with patch("cerebrate.config.datetime", wraps=datetime) as mock_dt:
-            mock_dt.now.return_value = local_noon_utc.replace(tzinfo=timezone.utc)
+            mock_dt.now.return_value = local_noon_utc.replace(tzinfo=UTC)
             self.api.scene_ingest(
                 {"session_id": "s1", "events": [{"kind": "msg", "text": "x"}]})
             r = self.api.scene_compress({"session_id": "s1"})
@@ -135,7 +135,7 @@ class SceneApiTests(unittest.TestCase):
         config.evolution_window_tz_offset_hours = 8
         local_noon_utc = datetime(2026, 8, 7, 12) - timedelta(hours=8)
         with patch("cerebrate.config.datetime", wraps=datetime) as mock_dt:
-            mock_dt.now.return_value = local_noon_utc.replace(tzinfo=timezone.utc)
+            mock_dt.now.return_value = local_noon_utc.replace(tzinfo=UTC)
             self.api.scene_ingest(
                 {"session_id": "d1", "events": [{"kind": "msg", "text": "x"}]})
             r = self.api.scene_distill({"session_id": "d1"})

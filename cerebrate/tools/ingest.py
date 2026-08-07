@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""cerebrate/tools/ingest.py — 企业知识蒸馏入脑虫
+"""
+cerebrate/tools/ingest.py — 企业知识蒸馏入脑虫.
 
 将本地文档目录批量吸入脑虫权威知识库（KnowledgeBase）。
 
@@ -28,7 +29,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -44,7 +45,7 @@ _PHYSICAL_USER = os.environ.get("USER") or os.environ.get("LOGNAME") or "unknown
 
 
 def _api_post(path: str, body: dict) -> dict:
-    """调用脑虫 API POST 接口，返回 v5 协议 JSON。"""
+    """调用脑虫 API POST 接口，返回 v5 协议 JSON。."""
     full_url = _SERVER_URL.rstrip("/") + path
     headers = {"Content-Type": "application/json"}
     if _SERVER_TOKEN:
@@ -81,20 +82,20 @@ DEFAULT_EXCLUDE_FILES = {"mcp.json", ".env", "package-lock.json", "yarn.lock",
 
 
 def _load_gitignore_patterns(root: Path) -> list:
-    """加载 .gitignore 中的模式（使用 pathspec 库，如不可用则回退简单规则）。"""
+    """加载 .gitignore 中的模式（使用 pathspec 库，如不可用则回退简单规则）。."""
     patterns = []
     gitignore_path = root / ".gitignore"
     if gitignore_path.exists():
         try:
             import pathspec
-            with open(gitignore_path, "r", encoding="utf-8") as f:
+            with open(gitignore_path, encoding="utf-8") as f:
                 spec = pathspec.PathSpec.from_lines(
                     pathspec.patterns.GitWildMatchPattern, f
                 )
             return spec
         except ImportError:
             # 没有 pathspec 库，逐行读取做基础过滤
-            with open(gitignore_path, "r", encoding="utf-8") as f:
+            with open(gitignore_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#"):
@@ -103,7 +104,7 @@ def _load_gitignore_patterns(root: Path) -> list:
 
 
 def _is_excluded_by_gitignore(file_rel: str, patterns) -> bool:
-    """检查相对路径是否匹配 .gitignore 规则。"""
+    """检查相对路径是否匹配 .gitignore 规则。."""
     if hasattr(patterns, "match_file"):
         return patterns.match_file(file_rel)
     # 回退：简单的后缀/前缀匹配
@@ -125,7 +126,7 @@ def _is_excluded_by_gitignore(file_rel: str, patterns) -> bool:
 
 
 def scan_files(root: Path, verbose: bool = False) -> list[Path]:
-    """递归扫描目录，返回所有支持的文件列表（已过滤排除项）。"""
+    """递归扫描目录，返回所有支持的文件列表（已过滤排除项）。."""
     gitignore_patterns = _load_gitignore_patterns(root)
     files = []
 
@@ -171,7 +172,8 @@ MAX_CHUNK_LINES = 300
 
 
 def chunk_document(filepath: Path) -> list[dict]:
-    """将文件拆分为知识块。
+    """
+    将文件拆分为知识块。.
 
     返回: [{title, content, tags, source}]
     """
@@ -200,8 +202,6 @@ def chunk_document(filepath: Path) -> list[dict]:
 
     # ── 大文件：按二级标题分块 ──
     chunks = []
-    current_lines = []
-    current_title = None
     header_indices = [i for i, line in enumerate(lines) if line.startswith("## ")]
 
     if not header_indices:
@@ -230,7 +230,7 @@ def chunk_document(filepath: Path) -> list[dict]:
         # 单个章节太长？递归拆分
         if len(section_lines) > MAX_CHUNK_LINES:
             # 按三级标题再分
-            sub_headers = [j for j, l in enumerate(section_lines) if l.startswith("### ")]
+            sub_headers = [j for j, line in enumerate(section_lines) if line.startswith("### ")]
             if sub_headers:
                 for si, sh in enumerate(sub_headers):
                     sn = sub_headers[si + 1] if si + 1 < len(sub_headers) else len(section_lines)
@@ -265,7 +265,7 @@ def chunk_document(filepath: Path) -> list[dict]:
 
 
 def _infer_title(content: str, fallback: str) -> str:
-    """从内容推断文档标题。"""
+    """从内容推断文档标题。."""
     lines = content.strip().split("\n")
     for line in lines[:20]:
         line = line.strip()
@@ -286,7 +286,7 @@ INGEST_CACHE_FILE = ".ingest_cache.json"
 
 
 def _load_ingest_cache(root: Path) -> dict:
-    """加载本地吸入缓存（文件级 SHA256 去重）。"""
+    """加载本地吸入缓存（文件级 SHA256 去重）。."""
     cache_path = root / INGEST_CACHE_FILE
     if cache_path.exists():
         try:
@@ -297,7 +297,7 @@ def _load_ingest_cache(root: Path) -> dict:
 
 
 def _save_ingest_cache(root: Path, cache: dict):
-    """保存吸入缓存。"""
+    """保存吸入缓存。."""
     cache_path = root / INGEST_CACHE_FILE
     # 限制缓存大小（最多保留 5000 条）
     if len(cache) > 5000:
@@ -314,7 +314,7 @@ def _save_ingest_cache(root: Path, cache: dict):
 
 
 def _file_hash(filepath: Path) -> str:
-    """计算文件 SHA256 哈希。"""
+    """计算文件 SHA256 哈希。."""
     h = hashlib.sha256()
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -327,7 +327,8 @@ def _file_hash(filepath: Path) -> str:
 
 def ingest_directory(root: Path, project_id: str = "", dry_run: bool = False,
                      verbose: bool = False) -> dict:
-    """执行目录知识吸入。
+    """
+    执行目录知识吸入。.
 
     返回报告 dict:
       {files_scanned, chunks_total, chunks_new, chunks_skipped, chunks_failed, results: [...]}
@@ -452,7 +453,7 @@ def ingest_directory(root: Path, project_id: str = "", dry_run: bool = False,
             cache[cache_key] = {
                 "hash": current_hash,
                 "status": "ok",
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
             }
             _save_ingest_cache(root, cache)
 
@@ -472,6 +473,7 @@ def ingest_directory(root: Path, project_id: str = "", dry_run: bool = False,
 
 
 def main(argv=None):
+    """知识蒸馏吸入 CLI 入口：扫描目录分块写入知识库。."""
     parser = argparse.ArgumentParser(
         description="🧠 知识蒸馏吸入器 — 将本地文档吸入脑虫知识库",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -503,7 +505,7 @@ def main(argv=None):
         _echo(f"错误: 目录不存在: {root}")
         sys.exit(1)
 
-    _echo(f"🧠 知识蒸馏入脑虫")
+    _echo("🧠 知识蒸馏入脑虫")
     _echo(f"   目录:  {root}")
     _echo(f"   项目:  {args.project or '(全局)'}")
     _echo(f"   模式:  {'🔍 DRY-RUN（预览）' if args.dry_run else '📤 写入'}")
@@ -529,7 +531,7 @@ def main(argv=None):
     _echo(f"  跳过重复:  {report['chunks_skipped']}")
     _echo(f"  写入失败:  {report['chunks_failed']}")
     if report["errors"]:
-        _echo(f"\n  错误详情:")
+        _echo("\n  错误详情:")
         for err in report["errors"][:5]:
             _echo(f"    ❌ [{err.get('file','?')}] {err.get('error','')}")
         if len(report["errors"]) > 5:

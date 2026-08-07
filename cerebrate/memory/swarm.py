@@ -1,4 +1,5 @@
-"""虫群共享记忆层 v5 — 服务端权威内核 + ChromaDB 向量存储
+"""
+虫群共享记忆层 v5 — 服务端权威内核 + ChromaDB 向量存储.
 
 v5.1 改进:
   - 长文档自动语义分块（按标题/段落/等长切割）
@@ -11,16 +12,15 @@ import json
 import logging
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
-from cerebrate.core.storage import ChromaStore
-from cerebrate.core.decay import calculate_decay, boost_from_reuse
+from cerebrate.config import config
 from cerebrate.core.chunking import estimate_tokens
+from cerebrate.core.decay import boost_from_reuse, calculate_decay
+from cerebrate.core.storage import ChromaStore
 from cerebrate.memory.docstore import DocumentStore
 from cerebrate.memory.metastore import get_metastore
-from cerebrate.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,12 @@ CATEGORY_OBSERVATION_TYPE = {
 
 
 def observation_type_for(category: str) -> str:
-    """从 category 推导 observation type（未知分类归为 discovery）。"""
+    """从 category 推导 observation type（未知分类归为 discovery）。."""
     return CATEGORY_OBSERVATION_TYPE.get(category or "", "discovery")
 
 
 def _extract_concepts(tags: list[str], category: str, title: str = "") -> list[str]:
-    """规则提取 concepts：标签 + 分类 + 标题关键词（去重、截断）。"""
+    """规则提取 concepts：标签 + 分类 + 标题关键词（去重、截断）。."""
     concepts: list[str] = []
     for t in tags:
         t = str(t).strip()
@@ -72,7 +72,7 @@ def _extract_concepts(tags: list[str], category: str, title: str = "") -> list[s
 
 
 def _extract_facts(solution: str = "", problem_solved: str = "") -> list[str]:
-    """规则提取 facts：从 solution/problem_solved 拆出短句（最多 5 条）。"""
+    """规则提取 facts：从 solution/problem_solved 拆出短句（最多 5 条）。."""
     facts: list[str] = []
     for src in (solution, problem_solved):
         if not src:
@@ -85,7 +85,7 @@ def _extract_facts(solution: str = "", problem_solved: str = "") -> list[str]:
 
 
 def _safe_split(val, separator=","):
-    """安全地将可能是 str 或 list 的元数据值转为列表。"""
+    """安全地将可能是 str 或 list 的元数据值转为列表。."""
     if not val:
         return []
     if isinstance(val, list):
@@ -96,7 +96,8 @@ def _safe_split(val, separator=","):
 
 
 class SwarmMemory:
-    """虫群共享记忆：ChromaDB 向量索引 + DocumentStore 原始内容
+    """
+    虫群共享记忆：ChromaDB 向量索引 + DocumentStore 原始内容.
 
     架构设计:
       - ChromaDB = 纯向量索引（doc_id + 向量 + 运营元数据）
@@ -107,8 +108,8 @@ class SwarmMemory:
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self._store: Optional[ChromaStore] = None
-        self._docstore: Optional[DocumentStore] = None
+        self._store: ChromaStore | None = None
+        self._docstore: DocumentStore | None = None
         # 元数据存储（PostgreSQL，可选）
         self._metastore: object = None  # lazy init
         # 轻量级计数器（会话内内存，定期刷盘）
@@ -138,13 +139,14 @@ class SwarmMemory:
                     saved.get("total_successes", 0))
 
     def _flush_stats(self):
-        """将统计计数器刷到 ChromaDB"""
+        """将统计计数器刷到 ChromaDB."""
         if self._store:
             with self._stats_lock:
                 self._store.upsert(
                     "_swarm_stats", "swarm statistics counter", dict(self._stats))
 
     def flush(self):
+        """有脏统计时冲刷统计计数器到 ChromaDB 并清除脏标记。."""
         if self._dirty:
             self._flush_stats()
             with self._stats_lock:
@@ -152,7 +154,7 @@ class SwarmMemory:
 
     @property
     def _ms(self):
-        """惰性获取 MetaStore 单例"""
+        """惰性获取 MetaStore 单例."""
         if self._metastore is None:
             self._metastore = get_metastore()
         return self._metastore
@@ -163,7 +165,8 @@ class SwarmMemory:
                            solution: str = "",
                            evidence: str = "",
                            max_chars: int = 0) -> str:
-        """构建用于向量嵌入的聚焦摘要文本
+        """
+        构建用于向量嵌入的聚焦摘要文本.
 
         向量数据库是「定位器」，不是「全文搜索引擎」。
         嵌入文本应如目录摘要般聚焦——讲清楚「文档是关于什么的」，
@@ -204,16 +207,17 @@ class SwarmMemory:
               project_id: str = "", scope: str = "", language: str = "",
               life_stage: str = "memory", nutrient_score: float = 1.0,
               confidence: float = 1.0, evidence: str = "",
-              supersedes: Optional[list[str]] = None,
-              origin_ids: Optional[list[str]] = None,
+              supersedes: list[str] | None = None,
+              origin_ids: list[str] | None = None,
               physical_user: str = "",
-              memory_id: Optional[str] = None,
+              memory_id: str | None = None,
               observation_type: str = "",
-              facts: Optional[list[str]] = None,
-              concepts: Optional[list[str]] = None,
+              facts: list[str] | None = None,
+              concepts: list[str] | None = None,
               knowledge_type: str = "",
-              skill_fields: Optional[dict] = None) -> str:
-        """向虫群共享记忆
+              skill_fields: dict | None = None) -> str:
+        """
+        向虫群共享记忆.
 
         架构:
           1. 完整内容（content/problem_solved/solution）写入 DocumentStore
@@ -258,7 +262,7 @@ class SwarmMemory:
         # 未显式指定时按 scope 自动推断；允许调用方显式覆盖（混合记忆）
         if not knowledge_type:
             knowledge_type = "business" if project_id else "tech"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         supersedes = supersedes or []
         origin_ids = origin_ids or []
 
@@ -450,15 +454,15 @@ class SwarmMemory:
         return memory_id
 
     def _docstore_put(self, doc_id: str, data: dict, doc_type: str = "memory"):
-        """安全写入 DocumentStore（按类型路由子目录）"""
+        """安全写入 DocumentStore（按类型路由子目录）."""
         if self._docstore:
             try:
                 self._docstore.put(doc_id, data, doc_type)
             except Exception as e:
                 logger.error(f"DocumentStore 写入失败 {doc_id}: {e}")
 
-    def _docstore_get(self, doc_id: str) -> Optional[dict]:
-        """安全读取 DocumentStore"""
+    def _docstore_get(self, doc_id: str) -> dict | None:
+        """安全读取 DocumentStore."""
         if self._docstore:
             try:
                 return self._docstore.get(doc_id)
@@ -467,7 +471,7 @@ class SwarmMemory:
         return None
 
     def _docstore_delete(self, doc_id: str) -> bool:
-        """安全删除 DocumentStore"""
+        """安全删除 DocumentStore."""
         if self._docstore:
             try:
                 return self._docstore.delete(doc_id)
@@ -476,7 +480,7 @@ class SwarmMemory:
         return False
 
     def _sync_meta(self, doc_id: str, **kwargs):
-        """同步元数据到 PostgreSQL（静默失败，不阻塞主流程）"""
+        """同步元数据到 PostgreSQL（静默失败，不阻塞主流程）."""
         try:
             ms = self._ms
             if ms and ms.available:
@@ -485,7 +489,8 @@ class SwarmMemory:
             logger.debug(f"元数据同步跳过 ({doc_id}): {e}")
 
     def _enrich_from_docstore(self, entry: dict) -> dict:
-        """从 DocumentStore 加载完整内容并填充到条目中
+        """
+        从 DocumentStore 加载完整内容并填充到条目中.
 
         对于短记忆（_fast_content=1），内容已在 ChromaDB 中，跳过 docstore。
 
@@ -537,7 +542,8 @@ class SwarmMemory:
     def expand_context(self, entry: dict,
                        before_chars: int = 1500,
                        after_chars: int = 1500) -> dict:
-        """对匹配到的记忆块做上下文扩展
+        """
+        对匹配到的记忆块做上下文扩展.
 
         根据块在原文中的字符偏移，加载前后文，让 AI 看到完整上下文。
 
@@ -548,6 +554,7 @@ class SwarmMemory:
 
         Returns:
             同一条目，追加 _expanded_context 和 _context_range 字段
+
         """
         entry["_expanded_context"] = entry.get("content", "")
         entry["_context_range"] = {"before": 0, "after": 0, "total": 0}
@@ -603,13 +610,14 @@ class SwarmMemory:
     def expand_all_contexts(self, entries: list[dict],
                              before_chars: int = 1500,
                              after_chars: int = 1500) -> list[dict]:
-        """批量上下文扩展"""
+        """批量上下文扩展."""
         return [self.expand_context(e, before_chars, after_chars) for e in entries]
 
     # ==================== 相关性过滤 ====================
 
     def filter_relevant(self, query: str, entries: list[dict]) -> list[dict]:
-        """用 LLM 对候选块做相关性过滤
+        """
+        用 LLM 对候选块做相关性过滤.
 
         使用 CerebrateLLM 逐块判断相关性，仅保留高相关的块。
         LLM 不可用时降级为分数阈值过滤。
@@ -653,8 +661,8 @@ class SwarmMemory:
                         token_estimate=0,
                         observation_type="", facts=None, concepts=None,
                         knowledge_type="",
-                        skill_fields: Optional[dict] = None) -> dict:
-        """构建统一的元数据字典"""
+                        skill_fields: dict | None = None) -> dict:
+        """构建统一的元数据字典."""
         skill = skill_fields or {}
         return {
             "title": title,
@@ -705,7 +713,7 @@ class SwarmMemory:
     # ==================== FTS5 全文索引（Phase 3） ====================
 
     def _get_fulltext(self):
-        """懒加载 FTS5 全文索引（线程安全）。"""
+        """懒加载 FTS5 全文索引（线程安全）。."""
         if not config.fulltext_enabled:
             return None
         if not hasattr(self, "_fulltext_cache"):
@@ -720,7 +728,7 @@ class SwarmMemory:
                     created: str, updated: str,
                     observation_type: str = "", physical_user: str = "",
                     life_stage: str = "memory") -> bool:
-        """双写 FTS5（失败静默降级，不影响主写入路径）。"""
+        """双写 FTS5（失败静默降级，不影响主写入路径）。."""
         fts = self._get_fulltext()
         if not fts or not fts.available:
             return False
@@ -732,10 +740,11 @@ class SwarmMemory:
             physical_user=physical_user, life_stage=life_stage)
 
     def fulltext_query(self, query_text: str, limit: int = 20,
-                       project_id: Optional[str] = None,
-                       scope: Optional[str] = None,
-                       category: Optional[str] = None) -> list[dict]:
-        """FTS5 全文检索：精确关键词（错误码/命令/函数名）优先。
+                       project_id: str | None = None,
+                       scope: str | None = None,
+                       category: str | None = None) -> list[dict]:
+        """
+        FTS5 全文检索：精确关键词（错误码/命令/函数名）优先。.
 
         返回渐进式披露索引层格式（source=fulltext + snippet）。
         """
@@ -746,9 +755,10 @@ class SwarmMemory:
                           project_id=project_id, category=category)
 
     def recent_index(self, limit: int = 10,
-                     project_id: Optional[str] = None,
-                     scope: Optional[str] = None) -> list[dict]:
-        """最近记忆紧凑索引（Phase 5）：会话开始即见存在什么 + token 成本。
+                     project_id: str | None = None,
+                     scope: str | None = None) -> list[dict]:
+        """
+        最近记忆紧凑索引（Phase 5）：会话开始即见存在什么 + token 成本。.
 
         数据源优先 FTS5 meta 表（轻量）；FTS 不可用时降级返回空列表
         （sense 是低风险读路径，不因索引缺失阻塞）。
@@ -759,7 +769,7 @@ class SwarmMemory:
         return fts.recent(limit=limit, scope=scope, project_id=project_id)
 
     def rebuild_fulltext(self, batch_size: int = 200) -> dict:
-        """从 DocStore + ChromaDB 全量重建 FTS5 索引。"""
+        """从 DocStore + ChromaDB 全量重建 FTS5 索引。."""
         fts = self._get_fulltext()
         if not fts:
             return {"status": "skipped", "reason": "fulltext disabled"}
@@ -804,13 +814,14 @@ class SwarmMemory:
 
     # ==================== 查询 ====================
 
-    def query(self, query_text: str = "", category: Optional[str] = None,
-              tags: Optional[list[str]] = None, limit: int = 10,
-              project_id: Optional[str] = None, scope: Optional[str] = None,
-              source_agent: Optional[str] = None,
-              query_texts: Optional[list[str]] = None,
+    def query(self, query_text: str = "", category: str | None = None,
+              tags: list[str] | None = None, limit: int = 10,
+              project_id: str | None = None, scope: str | None = None,
+              source_agent: str | None = None,
+              query_texts: list[str] | None = None,
               index_only: bool = False) -> list[dict]:
-        """向量语义查询，支持多角度查询 + 分块聚合 + 可选 ReRanker 精排
+        """
+        向量语义查询，支持多角度查询 + 分块聚合 + 可选 ReRanker 精排.
 
         index_only=True 时进入"渐进式披露索引层"模式：
           跳过 DocumentStore 全文加载、上下文扩展、LLM 相关性过滤、ReRanker，
@@ -1013,7 +1024,8 @@ class SwarmMemory:
 
     @staticmethod
     def _to_index_entry(e: dict) -> dict:
-        """渐进式披露索引层：把完整结果压缩为紧凑索引行。
+        """
+        渐进式披露索引层：把完整结果压缩为紧凑索引行。.
 
         对齐 claude-mem 索引格式（ID/标题/类型/时间/成本），
         让 agent 在扫描阶段即可判断相关性，无需读取全文。
@@ -1052,7 +1064,8 @@ class SwarmMemory:
         }
     @staticmethod
     def _diversity_rerank(results: list[dict], limit: int) -> list[dict]:
-        """多样性重排序：在保持分数优先的前提下，确保结果覆盖不同的语义簇。
+        """
+        多样性重排序：在保持分数优先的前提下，确保结果覆盖不同的语义簇。.
 
         算法：
         1. 按分数降序排列
@@ -1124,7 +1137,8 @@ class SwarmMemory:
 
     def _aggregate_chunks(self, scored: list[dict],
                           load_content: bool = True) -> list[dict]:
-        """将分块结果聚合为按文档归并，保留最佳块得分
+        """
+        将分块结果聚合为按文档归并，保留最佳块得分.
 
         load_content=False（索引层模式）时跳过 DocumentStore 全文加载，
         直接聚合各块的元数据，避免查询索引时产生大量磁盘 IO。
@@ -1249,6 +1263,12 @@ class SwarmMemory:
             return self._mem_locks[memory_id]
 
     def mark_reused(self, memory_id: str, success: bool = True, feedback: str = ""):
+        """
+        标记一条记忆被复用（更新复用/成功计数与评分）。.
+
+        parent（分块文档）或未找到时同步标记全部分块；
+        成功时同步 mark_reused 元数据到 PostgreSQL（可用时）。
+        """
         # 先标记主条目
         item = self._store.get(memory_id)
         parent_found = False
@@ -1281,7 +1301,7 @@ class SwarmMemory:
                 previous = meta.get("evidence", "")
                 meta["evidence"] = (
                     previous + "\n" if previous else "") + feedback[:500]
-            meta["updated"] = datetime.now(timezone.utc).isoformat()
+            meta["updated"] = datetime.now(UTC).isoformat()
             meta["score"] = self._calculate_swarm_score(meta)
             # 从 DocumentStore 加载内容用于重新嵌入
             doc = self._docstore_get(item["id"])
@@ -1298,10 +1318,12 @@ class SwarmMemory:
     # ==================== 统计与列表 ====================
 
     def get_stats(self) -> dict:
+        """返回虫群统计计数器的副本。."""
         with self._stats_lock:
             return dict(self._stats)
 
     def list_categories(self) -> list[str]:
+        """返回虫群记忆中出现的全部类别列表。."""
         metadatas = self._store.get_all_metadata(limit=1000)
         cats = set()
         for meta in metadatas:
@@ -1311,6 +1333,7 @@ class SwarmMemory:
         return list(cats)
 
     def list_projects(self) -> list[str]:
+        """返回虫群记忆中出现的全部项目 ID 列表。."""
         metadatas = self._store.get_all_metadata(limit=1000)
         projects = set()
         for meta in metadatas:
@@ -1320,7 +1343,7 @@ class SwarmMemory:
         return list(projects)
 
     def scope_counts(self) -> dict:
-        """统计通用记忆 / 项目记忆数量（含各项目分布）"""
+        """统计通用记忆 / 项目记忆数量（含各项目分布）."""
         metadatas = self._store.get_all_metadata(limit=1000)
         result = {"general": 0, "project": 0, "by_project": {}}
         for meta in metadatas:
@@ -1336,7 +1359,13 @@ class SwarmMemory:
                 result["by_project"][pid] = result["by_project"].get(pid, 0) + 1
         return result
 
-    def get_memory(self, memory_id: str) -> Optional[dict]:
+    def get_memory(self, memory_id: str) -> dict | None:
+        """
+        按 memory_id 读取记忆完整内容，不存在返回 None。.
+
+        parent（分块文档）从分块聚合内容；普通条目从 DocumentStore 补全正文；
+        也支持用 doc_group_id 查找分块文档。
+        """
         item = self._store.get(memory_id)
         if item:
             meta = item["metadata"]
@@ -1352,8 +1381,8 @@ class SwarmMemory:
         return self._aggregate_memory_from_chunks(memory_id)
 
     def _aggregate_memory_from_chunks(self, doc_group_id: str,
-                                      parent_meta: Optional[dict] = None) -> Optional[dict]:
-        """从分块聚合完整记忆内容，内容从 DocumentStore 加载"""
+                                      parent_meta: dict | None = None) -> dict | None:
+        """从分块聚合完整记忆内容，内容从 DocumentStore 加载."""
         chunks = self._store.get_items_by_where(
             {"doc_group_id": doc_group_id})
         if not chunks:
@@ -1378,6 +1407,12 @@ class SwarmMemory:
         return self._item_to_dict(doc_group_id, base)
 
     def delete_memory(self, memory_id: str) -> bool:
+        """
+        删除记忆（含分块与 DocumentStore 文件），成功返回 True。.
+
+        先删 DocumentStore 文件，PostgreSQL 走软删除（status=archived），
+        再从 ChromaDB 删除主条目与全部分块并扣减统计。
+        """
         # 从 DocumentStore 删除
         self._docstore_delete(memory_id)
 
@@ -1420,7 +1455,7 @@ class SwarmMemory:
 
         return False
 
-    def _load_memory(self, memory_id: str) -> Optional[dict]:
+    def _load_memory(self, memory_id: str) -> dict | None:
         """兼容旧调用者的内部接口（含 DocumentStore 加载）."""
         item = self._store.get(memory_id)
         if item:
@@ -1445,8 +1480,8 @@ class SwarmMemory:
             return meta
         return self._load_memory_from_chunks(memory_id)
 
-    def _load_memory_from_chunks(self, memory_id: str) -> Optional[dict]:
-        """分块文档聚合加载（从 DocumentStore）"""
+    def _load_memory_from_chunks(self, memory_id: str) -> dict | None:
+        """分块文档聚合加载（从 DocumentStore）."""
         # 先尝试 docstore 父文档
         doc = self._docstore_get(memory_id)
         if doc:
@@ -1478,8 +1513,14 @@ class SwarmMemory:
         return base
 
     def update_lifecycle(self, memory_id: str, life_stage: str,
-                         confidence: Optional[float] = None,
+                         confidence: float | None = None,
                          evidence: str = "") -> bool:
+        """
+        更新记忆生命周期阶段（如 memory/nutrient/archived），返回是否成功。.
+
+        更新主条目；parent 或未找到时同步更新全部分块；
+        可用时同步元数据到 PostgreSQL。
+        """
         # 尝试直接查找
         item = self._store.get(memory_id)
         parent_found = False
@@ -1519,8 +1560,9 @@ class SwarmMemory:
 
     def append_skill_version(self, memory_id: str, *, content: str,
                              author: str = "", description: str = "",
-                             skill_fields: Optional[dict] = None) -> dict:
-        """Skill 版本化（v5.2，借鉴 TencentDB Agent Memory appendNextVersion）。
+                             skill_fields: dict | None = None) -> dict:
+        """
+        Skill 版本化（v5.2，借鉴 TencentDB Agent Memory appendNextVersion）。.
 
         给已有技能记忆追加一个新版本：
           - 幂等：content 与 head 相同 → 返回 head（不新增版本）
@@ -1560,7 +1602,7 @@ class SwarmMemory:
             }
 
         new_version = str(len(versions) + 1)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         entry = {
             "version": new_version,
             "content_hash": content_hash,
@@ -1623,7 +1665,7 @@ class SwarmMemory:
         }
 
     def skill_versions(self, memory_id: str) -> list[dict]:
-        """读取技能版本历史（v5.2）。"""
+        """读取技能版本历史（v5.2）。."""
         import json as _json
         item = self._store.get(memory_id)
         if not item:
@@ -1638,7 +1680,7 @@ class SwarmMemory:
 
     def _update_item_lifecycle(self, item_id: str, meta: dict,
                                 life_stage: str,
-                                confidence: Optional[float] = None,
+                                confidence: float | None = None,
                                 evidence: str = "") -> bool:
         if life_stage not in LIFE_STAGES:
             return False
@@ -1650,7 +1692,7 @@ class SwarmMemory:
                 previous = meta.get("evidence", "")
                 meta["evidence"] = (
                     previous + "\n" if previous else "") + evidence
-            meta["updated"] = datetime.now(timezone.utc).isoformat()
+            meta["updated"] = datetime.now(UTC).isoformat()
             # 从 DocumentStore 加载内容用于重新嵌入
             doc = self._docstore_get(item_id)
             if doc:
@@ -1683,8 +1725,8 @@ class SwarmMemory:
             return True
 
     def lifecycle_counts(self) -> dict:
+        """按生命周期阶段统计记忆条数（跳过分块子 ID）。."""
         ids = self.get_all_memory_ids()
-        seen_groups = set()
         counts = {stage: 0 for stage in sorted(LIFE_STAGES)}
         for mid in ids:
             # 跳过分块子 ID（以 _cXXXX 结尾的）
@@ -1697,12 +1739,13 @@ class SwarmMemory:
         return counts
 
     def get_all_memory_ids(self) -> list[str]:
+        """返回全部记忆 doc_id 列表。."""
         return self._store.get_all_ids()
 
     # ==================== 内部 ====================
 
     def _item_to_dict(self, memory_id: str, meta: dict) -> dict:
-        """将 ChromaDB 元数据转为标准返回字典"""
+        """将 ChromaDB 元数据转为标准返回字典."""
         return {
             "memory_id": memory_id,
             "title": meta.get("title", ""),

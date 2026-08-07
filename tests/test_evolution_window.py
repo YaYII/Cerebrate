@@ -9,7 +9,7 @@
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -31,7 +31,7 @@ class EvolutionWindowFunctionTests(unittest.TestCase):
         """构造指定本地小时对应的 UTC 时刻（UTC+8 偏移）。"""
         local_naive = datetime(2026, 8, 7, hour, minute)
         utc = local_naive - timedelta(hours=config.evolution_window_tz_offset_hours)
-        return utc.replace(tzinfo=timezone.utc)
+        return utc.replace(tzinfo=UTC)
 
     def test_in_window_midnight(self):
         """本地 0:00-0:59 在窗口内。"""
@@ -105,7 +105,7 @@ class EvolutionWindowApiTests(unittest.TestCase):
             wraps=datetime,
         )
         self._mock_dt = self._now_patch.start()
-        self._mock_dt.now.return_value = local_noon_utc.replace(tzinfo=timezone.utc)
+        self._mock_dt.now.return_value = local_noon_utc.replace(tzinfo=UTC)
 
         from cerebrate.server.api import BrainAPI
         self.api = BrainAPI()

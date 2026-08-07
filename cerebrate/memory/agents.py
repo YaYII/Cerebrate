@@ -1,19 +1,18 @@
-"""智能体注册表 v5 — ChromaDB 后端，高并发安全"""
+"""智能体注册表 v5 — ChromaDB 后端，高并发安全."""
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cerebrate.config import config
 from cerebrate.core.storage import ChromaStore
 
 
 class AgentRegistry:
-    """管理所有连接到虫群的 AI 智能体"""
+    """管理所有连接到虫群的 AI 智能体."""
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self._store: Optional[ChromaStore] = None
+        self._store: ChromaStore | None = None
         self._cache: dict[str, dict] = {}  # agent_id -> 完整信息
         self._cache_lock = threading.Lock()
         self._init_store()
@@ -27,11 +26,11 @@ class AgentRegistry:
             config.chroma_path, "agents_registry", engine)
 
     def _import_legacy(self):
-        """从 ChromaDB 加载所有 agent 到缓存。"""
+        """从 ChromaDB 加载所有 agent 到缓存。."""
         self._load_from_chroma()
 
     def _load_from_chroma(self):
-        """从 ChromaDB 加载所有 agent 到缓存"""
+        """从 ChromaDB 加载所有 agent 到缓存."""
         for did in self._store.get_all_ids():
             item = self._store.get(did)
             if not item:
@@ -60,7 +59,7 @@ class AgentRegistry:
                 self._cache[aid] = info
 
     def _persist(self, agent_id: str):
-        """写回单个 agent"""
+        """写回单个 agent."""
         with self._cache_lock:
             info = self._cache.get(agent_id)
             if not info:
@@ -83,10 +82,16 @@ class AgentRegistry:
     # ==================================================================
 
     def register(self, agent_id: str, agent_type: str = "cli",
-                 capabilities: Optional[list[str]] = None,
-                 metadata: Optional[dict] = None,
+                 capabilities: list[str] | None = None,
+                 metadata: dict | None = None,
                  physical_user: str = "") -> dict:
-        now = datetime.now(timezone.utc).isoformat()
+        """
+        注册或更新智能体信息，返回智能体完整档案 dict。.
+
+        已注册则合并 capabilities/metadata 并刷新 last_active；未注册则创建新档案。
+        注册后持久化到 agents 存储。
+        """
+        now = datetime.now(UTC).isoformat()
         with self._cache_lock:
             if agent_id in self._cache:
                 info = self._cache[agent_id]
@@ -120,15 +125,18 @@ class AgentRegistry:
         self._persist(agent_id)
         return info
 
-    def get(self, agent_id: str) -> Optional[dict]:
+    def get(self, agent_id: str) -> dict | None:
+        """按 agent_id 读取智能体档案，未注册返回 None。."""
         with self._cache_lock:
             return self._cache.get(agent_id)
 
     def list_active(self) -> list[str]:
+        """返回当前已注册（活跃）的智能体 ID 列表。."""
         with self._cache_lock:
             return list(self._cache.keys())
 
     def list_details(self) -> list[dict]:
+        """返回全部智能体的详细信息列表（含成功率/贡献数/最近活跃时间）。."""
         with self._cache_lock:
             result = []
             for aid, info in self._cache.items():
@@ -149,8 +157,13 @@ class AgentRegistry:
 
     def record_action(self, agent_id: str, action_type: str,
                       project_id: str = "", outcome: str = "success",
-                      details: Optional[dict] = None) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+                      details: dict | None = None) -> None:
+        """
+        记录一次智能体动作（计入 total_actions 与 outcome 计数）。.
+
+        未注册的智能体会被隐式创建（默认 cli 类型），用于事后统计贡献与成功率。
+        """
+        now = datetime.now(UTC).isoformat()
         with self._cache_lock:
             info = self._cache.get(agent_id)
             if not info:
@@ -195,14 +208,15 @@ class AgentRegistry:
         self._persist(agent_id)
 
     def get_physical_user(self, agent_id: str) -> str:
-        """查询 agent 对应的物理用户（操作系统用户名），用于安全溯源。"""
+        """查询 agent 对应的物理用户（操作系统用户名），用于安全溯源。."""
         with self._cache_lock:
             info = self._cache.get(agent_id)
             if info:
                 return info.get("physical_user", "")
         return ""
 
-    def get_stats(self, agent_id: str) -> Optional[dict]:
+    def get_stats(self, agent_id: str) -> dict | None:
+        """返回智能体统计（动作数/成功率/贡献数等），未注册返回 None。."""
         with self._cache_lock:
             info = self._cache.get(agent_id)
             if not info:

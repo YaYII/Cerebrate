@@ -1,24 +1,23 @@
 """HTTP transport for the authoritative Cerebrate Brain Server."""
 
+import hmac
 import json
 import signal
 import threading
 import time
-import hmac
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from cerebrate.config import config
 from cerebrate.protocol import err, ok
 from cerebrate.server.api import BrainAPI
 from cerebrate.server.mcp_transport import (
-    handle_mcp_rpc, _rpc_error,
+    _rpc_error,
+    handle_mcp_rpc,
 )
-
 
 # ── 管理端点（admin-only）──────────────────────────────
 # 普通 user token 调用返回 403；master token（或本地开发无鉴权模式）放行。
@@ -45,7 +44,8 @@ _ADMIN_ENDPOINTS = {
 
 
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    """限制并发处理线程数，防高并发线程爆炸（阶段 1 扩展）。
+    """
+    限制并发处理线程数，防高并发线程爆炸（阶段 1 扩展）。.
 
     用 ThreadPoolExecutor(max_workers) 提交请求处理：超出上限的请求进入
     有界队列排队（而非无限开线程），配合客户端超时保护服务稳定性。
@@ -62,30 +62,38 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             thread_name_prefix="cerebrate-http")
 
     def process_request(self, request, client_address):
+        """将请求提交到有界线程池执行，超限请求排队而非无限开线程。."""
         self._executor.submit(self.process_request_thread,
                               request, client_address)
 
     def shutdown(self):
+        """关闭服务器：取消未执行任务并停止线程池。."""
         self._executor.shutdown(wait=False, cancel_futures=True)
         super().shutdown()
 
 
 class BrainRequestHandler(BaseHTTPRequestHandler):
+    """HTTP 请求处理器：路由到 BrainAPI，输出协议 v5 JSON。."""
+
     server_version = "CerebrateBrain/5"
 
     @property
     def api(self) -> BrainAPI:
+        """返回服务器持有的 BrainAPI 实例。."""
         return self.server.api  # type: ignore[attr-defined]
 
     def log_message(self, fmt, *args):
+        """开启 quiet 时静默，否则按父类记录访问日志。."""
         if getattr(self.server, "quiet", False):  # type: ignore[attr-defined]
             return
         super().log_message(fmt, *args)
 
     def do_GET(self):
+        """处理 GET 请求（委托 _handle）。."""
         self._handle("GET")
 
     def do_POST(self):
+        """处理 POST 请求（委托 _handle）。."""
         self._handle("POST")
 
     def _handle(self, method: str):
@@ -150,7 +158,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                             HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _parse_mcp_auth(self):
-        """解析 MCP 请求身份（与 _check_auth 一致，但允许匿名继续）。
+        """
+        解析 MCP 请求身份（与 _check_auth 一致，但允许匿名继续）。.
 
         - Bearer user token → current_user=uid, is_admin=False
         - Bearer master token → current_user="", is_admin=True
@@ -179,7 +188,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         self.is_admin = False
 
     def _handle_mcp(self, method: str):
-        """处理 MCP Streamable HTTP 端点（POST /v1/mcp）。
+        """
+        处理 MCP Streamable HTTP 端点（POST /v1/mcp）。.
 
         规范（2025-03-26）：
           - POST：JSON-RPC 消息（支持单对象与批量数组）
@@ -411,7 +421,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         raise RuntimeError(f"unknown endpoint: {method} {path}")
 
     def _check_auth(self) -> bool:
-        """校验 Bearer token（master token 或 user token）。
+        """
+        校验 Bearer token（master token 或 user token）。.
 
         - master token（config.server_token）：管理员，user_id=None
         - user token（登录获取）：确定 user_id（物理用户）
@@ -440,12 +451,12 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         return not master
 
     def _is_admin(self) -> bool:
-        """当前请求是否为管理员（master token / 本地开发无鉴权模式）。"""
+        """当前请求是否为管理员（master token / 本地开发无鉴权模式）。."""
         return getattr(self, "is_admin", False)
 
     @staticmethod
     def _endpoint_requires_admin(method: str, path: str) -> bool:
-        """该 (method, path) 是否属于管理端点（普通用户须 403）。"""
+        """该 (method, path) 是否属于管理端点（普通用户须 403）。."""
         if (method, path) in _ADMIN_ENDPOINTS:
             return True
         if method == "GET" and path.startswith("/v1/logs"):
@@ -462,8 +473,11 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
         return self._with_user(json.loads(raw))
 
     def _with_user(self, payload: dict) -> dict:
-        """把服务端认证的 user_id 注入 POST payload（_current_user）。
-        API 层以此为唯一可信身份（优先于客户端自报的 physical_user，防伪造）。"""
+        """
+        把服务端认证的 user_id 注入 POST payload（_current_user）。.
+
+        API 层以此为唯一可信身份（优先于客户端自报的 physical_user，防伪造）。.
+        """
         if isinstance(payload, dict):
             uid = getattr(self, "current_user", "")
             if uid:
@@ -484,8 +498,8 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 
     def _send_raw(self, body: str, content_type: str,
                   status: HTTPStatus = HTTPStatus.OK,
-                  extra_headers: Optional[dict] = None):
-        """发送裸响应（HTML 等非 JSON 信封）。"""
+                  extra_headers: dict | None = None):
+        """发送裸响应（HTML 等非 JSON 信封）。."""
         data = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -500,7 +514,7 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             pass
 
     def _serve_mcp_artifact(self, path: str):
-        """从项目根提供 MCP 客户端分发包（mcp.js / install.sh / VERSION）。"""
+        """从项目根提供 MCP 客户端分发包（mcp.js / install.sh / VERSION）。."""
         root = Path(__file__).resolve().parents[2]  # 容器内 /app
         mapping = {
             "/mcp/mcp.js": ("mcp.js", "text/javascript; charset=utf-8"),
@@ -575,7 +589,7 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
                 self._sse_semaphore.release()
 
     def _handle_ingest(self, payload: dict) -> dict:
-        """处理知识蒸馏吸入请求（POST /v1/ingest）。"""
+        """处理知识蒸馏吸入请求（POST /v1/ingest）。."""
         dir_raw = payload.get("dir", "")
         if not dir_raw:
             raise ValueError("缺少必填参数: dir")
@@ -593,6 +607,11 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
 
 
 def create_server(host: str = "", port: int = 0, quiet: bool = False) -> ThreadingHTTPServer:
+    """
+    创建并返回配置好的 HTTP 服务器实例。.
+
+    绑定 host/port（缺省取配置），挂载 BrainAPI，设定有界线程池与 quiet 标志。
+    """
     bind_host = host or config.server_host
     bind_port = config.server_port if port is None else port
     server = BoundedThreadingHTTPServer(
@@ -604,6 +623,7 @@ def create_server(host: str = "", port: int = 0, quiet: bool = False) -> Threadi
 
 
 def serve(host: str = "", port: int = 0, quiet: bool = False):
+    """启动 HTTP 服务并打印 base_url JSON，阻塞直到服务器关闭。."""
     server = create_server(host, port, quiet)
     actual_host, actual_port = server.server_address
     print(json.dumps(ok({

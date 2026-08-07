@@ -1,4 +1,5 @@
-"""Skill 结构化资产 — SKILL.md frontmatter 解析与校验（借鉴 TencentDB Agent Memory）。
+"""
+Skill 结构化资产 — SKILL.md frontmatter 解析与校验（借鉴 TencentDB Agent Memory）。.
 
 腾讯的 Skill 资产不是一段 Prompt：它有版本、资源文件、触发边界、
 执行步骤和验证规则，统一用 SKILL.md（frontmatter + body）表达。
@@ -9,8 +10,6 @@
 """
 
 import re
-from typing import Optional
-
 
 NAME_MAX = 64
 DESCRIPTION_MAX = 1024
@@ -18,8 +17,9 @@ BODY_MAX = 50_000
 NAME_REGEX = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
-def parse_skill_markdown(raw: str) -> Optional[dict]:
-    """从 SKILL.md 文本解析结构化 Skill 字段。
+def parse_skill_markdown(raw: str) -> dict | None:
+    r"""
+    从 SKILL.md 文本解析结构化 Skill 字段。.
 
     输入须以 `---\\n` 开头并有闭合围栏；否则返回 None（普通记忆）。
     解析出的字段：
@@ -82,7 +82,7 @@ def parse_skill_markdown(raw: str) -> Optional[dict]:
 
 
 def validate_skill_fields(skill: dict) -> tuple[bool, list[str]]:
-    """校验 Skill 结构化字段（对齐腾讯 skill-format 契约）。"""
+    """校验 Skill 结构化字段（对齐腾讯 skill-format 契约）。."""
     issues: list[str] = []
     name = skill.get("name", "")
     description = skill.get("description", "")

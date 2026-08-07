@@ -1,19 +1,18 @@
-"""权威知识库层 v5 — 服务端权威知识 + ChromaDB 向量存储"""
+"""权威知识库层 v5 — 服务端权威知识 + ChromaDB 向量存储."""
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
-from cerebrate.core.storage import ChromaStore
 from cerebrate.config import config
+from cerebrate.core.storage import ChromaStore
 
 
 class KnowledgeBase:
-    """权威知识库：ChromaDB 向量存储后端"""
+    """权威知识库：ChromaDB 向量存储后端."""
 
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self._store: Optional[ChromaStore] = None
+        self._store: ChromaStore | None = None
         self._hash_index: dict[str, str] = {}  # content_hash → doc_id
         self._init_store()
         self._build_hash_index()
@@ -24,7 +23,7 @@ class KnowledgeBase:
         self._store = ChromaStore(config.chroma_path, "knowledge_base", engine)
 
     def _get_fulltext(self):
-        """懒加载知识库 FTS5 全文索引（独立 db + 表前缀，与 swarm 隔离）。"""
+        """懒加载知识库 FTS5 全文索引（独立 db + 表前缀，与 swarm 隔离）。."""
         if not config.fulltext_enabled:
             return None
         if not hasattr(self, "_fulltext_cache"):
@@ -37,7 +36,7 @@ class KnowledgeBase:
     def _fts_upsert(self, doc_id: str, *, title: str, content: str,
                     tags: str, scope: str, project_id: str,
                     created: str, updated: str) -> bool:
-        """双写 FTS5（失败静默降级，不影响主写入路径）。"""
+        """双写 FTS5（失败静默降级，不影响主写入路径）。."""
         fts = self._get_fulltext()
         if not fts or not fts.available:
             return False
@@ -48,7 +47,7 @@ class KnowledgeBase:
             observation_type="knowledge")
 
     def _build_hash_index(self):
-        """启动时扫描一次，建立 content hash → doc_id 索引"""
+        """启动时扫描一次，建立 content hash → doc_id 索引."""
         self._hash_index.clear()
         for did in self._store.get_all_ids():
             item = self._store.get(did)
@@ -58,6 +57,7 @@ class KnowledgeBase:
                     self._hash_index[h] = did
 
     def flush(self):
+        """冲刷知识库（ChromaDB 自动持久化，当前为空实现占位）。."""
         pass  # ChromaDB 自动持久化
 
     # ==================== 写入 ====================
@@ -66,6 +66,12 @@ class KnowledgeBase:
               is_policy: bool = False, policy_name: str = "",
               version: str = "1.0", author: str = "",
               project_id: str = "", scope: str = "") -> str:
+        """
+        存入一篇知识文档，返回 doc_id。.
+
+        按 scope 归一化 project_id（general 清空，project 补齐当前项目）；
+        内容哈希 O(1) 去重，重复内容直接返回既有 doc_id；同步双写 FTS5 全文索引。
+        """
         if scope == "general":
             project_id = ""
         elif scope == "project":
@@ -82,10 +88,10 @@ class KnowledgeBase:
             return self._hash_index[doc_hash]
 
         doc_id = hashlib.sha256(
-            f"{title}{source}{datetime.now(timezone.utc).isoformat()}".encode()
+            f"{title}{source}{datetime.now(UTC).isoformat()}".encode()
         ).hexdigest()[:16]
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         search_text = f"{title}\n{content}"
         metadata = {
             "title": title,
@@ -115,16 +121,16 @@ class KnowledgeBase:
         return doc_id
 
     def fulltext_query(self, query: str, limit: int = 20,
-                       scope: Optional[str] = None,
-                       project_id: Optional[str] = None) -> list[dict]:
-        """知识库 FTS5 全文检索（精确关键词：命令/错误码/策略名）。"""
+                       scope: str | None = None,
+                       project_id: str | None = None) -> list[dict]:
+        """知识库 FTS5 全文检索（精确关键词：命令/错误码/策略名）。."""
         fts = self._get_fulltext()
         if not fts or not fts.available:
             return []
         return fts.search(query, limit=limit, scope=scope, project_id=project_id)
 
     def rebuild_fulltext(self, batch_size: int = 200) -> dict:
-        """从 ChromaDB 全量重建知识库 FTS5 索引。"""
+        """从 ChromaDB 全量重建知识库 FTS5 索引。."""
         fts = self._get_fulltext()
         if not fts:
             return {"status": "skipped", "reason": "fulltext disabled"}
@@ -159,10 +165,10 @@ class KnowledgeBase:
 
     # ==================== 查询 ====================
 
-    def lookup(self, query: str, topic: Optional[str] = None,
-               exact_policy: bool = False, project_id: Optional[str] = None,
-               scope: Optional[str] = None) -> list[dict]:
-        """向量语义查询知识库"""
+    def lookup(self, query: str, topic: str | None = None,
+               exact_policy: bool = False, project_id: str | None = None,
+               scope: str | None = None) -> list[dict]:
+        """向量语义查询知识库."""
         conditions = []
         if scope == "all":
             pass
@@ -226,6 +232,7 @@ class KnowledgeBase:
         return results[:5]
 
     def list_topics(self) -> list[str]:
+        """返回知识库中出现的全部主题标签列表。."""
         topics = set()
         for did in self._store.get_all_ids()[:500]:
             item = self._store.get(did)
@@ -236,6 +243,7 @@ class KnowledgeBase:
         return list(topics)
 
     def list_policies(self) -> list[str]:
+        """返回知识库中全部策略文档名（policy_name）列表。."""
         policies = set()
         for did in self._store.get_all_ids()[:500]:
             item = self._store.get(did)
@@ -245,14 +253,14 @@ class KnowledgeBase:
 
     def update_document(self, doc_id: str, title: str, content: str,
                         metadata: dict = None):
-        """更新已有文档的 ChromaDB 记录。"""
+        """更新已有文档的 ChromaDB 记录。."""
         item = self._store.get(doc_id)
         if not item:
             return False
         meta = item["metadata"]
         meta["content"] = content
         meta["title"] = title
-        meta["updated"] = datetime.now(timezone.utc).isoformat()
+        meta["updated"] = datetime.now(UTC).isoformat()
         if metadata:
             meta.update(metadata)
         text = f"{title}\n{content[:500]}"

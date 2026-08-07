@@ -16,7 +16,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cerebrate.server.auth import (
-    UserAuth, _hotp, generate_secret, totp_uri, verify_totp,
+    UserAuth,
+    _hotp,
+    generate_secret,
+    totp_uri,
+    verify_totp,
 )
 
 
@@ -29,7 +33,7 @@ class TotpAlgorithmTests(unittest.TestCase):
 
     def test_hotp_rfc_vector(self):
         """RFC 6238 SHA1 标准向量（6 位）。"""
-        import base64, struct
+        import base64
         secret = base64.b32decode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
         # RFC 6238: counter=0 → 755224; counter=1 → 287082; counter=2 → 359152
         self.assertEqual(_hotp(secret, 0), "755224")

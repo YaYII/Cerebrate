@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def configure_temp_env(tmp_name):
-    from cerebrate.config import config
     import cerebrate.core.embedding as embedding
+    from cerebrate.config import config
 
     root = Path(tmp_name) / "memory"
     config.memory_root = root
@@ -50,8 +50,8 @@ class MemoryScopeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         configure_temp_env(self.tmp.name)
-        from cerebrate.memory.swarm import SwarmMemory
         from cerebrate.config import config
+        from cerebrate.memory.swarm import SwarmMemory
         self.swarm = SwarmMemory(config.swarm_path)
 
     def tearDown(self):
@@ -147,7 +147,6 @@ class MemoryScopeTests(unittest.TestCase):
 
     def test_legacy_data_without_scope_inferred(self):
         """旧数据无 scope 字段时按 project_id 兼容推导"""
-        from cerebrate.memory.swarm import SwarmMemory
         mid = self._share("旧数据通用", "旧通用记忆", project_id="")
         item = self.swarm._store.get(mid)
         meta = item["metadata"]
@@ -181,8 +180,8 @@ class KnowledgeScopeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         configure_temp_env(self.tmp.name)
-        from cerebrate.memory.knowledge import KnowledgeBase
         from cerebrate.config import config
+        from cerebrate.memory.knowledge import KnowledgeBase
         self.kb = KnowledgeBase(config.knowledge_path)
 
     def tearDown(self):
