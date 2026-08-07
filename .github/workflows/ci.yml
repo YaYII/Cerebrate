@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ── 1. 代码规范（ruff 0 错误 + Node 语法）──────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff lint
+        run: ruff check cerebrate/ tests/
+      - name: Node syntax
+        run: node --check mcp.js
+
+  # ── 2. 全量单元测试（零 LLM 付费；CPU-only torch 对齐生产镜像）──
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - name: Install CPU-only torch（对齐 Dockerfile，避免拉 CUDA 版）
+        run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Unit tests
+        run: python -m pytest tests/ -q --ignore=tests/prod_test.py
+
+  # ── 3. Docker 镜像构建冒烟（验证 Dockerfile 可构建、服务可启动）──
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t cerebrate:ci .
+      - name: Start container
+        run: docker run -d --name cerebrate-ci -p 127.0.0.1:8765:8765 \
+          -e CEREBRATE_SERVER_TOKEN=ci-test \
+          -e CEREBRATE_EMBEDDING_ALLOW_DOWNLOAD=false \
+          cerebrate:ci
+      - name: Health check（等待服务就绪，最多 300s）
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf -m 5 -H "Authorization: Bearer ci-test" \
+                http://127.0.0.1:8765/v1/sense >/dev/null 2>&1; then
+              echo "✅ 服务在线 (第 ${i} 次探测)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ 服务未就绪，容器日志："
+          docker logs cerebrate-ci
+          exit 1
