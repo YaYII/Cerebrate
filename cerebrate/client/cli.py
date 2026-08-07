@@ -100,12 +100,15 @@ def cmd_project_navigate(args):
     }))
 
 def cmd_project_harvest(args):
-    """代码结构养料收割：扫描真实代码生成结构图谱（画像真实骨架）"""
-    output(client_request(args.url, "POST", "/v1/project/harvest", {
-        "project": args.project,
-        "dir": args.dir,
-        "exts": [args.exts] if args.exts else [".py"],
-    }))
+    """代码结构养料收割（deprecated，兼容入口）。
+
+    旧实现把本地 dir 交给服务端扫描（代码离开本地），违反
+    「代码不离开本地」架构红线；现转调 harvest-push（本地 AST → 只推结构）。
+    """
+    print("⚠️  project-harvest 已弃用：改为本地分析（代码不离开本地），"
+          "请优先使用 harvest-push；本命令现为 harvest-push 的兼容别名。",
+          file=sys.stderr)
+    cmd_harvest_push(args)
 
 def cmd_code_sync(args):
     """代码同步：把本地完整项目代码打包上传到脑虫服务器（→代码仓→harvest）"""
@@ -452,7 +455,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_project_navigate)
 
     p = sub.add_parser("project-harvest",
-                       help="代码结构养料收割（真实代码 AST → 画像骨架）")
+                       help="[已弃用] 代码结构养料收割（兼容 harvest-push 的旧入口）")
     p.add_argument("--project", default="", help="项目 ID")
     p.add_argument("--dir", default="", help="项目代码根目录（留空则读取已生成）")
     p.add_argument("--exts", default=".py", help="扫描扩展名（默认 .py）")
