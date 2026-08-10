@@ -6,6 +6,69 @@ Cerebrate 脑虫记忆系统的 MCP Server（Node.js 版，零依赖，node >= 1
 opencode / Trae 等 AI 客户端通过 [Model Context Protocol](https://modelcontextprotocol.io)
 接入脑虫服务。
 
+## 架构总览
+
+一句话：**你的 AI 客户端通过 `cerebrate-mcp` 连上脑虫服务端，把团队经验读写到共享存储**。
+下面两张图分别说明「系统由哪些部分组成」和「从零开始怎么用」。
+
+### 系统架构
+
+```mermaid
+graph TB
+    subgraph clients["① AI 客户端（使用者）"]
+        A1["Claude Code"]
+        A2["Codex"]
+        A3["Qoder / opencode / Trae"]
+    end
+
+    subgraph mcp["② cerebrate-mcp（MCP Server，本机运行）"]
+        B1["MCP 协议接入<br/>stdio / HTTP"]
+        B2["认证管理<br/>setup / login / status"]
+        B3["本地实体抽取<br/>（规则引擎，数据不出本机）"]
+    end
+
+    subgraph server["③ 脑虫服务端（Cerebrate Server）"]
+        C1["REST API /v1/*"]
+        C2["记忆内核<br/>swarm / personal / knowledge"]
+        C3["业务画像<br/>数据世界 + 流程世界"]
+        C4["认证<br/>TOTP → user token"]
+    end
+
+    subgraph storage["④ 存储层"]
+        D1[("ChromaDB<br/>向量库")]
+        D2[("文档存储<br/>{doc_id}.md")]
+        D3[("PostgreSQL<br/>元数据（可选）")]
+        D4[("事件日志")]
+    end
+
+    clients -->|"MCP 协议"| mcp
+    mcp -->|"HTTPS + Bearer token"| server
+    server --> storage
+```
+
+各层职责：
+
+| 层 | 组件 | 职责 |
+| --- | --- | --- |
+| ① 使用者 | Claude Code / Codex / Qoder / opencode / Trae | 你日常对话的 AI 助手 |
+| ② 接入层 | cerebrate-mcp | 把 MCP 协议翻译成脑虫 REST API；认证与本地实体抽取 |
+| ③ 服务端 | Cerebrate Server | 记忆读写、业务画像、共识进化、鉴权 |
+| ④ 存储 | ChromaDB / 文档 / PostgreSQL / 事件日志 | 向量、正文、元数据、审计事件 |
+
+### 接入使用流程
+
+```mermaid
+flowchart LR
+    S1["1. 安装<br/>npm install -g cerebrate-mcp@latest"] --> S2["2. 首次配置<br/>cerebrate-mcp setup --url --token"]
+    S2 --> S3["3. 接入 AI 客户端<br/>Claude Code / Codex / stdio"]
+    S3 --> S4["4. 会话中使用<br/>sense → search → propose"]
+    S1 -. "新用户" .-> R1["注册<br/>cerebrate_auth_register"]
+    R1 --> R2["浏览器扫码绑定<br/>Authenticator"]
+    R2 -. "拿到 user token" .-> S2
+```
+
+> 新用户：先注册 → 扫码绑定 → 拿到 token 后走第 2 步配置；老用户直接走 1 → 4。
+
 ## 安装（npm 标准方式，执行完即完成安装）
 
 ```bash
@@ -76,7 +139,7 @@ cerebrate-mcp logout|status   # 登出 / 查看状态
 
 ## 功能
 
-- 29 个 MCP 工具：记忆检索（sense/search/timeline/detail）、写入（propose/vote/use）、
+- 43 个 MCP 工具：记忆检索（sense/search/timeline/detail）、写入（propose/vote/use）、
   业务画像（profile/navigate/harvest）、认证（register/login）、实体抽取（本地）
 - 本地实体抽取：规则引擎在本地运行，实体数据不离开本机
 - 认证：TOTP（Authenticator）登录，token 为唯一凭证，长期有效
