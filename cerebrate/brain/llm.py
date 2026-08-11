@@ -7,7 +7,7 @@ LLM 客户端 — 脑虫的记忆管理者（Chief Memory Curator）.
 3. 自动分类归档、打标签、关联建议
 4. 检测知识库冲突
 5. 链式多轮知识整合（突破单次 token 限制）
-6. 思考模式推理（deepseek-v4-pro + thinking enabled）
+6. 思考模式推理（deepseek v4 全系 + thinking enabled，含便宜的 v4-flash）
 """
 
 import json
@@ -16,6 +16,7 @@ import re
 import time
 
 from cerebrate.config import config
+from cerebrate.core.llm_budget import LLMBudget
 
 
 class CerebrateLLM:
@@ -40,20 +41,67 @@ class CerebrateLLM:
         self._model = config.llm_model
         self._immune_enabled = config.immune_enabled
         self._immune_threshold = config.immune_threshold
+        self._budget: LLMBudget | None = None
+
+    @property
+    def budget(self) -> LLMBudget:
+        """每日消费账本（延迟初始化，路径依赖 config.memory_root）。"""
+        if self._budget is None:
+            self._budget = LLMBudget()
+        return self._budget
+
+    def _record_usage(self, response) -> None:
+        """从一次 LLM 调用响应提取 usage 记账（openai/deepseek + anthropic 兼容）。"""
+        try:
+            usage = getattr(response, "usage", None)
+            if not usage:
+                return
+            if self._provider == "anthropic":
+                prompt = int(getattr(usage, "input_tokens", 0) or 0)
+                completion = int(getattr(usage, "output_tokens", 0) or 0)
+                cached = (int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+                          + int(getattr(usage, "cache_creation_input_tokens", 0) or 0))
+            else:
+                prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+                completion = int(getattr(usage, "completion_tokens", 0) or 0)
+                details = getattr(usage, "prompt_tokens_details", None)
+                cached = int(getattr(details, "cached_tokens", 0) or 0) if details else 0
+            self.budget.record(prompt, completion, cached)
+        except Exception:
+            pass  # 记账失败不影响 LLM 功能
 
     def is_available(self) -> bool:
-        """检查 LLM 是否可用（仅检查 API Key 是否存在）."""
+        """检查 LLM 是否可用（API Key 存在 且 未超当日消费预算）。"""
         if self._available is not None:
-            return self._available
-        if self._provider == "anthropic":
-            self._available = bool(os.environ.get("ANTHROPIC_API_KEY"))
-        elif self._provider == "openai":
-            self._available = bool(os.environ.get("OPENAI_API_KEY"))
-        elif self._provider == "deepseek":
-            self._available = bool(os.environ.get("DEEPSEEK_API_KEY"))
+            has_key = self._available
         else:
-            self._available = False
-        return self._available
+            if self._provider == "anthropic":
+                has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+            elif self._provider == "openai":
+                has_key = bool(os.environ.get("OPENAI_API_KEY"))
+            elif self._provider == "deepseek":
+                has_key = bool(os.environ.get("DEEPSEEK_API_KEY"))
+            else:
+                has_key = False
+            self._available = has_key
+        if not has_key:
+            return False
+        # v5.2.2 预算门控：当日消费达预算 → 关闭 LLM（实时检查，不缓存；
+        # 次日账本自动重置后恢复）
+        if self.budget.exceeded():
+            if not getattr(self, "_budget_warned", False):
+                self._budget_warned = True
+                try:
+                    from cerebrate.brain.logger import get_logger
+                    get_logger().warning(
+                        "llm", "budget_exceeded",
+                        "LLM 当日消费已达预算，已自动关闭（次日重置恢复）",
+                        details=self.budget.today())
+                except Exception:
+                    pass
+            return False
+        self._budget_warned = False
+        return True
 
     def _sdk_ready(self) -> bool:
         """检查 SDK 是否可正常导入和初始化（失败后有 5 分钟冷却期）。."""
@@ -126,11 +174,14 @@ class CerebrateLLM:
         """
         当前模型是否支持/需要思考（推理）模式。.
 
-        DeepSeek: v4-pro 和 reasoner 都支持思考模式
+        DeepSeek: v4 全系（v4-flash / v4-pro）和 reasoner 都支持思考模式。
+        实测 deepseek-v4-flash 不带 thinking 参数时返回 content 为空、
+        推理全在 reasoning_content —— 必须走 thinking 分支才能拿到正文。
+        注意：模型名锁定 v4-flash（便宜），禁止切换到 v4-pro。
         """
         if self._provider != "deepseek":
             return False
-        return "v4-pro" in self._model or "reasoner" in self._model
+        return "v4" in self._model or "reasoner" in self._model
 
     def _deepseek_thinking_kwargs(self) -> dict:
         """
@@ -298,6 +349,7 @@ class CerebrateLLM:
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content
+            self._record_usage(response)
 
             match = re.search(r'\{[\s\S]*\}', text)
             if match:
@@ -418,15 +470,16 @@ class CerebrateLLM:
                 kwargs["max_tokens"] = 4096
                 kwargs["temperature"] = 0.3
             else:
-                kwargs["max_tokens"] = 65536
-                if self._provider == "deepseek" and "v4-pro" in self._model:
-                    kwargs.update(self._deepseek_thinking_kwargs())
+                # 思考模式：尊重调用方 max_tokens（避免固定 65536 造成 flash 成本浪费）
+                kwargs["max_tokens"] = max_tokens
+                kwargs.update(self._deepseek_thinking_kwargs())
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
                 text = response.content[0].text if response.content else ""
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content if response.choices else ""
+            self._record_usage(response)
 
             match = re.search(r'\{[\s\S]*\}', text)
             if match:
@@ -488,6 +541,7 @@ class CerebrateLLM:
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content
+            self._record_usage(response)
             text = (text or "").strip().strip('"').strip("'")
             return text[:60] if text else None
         except Exception:
@@ -542,6 +596,7 @@ class CerebrateLLM:
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content
+            self._record_usage(response)
             match = re.search(r'\{[\s\S]*\}', text or "")
             if match:
                 data = json.loads(match.group())
@@ -558,7 +613,8 @@ class CerebrateLLM:
         """
         统一的 LLM 对话补全调用，兼容 anthropic / openai / deepseek。.
 
-        思考模式模型（如 deepseek-v4-pro）自动启用 thinking 参数。
+        思考模式模型（deepseek v4 全系）自动启用 thinking 参数。
+        thinking 分支尊重调用方 max_tokens，不再固定 65536（省 flash 成本）。
         """
         client = self._get_client()
         if not client:
@@ -572,15 +628,17 @@ class CerebrateLLM:
             kwargs["max_tokens"] = max_tokens
             kwargs["temperature"] = temperature
         else:
-            kwargs["max_tokens"] = 65536
-            if self._provider == "deepseek" and "v4-pro" in self._model:
-                kwargs.update(self._deepseek_thinking_kwargs())
+            # 思考模式：max_tokens 用调用方传入值；v4 全系都启用 thinking 参数
+            kwargs["max_tokens"] = max_tokens
+            kwargs.update(self._deepseek_thinking_kwargs())
         try:
             if self._provider == "anthropic":
                 response = client.messages.create(**kwargs)
+                self._record_usage(response)
                 return response.content[0].text if response.content else None
             else:
                 response = client.chat.completions.create(**kwargs)
+                self._record_usage(response)
                 return response.choices[0].message.content if response.choices else None
         except Exception:
             return None
@@ -760,7 +818,7 @@ class CerebrateLLM:
 
         # ── 动态计算 batch_size ──
         # 目标：每个 LLM 请求的总 token 不超过上下文窗口的 80%
-        # deepseek-v4-pro 上下文窗口 128K token，保留 20% 给输出
+        # deepseek-v4 上下文窗口 128K token，保留 20% 给输出
         # 非思考模型保守设 8K，思考模型大输出设 128K
         if self._is_thinking_model:
             context_limit = 98304  # 128K * 0.75，留 25% 给 reasoning + output
@@ -930,6 +988,7 @@ class CerebrateLLM:
             else:
                 response = client.chat.completions.create(**kwargs)
                 text = response.choices[0].message.content if response.choices else ""
+            self._record_usage(response)
 
             match = re.search(r'\{[\s\S]*\}', text)
             if match:

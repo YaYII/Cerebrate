@@ -175,6 +175,7 @@ class BrainAPI:
                 "available": llm_ok,
                 "provider": llm.get("provider", ""),
                 "immune_enabled": bool(llm.get("immune_enabled")),
+                "budget": CerebrateLLM().budget.today(),
             },
             "load": {
                 "usage_records": usage_count,
@@ -2413,15 +2414,34 @@ class BrainAPI:
             except (TypeError, ValueError):
                 limit = 200
             llm_refine = payload.get("llm_refine")
+            branch = ""
             harvest = None
             if payload.get("use_harvest"):
                 from cerebrate.tools.code_harvest import load_harvest
-                harvest = load_harvest(project_id)
+                # 分支感知：显式 branch 优先，否则取项目默认分支（meta.default_branch）。
+                # 之前不带 branch 会找旧路径 harvest/{project_id}.json，
+                # 而 harvest-push 存的是分支版 harvest/{project_id}/{branch}.json
+                # → 必然 harvest_not_found（ihm-backend 实测）。
+                branch = payload.get("branch", "") or ""
+                if not branch:
+                    try:
+                        from cerebrate.tools.code_sync import list_branches
+                        info = list_branches(project_id)
+                        bs = [b["branch"] for b in info.get("branches", [])]
+                        db = info.get("default_branch") or ""
+                        # default_branch 优先；若仍是占位 "default" 且存在真实分支，
+                        # fallback 到第一个真实分支（兼容历史 meta 登记 bug）。
+                        branch = db if db in bs else (bs[0] if bs else db)
+                    except Exception:
+                        branch = ""
+                harvest = load_harvest(project_id, branch=branch)
                 if not harvest:
                     return {
                         "project_id": project_id,
                         "error": "harvest_not_found",
-                        "hint": "请先 POST /v1/project/harvest 生成代码结构",
+                        "branch": branch,
+                        "hint": f"未找到 {project_id} 的 harvest 结构（branch={branch or 'default'}），"
+                                "请先通过 harvest-push（本地 AST 分析）推结构",
                     }
             draft = store.build_draft(project_id, limit=limit,
                                       llm_refine=llm_refine,
@@ -2431,6 +2451,7 @@ class BrainAPI:
                 "status": draft.get("status", "draft"),
                 "domain_count": len(draft.get("domains", [])),
                 "harvest_source": bool(harvest),
+                "branch": branch,
                 "business_memories": len(
                     store._collect_memories(project_id, limit=limit)["business"]),
                 "draft": draft,
@@ -2568,7 +2589,12 @@ class BrainAPI:
         result["branch"] = branch or "default"
         # 更新分支登记 meta
         meta = _load_meta(project_id)
-        if not meta.get("default_branch"):
+        # 首次登记：_load_meta 对不存在文件返回 {"default_branch": "default"} 占位，
+        # 该占位值 truthy，导致旧判断 if not default_branch 永远不更新
+        # → default_branch 停在 "default" 与真实分支（如 master）不一致（ihm-backend 实测）。
+        if (not meta.get("default_branch")
+                or (meta.get("default_branch") == "default"
+                    and not meta.get("branches"))):
             meta["default_branch"] = branch or "default"
         meta["branches"][branch or "default"] = {
             "last_synced": datetime.now(UTC).isoformat(),

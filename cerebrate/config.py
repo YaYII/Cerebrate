@@ -67,6 +67,25 @@ class CerebrateConfig:
         default_factory=lambda: float(os.environ.get("CEREBRATE_LLM_TIMEOUT", "60"))
     )
 
+    # LLM 每日消费预算（v5.2.2 防钱包被攻击）：当日累计费用达到预算即自动关闭 LLM 能力。
+    #  - 默认 1 元/天（用户要求）
+    #  - 0 = 完全禁止 LLM（不花一分钱）；负值 = 不限制（回退旧行为）
+    # 记账方式：每次 LLM 调用成功后从响应 usage 提取 token 数 × 单价换算（本地记账，精确到调用）
+    llm_daily_budget_yuan: float = field(
+        default_factory=lambda: float(os.environ.get("CEREBRATE_LLM_DAILY_BUDGET_YUAN", "1.0"))
+    )
+    # deepseek-v4-flash 官方定价（元/百万 token，平峰价；官方 2026-08 预告涨价，
+    # 涨价后请自行调高——单价配置滞后只会让预算更早触发，方向安全）
+    llm_input_price_per_m: float = field(
+        default_factory=lambda: float(os.environ.get("CEREBRATE_LLM_INPUT_PRICE_PER_M", "1.0"))
+    )
+    llm_output_price_per_m: float = field(
+        default_factory=lambda: float(os.environ.get("CEREBRATE_LLM_OUTPUT_PRICE_PER_M", "2.0"))
+    )
+    llm_cached_input_price_per_m: float = field(
+        default_factory=lambda: float(os.environ.get("CEREBRATE_LLM_CACHED_INPUT_PRICE_PER_M", "0.02"))
+    )
+
     # 免疫系统配置
     immune_enabled: bool = field(default_factory=lambda: os.environ.get("CEREBRATE_IMMUNE_ENABLED", "true").lower() == "true")
     immune_threshold: float = field(default_factory=lambda: float(os.environ.get("CEREBRATE_IMMUNE_THRESHOLD", "0.7")))
