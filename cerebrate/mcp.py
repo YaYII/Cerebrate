@@ -416,14 +416,17 @@ TOOLS = [
     },
     {
         "name": "cerebrate_project_profile",
-        "description": "【业务画像-数据世界】为项目构建/读取业务画像（领域树+实体关系+依赖导航，地图式分层：先宏观俯瞰再微观深挖，避免 AI 大面积扫代码/被文档淹没）。\naction=read 读取画像（默认；level=summary 宏观概览/level=graph 中观图谱/level=detail 微观完整）；action=list 列出已有画像项目；action=draft 从业务记忆构建草稿（llm_refine=true 时用 LLM 精炼）；action=save 保存人工确认版（profile 字段传画像 JSON）；action=attach 把业务记忆挂到画像节点（node_path + memory_id）。",
+        "description": "【业务画像-数据世界】为项目构建/读取业务画像（领域树+实体关系+依赖导航，地图式分层：先宏观俯瞰再微观深挖，避免 AI 大面积扫代码/被文档淹没）。\naction=read 读取画像（默认；level=summary 宏观概览/level=graph 中观图谱/level=detail 微观完整）；action=list 列出已有画像项目；action=draft 构建草稿（use_harvest=true 时融合真实代码骨架；llm_refine=true 时用 LLM 精炼）；action=read_draft 读取当前草稿；action=promote 把草稿晋升为确认版；action=save 保存人工确认版（profile 字段传画像 JSON）；action=attach 把业务记忆挂到画像节点（node_path + memory_id）。",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "project": {"type": "string", "description": "项目 ID"},
-                "action": {"type": "string", "description": "read=读取(默认); list=列出; draft=构建草稿; save=保存确认版; attach=挂载记忆", "default": "read", "enum": ["read", "list", "draft", "save", "attach"]},
+                "action": {"type": "string", "description": "read=读取(默认); list=列出; draft=构建草稿; read_draft=读草稿; promote=晋升确认版; save=保存确认版; attach=挂载记忆", "default": "read", "enum": ["read", "list", "draft", "read_draft", "promote", "save", "attach"]},
                 "level": {"type": "string", "description": "read 时披露层级: summary=宏观概览(域+依赖+实体数); graph=中观图谱(域+实体+关系); detail=微观完整(字段+记忆)", "default": "detail", "enum": ["summary", "graph", "detail"]},
                 "llm_refine": {"type": "boolean", "description": "draft 时是否用 LLM 精炼（默认取服务端配置）", "default": False},
+                "use_harvest": {"type": "boolean", "description": "draft 时是否融合真实代码骨架（需先 harvest-push；branch 缺省取项目默认分支）", "default": False},
+                "branch": {"type": "string", "description": "draft+use_harvest 时指定代码分支（缺省取项目默认分支）", "default": ""},
+                "limit": {"type": "integer", "description": "draft 时收录业务记忆条数上限（默认 200，最大 500）", "default": 200},
                 "profile": {"type": "object", "description": "save 时传入的画像 JSON（domains/shared_tech 结构）"},
                 "node_path": {"type": "string", "description": "attach 时的节点路径，如 domain 或 domain/entity"},
                 "memory_id": {"type": "string", "description": "attach 时要挂载的记忆 ID"}
@@ -917,6 +920,9 @@ def _handle_call(name: str, args: dict) -> dict:
                 "action": args.get("action", "read"),
                 "level": args.get("level", "detail"),
                 "llm_refine": args.get("llm_refine", False),
+                "use_harvest": args.get("use_harvest", False),
+                "branch": args.get("branch", ""),
+                "limit": args.get("limit", 200),
                 "profile": args.get("profile"),
                 "node_path": args.get("node_path", ""),
                 "memory_id": args.get("memory_id", ""),

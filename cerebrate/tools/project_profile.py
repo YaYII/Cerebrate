@@ -528,8 +528,10 @@ class ProfileStore:
         llm = CerebrateLLM()
         if not llm.is_available():
             return None
+        # 输入记忆控制在 20 条：输入越小 → thinking 推理越短 → 输出越稳定，
+        # 且更便宜（deepseek-v4-flash）。40 条实测偶发截断/解析失败。
         mem_blocks = []
-        for m in business[:40]:
+        for m in business[:20]:
             mem_blocks.append(
                 f"- {m['memory_id']} | {m['category']} | {m['title']}")
         prompt = f"""你是企业级项目的领域架构师。基于以下项目「{project_id}」的业务记忆清单，
@@ -599,13 +601,21 @@ class ProfileStore:
 - flows 提炼 1-6 条核心流程（若记忆体现流程）；steps 按执行时序排列；state_machine 只填有依据的状态流转
 - 数据世界必须真实：宁可少而准，不要编造
 """
-        text = llm._chat_completion(
-            [{"role": "user", "content": prompt}], max_tokens=6000,
-            temperature=0.1)
-        if not text:
-            return None
-        parsed = self._parse_json(text)
-        if not parsed or not isinstance(parsed.get("domains"), list):
+        # max_tokens 需覆盖 thinking 模型的「推理 + 正文」总量：
+        # 6000 会被推理吃掉大部分、正文 JSON 截断；12000 对 flash 足够且仍
+        # 远小于旧固定 65536。输出偶发波动时重试一次（防截断静默回退）。
+        parsed = None
+        for _attempt in range(2):
+            text = llm._chat_completion(
+                [{"role": "user", "content": prompt}], max_tokens=12000,
+                temperature=0.1)
+            if not text:
+                continue
+            parsed = self._parse_json(text)
+            if parsed and isinstance(parsed.get("domains"), list):
+                break
+            parsed = None
+        if parsed is None:
             return None
         if not isinstance(parsed.get("flows"), list):
             parsed["flows"] = []

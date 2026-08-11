@@ -93,6 +93,8 @@ def cmd_project_profile(args):
     if args.action == "draft":
         body["llm_refine"] = args.llm_refine
         body["limit"] = args.limit
+        body["use_harvest"] = args.use_harvest
+        body["branch"] = args.branch
     output(client_request(args.url, "POST", "/v1/project/profile", body))
 
 def cmd_project_navigate(args):
@@ -465,11 +467,17 @@ def main(argv=None):
                        help="业务画像（数据世界）：项目的领域树+实体关系+依赖导航")
     p.add_argument("--project", default="", help="项目 ID")
     p.add_argument("--action", default="read",
-                   choices=["read", "list", "draft", "save", "attach"],
+                   choices=["read", "list", "draft", "read_draft",
+                            "promote", "save", "attach"],
                    help="read=读取(默认); list=列出; draft=构建草稿; "
+                        "read_draft=读草稿; promote=晋升确认版; "
                         "save=保存确认版; attach=挂载记忆")
     p.add_argument("--llm-refine", action="store_true",
                    help="draft 时用 LLM 精炼画像（默认关）")
+    p.add_argument("--use-harvest", action="store_true",
+                   help="draft 时融合真实代码骨架（需先 harvest-push）")
+    p.add_argument("--branch", default="",
+                   help="draft+use-harvest 时指定代码分支（缺省取项目默认分支）")
     p.add_argument("--limit", type=int, default=200,
                    help="draft 时收录的业务记忆条数上限（默认 200，最大 500）")
     p.set_defaults(func=cmd_project_profile)
