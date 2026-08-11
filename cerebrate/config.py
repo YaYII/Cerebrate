@@ -90,6 +90,17 @@ class CerebrateConfig:
         default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_WINDOW_TZ_OFFSET", "8"))
     )
 
+    # 单次进化蒸馏上限（v5.2.2 防「全量蒸馏」LLM 费用爆炸）：
+    #  - 分块记录（doc_group_id / total_chunks>1 / is_parent）不参与蒸馏与聚类
+    #  - 每次 evolve 最多蒸馏 N 个主题组（按组复用总量排序取 top N）
+    #  - 每组最多取 N 条记忆（按复用排序，防止大组链式 LLM 调用爆炸）
+    evolution_max_distill_groups: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_MAX_GROUPS", "20"))
+    )
+    evolution_max_mems_per_group: int = field(
+        default_factory=lambda: int(os.environ.get("CEREBRATE_EVOLUTION_MAX_MEMS", "30"))
+    )
+
     # 原始记忆归档保留（防删策略）：<=0 = 永不删除（默认，符合「任何记忆都有原始归档，防止被删除」）
     origin_retention_days: int = field(
         default_factory=lambda: int(os.environ.get("CEREBRATE_ORIGIN_RETENTION_DAYS", "0"))

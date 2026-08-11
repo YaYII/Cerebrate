@@ -13,6 +13,23 @@ class EvolutionEngine:
 
     EVO_LOG_DOC = "evolution_log"
 
+    @staticmethod
+    def _is_chunk_record(mem: dict) -> bool:
+        """分块/父文档记录不参与蒸馏与聚类。
+
+        背景（2026-08-11）：swarm 集合中 2.1 万条记录是 53 篇大文档的分块
+        （doc_group_id / total_chunks>1 / is_parent）。若参与蒸馏，
+        每个主题组会被撑到上万条 → 链式 LLM 调用爆炸 + 上下文溢出；
+        参与聚类则 O(n²) 向量比对卡死。
+        """
+        if mem.get("doc_group_id"):
+            return True
+        if (mem.get("total_chunks") or 1) > 1:
+            return True
+        if mem.get("is_parent"):
+            return True
+        return False
+
     def __init__(self, evolution_path: Path, manager):
         self.evolution_path = evolution_path
         self.manager = manager
@@ -157,8 +174,12 @@ class EvolutionEngine:
         for mid in mids:
             item = swarm._store.get(mid)
             if item and item.get("embedding") is not None:
+                meta = item["metadata"]
+                if meta.get("doc_group_id") or (meta.get("total_chunks") or 1) > 1 \
+                        or meta.get("is_parent"):
+                    continue  # 分块记录跳过（防 O(n²) 向量比对爆炸）
                 embeddings[mid] = item["embedding"]
-                memories[mid] = item["metadata"]
+                memories[mid] = meta
                 memories[mid]["memory_id"] = mid
 
         if len(embeddings) < 2:
@@ -234,6 +255,8 @@ class EvolutionEngine:
             mem = swarm._load_memory(mid)
             if not mem or mem.get("life_stage") in {"quarantined", "archived"}:
                 continue
+            if self._is_chunk_record(mem):
+                continue  # 分块记录跳过（防全量蒸馏 LLM 爆炸）
             reuse = int(mem.get("reuse_count", 0))
             success = int(mem.get("success_count", 0))
             # 全量纳入：不设 reuse 门槛，低复用解以降权方式参与蒸馏
@@ -251,12 +274,22 @@ class EvolutionEngine:
                 topic_groups.setdefault(tag, []).append(mem)
 
         # ── 尝试 LLM 综合整合，失败则回退模板 ──
+        # ── 单次进化蒸馏上限：按组复用总量排序取 top N（防 LLM 调用爆炸）──
+        sorted_groups = sorted(
+            topic_groups.items(),
+            key=lambda kv: sum(int(m.get("reuse_count", 0)) for m in kv[1]),
+            reverse=True,
+        )
         llm = CerebrateLLM()
-        for topic, mems in topic_groups.items():
+        for topic, mems in sorted_groups[: config.evolution_max_distill_groups]:
             # ── 质量门控 ──
             # 全量纳入：至少 2 条即可蒸馏，复用次数低则置信度降权
             if len(mems) < 2:
                 continue
+            # 组内记忆上限：按复用排序取 top N（防大组链式 LLM 调用爆炸）
+            if len(mems) > config.evolution_max_mems_per_group:
+                mems = sorted(mems, key=lambda m: int(m.get("reuse_count", 0)),
+                              reverse=True)[: config.evolution_max_mems_per_group]
             total_reuse = sum(m.get("reuse_count", 0) for m in mems)
             unique_agents = {m.get("source_agent", "") for m in mems if m.get("source_agent")}
             unique_agents.discard("")
@@ -362,6 +395,8 @@ class EvolutionEngine:
             mem = swarm._load_memory(mid)
             if not mem or mem.get("life_stage") not in {"verified_skill", "memory"}:
                 continue
+            if self._is_chunk_record(mem):
+                continue  # 分块记录跳过（防教条固化 LLM 爆炸）
             reuse = int(mem.get("reuse_count", 0))
             success = int(mem.get("success_count", 0))
             # 不设 reuse 门槛，低复用解以降权方式参与教条固化

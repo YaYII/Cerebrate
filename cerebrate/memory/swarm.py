@@ -1429,11 +1429,13 @@ class SwarmMemory:
             has_chunks = meta.get("is_parent", False) or meta.get("total_chunks", 1) > 1
             # 先删所有分块
             if has_chunks:
-                chunks = self._store.get_items_by_where(
+                # 全量取分块 id（v5.2.2：get_items_by_where 默认 limit=100 会漏删
+                # 超大文档 >100 块的分块，2026-08-11 清理事故发现）
+                chunk_ids = self._store.get_ids_by_where(
                     {"doc_group_id": memory_id})
-                for ch in chunks:
-                    self._store.delete(ch["id"])
-                    self._docstore_delete(ch["id"])
+                for ch_id in chunk_ids:
+                    self._store.delete(ch_id)
+                    self._docstore_delete(ch_id)
             # 再删主条目
             self._store.delete(memory_id)
             with self._stats_lock:
@@ -1442,12 +1444,12 @@ class SwarmMemory:
             return True
 
         # 按 doc_group_id 查找分块
-        chunks = self._store.get_items_by_where(
+        chunk_ids = self._store.get_ids_by_where(
             {"doc_group_id": memory_id})
-        if chunks:
-            for ch in chunks:
-                self._store.delete(ch["id"])
-                self._docstore_delete(ch["id"])
+        if chunk_ids:
+            for ch_id in chunk_ids:
+                self._store.delete(ch_id)
+                self._docstore_delete(ch_id)
             with self._stats_lock:
                 self._stats["total"] = max(0, self._stats["total"] - 1)
                 self._dirty = True

@@ -309,3 +309,25 @@ class ChromaStore:
                     items.append({"id": mid, "metadata": meta, "document": doc, "embedding": emb})
                 return items
         return _retry_busy(_get)
+
+    def get_ids_by_where(self, where: dict, limit: int = 100000) -> list[str]:
+        """
+        按元数据条件返回匹配的 doc_id 列表（轻量，仅 id，不拉文档/向量）。
+
+        用于删除等只关心 id 的场景（拉取 embedding 对大数据集会显著变慢）。
+        limit 默认 100000：覆盖单篇文档最大分块数，防止漏删。
+
+        Args:
+            where: ChromaDB 元数据过滤条件，如 {"doc_group_id": "abc123"}
+            limit: 最大返回数
+
+        Returns:
+            doc_id 列表
+        """
+        def _get():
+            with ChromaStore._semaphore():
+                results = self._collection.get(
+                    where=where, include=[], limit=limit,
+                )
+                return results.get("ids") or []
+        return _retry_busy(_get)
