@@ -45,6 +45,7 @@ export interface AopResult {
  * 返回探针脚本绝对路径。
  */
 export function generateProbe(entryAbs: string, outDir: string): string {
+
   mkdirSync(outDir, { recursive: true })
   const probePath = join(outDir, 'aop-probe.mjs')
   const script = `
@@ -79,6 +80,11 @@ const wrap = (ns, prefix) => {
 }
 const mod = await import(${JSON.stringify('file://' + entryAbs)})
 const wrapped = wrap(mod.default ?? mod, '')
+// 递归包裹 import 的子模块导出，实现跨模块调用链观测（业务层 → 功能层砖块）
+const subWrapped = {}
+for (const [k, v] of Object.entries(mod)) {
+  if (k !== 'default' && typeof v === 'object' && v !== null) subWrapped[k] = wrap(v, k + '.')
+}
 // 触发入口：优先 default 函数；否则尝试具名业务入口（processOrder/process/main/run/start/execute）
 const ENTRY_NAMES = ['default', 'processOrder', 'process', 'main', 'run', 'start', 'execute', 'handler']
 let entryFn = null
