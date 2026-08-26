@@ -3,7 +3,7 @@
  *
  * 每个工具的 execute 逻辑都是**顶层导出函数**（可独立单元测试），
  * buildImpls 只做装配引用——不嵌套闭包，测试零遗漏。
- * wiki_write（impls-write.ts）与 wiki_evolve（impls-evolve.ts）同构独立。
+ * 落盘工具与进化工具各自独立成文件，与本文件同构。
  *
  * @module @deepseek-ai/dsh-project-wiki
  */
@@ -96,7 +96,7 @@ export async function executeWikiStatus(
 
 // ── 装配注册表：只做引用，不嵌套逻辑 ──
 
-/** 实现注册表：顶层函数装配（write/evolve 独立模块 + 4 个轻量工具）。 */
+/** 实现注册表：顶层函数装配（落盘/进化独立模块 + 4 个轻量工具）。 */
 export function buildImpls(ctx: Context, config: { vaultDir: string; kbRoot: string }): ToolImpl[] {
   return [
     buildWriteImpl(config),
