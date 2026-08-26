@@ -10,7 +10,7 @@
  * @module @deepseek-ai/dsh-code-architecture
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
@@ -44,7 +44,27 @@ export interface AopResult {
  * 生成探针脚本：包裹目标入口模块的导出函数，记录调用与耗时。
  * 返回探针脚本绝对路径。
  */
+/**
+ * 暂存入口模块：复制为 .mjs 并给相对导入补 .ts 后缀，
+ * 使探针能在 Node ESM 下直接加载 TypeScript 模块。
+ */
+function stageEntry(entryAbs: string, outDir: string): string {
+  const src = readFileSync(entryAbs, 'utf8')
+  const outAbs = entryAbs.replace(/.ts$/, '.stage.ts')
+  // 给相对导入补 .ts 后缀（Node ESM + strip-types 需要显式扩展名）
+  const rewritten = src.replace(/from\s+['"]([^'"]+)['"]/g, (m: string, spec: string) => {
+    if (spec.startsWith('.')) {
+      return m.replace(spec, spec.endsWith('.ts') ? spec : spec + '.ts')
+    }
+    return m
+  })
+  writeFileSync(outAbs, rewritten, 'utf8')
+  return outAbs
+}
 export function generateProbe(entryAbs: string, outDir: string): string {
+  // 把入口 .ts 复制为临时 .mjs，并给相对导入补 .ts 后缀（Node ESM 需要显式扩展名）
+  entryAbs = stageEntry(entryAbs, outDir)
+
 
   mkdirSync(outDir, { recursive: true })
   const probePath = join(outDir, 'aop-probe.mjs')
@@ -86,13 +106,23 @@ for (const [k, v] of Object.entries(mod)) {
   if (k !== 'default' && typeof v === 'object' && v !== null) subWrapped[k] = wrap(v, k + '.')
 }
 // 触发入口：优先 default 函数；否则尝试具名业务入口（processOrder/process/main/run/start/execute）
-const ENTRY_NAMES = ['default', 'processOrder', 'process', 'main', 'run', 'start', 'execute', 'handler']
+const ENTRY_NAMES = ['default', 'processVerify', 'processOrder', 'process', 'main', 'run', 'start', 'execute', 'handler']
 let entryFn = null
 for (const n of ENTRY_NAMES) {
   if (typeof wrapped[n] === 'function') { entryFn = wrapped[n]; break }
 }
+// 兜底：未命中预设入口时，取第一个导出函数作为入口
+if (!entryFn) {
+  const first = Object.entries(wrapped).find(([, v]) => typeof v === 'function')
+  if (first) entryFn = first[1]
+}
 if (entryFn && process.env.AOP_CALL_ENTRY === '1') {
-  try { await entryFn() } catch {}
+  try {
+    // 入口可能声明参数：用空字符串/数字演示参数触发，让业务流转真实跑起来
+    await entryFn('', '', 0)
+  } catch (e) {
+    records.push({ name: 'ENTRY_CALL_FAILED', seq: ++seq, ms: 0, start: Date.now(), threw: true, depth: 0 })
+  }
 }
 process.stdout.write('\\n__AOP_RESULT__' + JSON.stringify(records) + '\\n')
 `
@@ -115,7 +145,7 @@ export function runAopProbe(opts: {
   const timeout = opts.timeoutMs ?? 60000
   let stdout = ''
   try {
-    const res = execFileSync('node', ['--input-type=module', '-e', 'process.env.AOP_CALL_ENTRY="1"; import(' + JSON.stringify('file://' + probePath) + ')'], {
+    const res = execFileSync('node', ['--experimental-strip-types', '--input-type=module', '-e', 'process.env.AOP_CALL_ENTRY="1"; import(' + JSON.stringify('file://' + probePath) + ')'], {
       cwd,
       timeout,
       encoding: 'utf8',
