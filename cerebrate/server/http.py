@@ -27,7 +27,8 @@ _ADMIN_ENDPOINTS = {
     ("GET", "/v1/auth/users"),
     ("POST", "/v1/auth/rebind"),
     ("POST", "/v1/soul/set"),
-    ("POST", "/v1/knowledge"),
+    # 分层权限：普通知识写（POST /v1/knowledge）放开给已登录 agent；
+    # 权威/策略（is_policy 或 authoritative=true）在路由内单独要求 admin。
     ("POST", "/v1/knowledge/distill"),
     ("POST", "/v1/distill"),
     ("POST", "/v1/fulltext/rebuild"),
@@ -322,6 +323,7 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
             return self.api.set_personal(payload)
         if method == "POST" and path == "/v1/knowledge":
             payload = self._read_json()
+            self._check_knowledge_write(payload)
             return self.api.store_knowledge(payload)
         if method == "POST" and path == "/v1/knowledge/distill":
             payload = self._read_json()
@@ -471,6 +473,22 @@ class BrainRequestHandler(BaseHTTPRequestHandler):
     def _is_admin(self) -> bool:
         """当前请求是否为管理员（master token / 本地开发无鉴权模式）。."""
         return getattr(self, "is_admin", False)
+
+    def _check_knowledge_write(self, payload: dict) -> None:
+        """权威知识库写入的分层权限（v5.3 团队知识库）。
+
+        - 权威/策略文档（is_policy=True 或 authoritative=True）→ 仅管理员。
+        - 普通知识文档 → 任意已认证 agent（带合法 user token）。
+        - 未认证匿名（生产有 master 时无 token）→ 401。
+        """
+        authoritative = bool(payload.get("is_policy") or payload.get("authoritative"))
+        if authoritative:
+            if not self._is_admin():
+                raise PermissionError(f"authoritative knowledge write requires admin: {self.current_user or 'anonymous'}")
+            payload["authoritative"] = True
+            return
+        if not self._is_admin() and not self.current_user:
+            raise PermissionError("knowledge write requires authenticated user or admin")
 
     @staticmethod
     def _endpoint_requires_admin(method: str, path: str) -> bool:

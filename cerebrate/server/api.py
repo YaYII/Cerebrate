@@ -2308,7 +2308,12 @@ class BrainAPI:
         return self.mm.lookup_knowledge(query, topic=t, project_id=pid, scope=s)
 
     def store_knowledge(self, payload: dict) -> dict:
-        """手动写入权威知识库。."""
+        """手动写入权威知识库。
+
+        分层权限（v5.3 团队知识库）：is_policy 与 authoritative 为同一权威
+        概念的两个入口名；权威文档在 http 层已要求 admin。authoritative 真值
+        归一为 is_policy=True 存入库内，使检索侧的 policy 加权/权威标记生效。
+        """
         title = payload.get("title", "")
         content = payload.get("content", "")
         if not title or not content:
@@ -2316,15 +2321,16 @@ class BrainAPI:
         topics = payload.get("topics", [])
         if isinstance(topics, str):
             topics = [t.strip() for t in topics.split(",") if t.strip()]
+        is_policy = bool(payload.get("is_policy") or payload.get("authoritative"))
         doc_id = self.mm.store_knowledge(
             title=title,
             content=content,
             source=payload.get("source", "manual"),
             topics=topics,
-            is_policy=payload.get("is_policy", False),
+            is_policy=is_policy,
             policy_name=payload.get("policy_name", ""),
             version=payload.get("version", "1.0"),
-            author=payload.get("author", ""),
+            author=payload.get("author", "") or payload.get("_current_user", "") or "manual",
             project_id=payload.get("project_id", ""),
             scope=payload.get("scope", ""),
         )
