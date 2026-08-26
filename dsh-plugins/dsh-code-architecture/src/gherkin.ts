@@ -27,10 +27,11 @@ export interface GherkinScenario {
 /** 业务层目录标记。 */
 const BUSINESS_DIRS = ['biz', 'business', 'services', 'service', 'controllers', 'controller', 'app', 'modules', 'module', 'domains', 'domain']
 
-/** 收集业务层源文件。 */
+/** 收集业务层源文件；无业务目录时回退全部源码文件。 */
 function collectBusinessFiles(root: string): string[] {
   const out: string[] = []
-  const walk = (dir: string) => {
+  let foundBusiness = false
+  const walk = (dir: string, fromBusiness: boolean) => {
     let names: string[] = []
     try { names = readdirSync(dir) } catch { return }
     for (const name of names) {
@@ -38,14 +39,30 @@ function collectBusinessFiles(root: string): string[] {
       const abs = join(dir, name)
       let st: ReturnType<typeof statSync>
       try { st = statSync(abs) } catch { continue }
-      if (st.isDirectory()) walk(abs)
+      if (st.isDirectory()) walk(abs, fromBusiness || BUSINESS_DIRS.includes(name))
       else if (/\.(ts|js|mjs)$/.test(name) && !name.endsWith('.spec.ts') && !name.endsWith('.test.ts')) {
-        const rel = abs.slice(root.length + 1).replace(/\\/g, '/')
-        if (rel.split('/').some(s => BUSINESS_DIRS.includes(s))) out.push(abs)
+        if (fromBusiness) { out.push(abs); foundBusiness = true }
       }
     }
   }
-  walk(root)
+  walk(root, false)
+  if (!foundBusiness) {
+    // 回退：扫全部源码文件，让无业务目录的项目也能生成 BDD 场景
+    out.length = 0
+    const walkAll = (dir: string) => {
+      let names: string[] = []
+      try { names = readdirSync(dir) } catch { return }
+      for (const name of names) {
+        if (['node_modules', '.git', 'dist', 'lib', '.code-arch', 'tests', 'coverage'].includes(name)) continue
+        const abs = join(dir, name)
+        let st: ReturnType<typeof statSync>
+        try { st = statSync(abs) } catch { continue }
+        if (st.isDirectory()) walkAll(abs)
+        else if (/\.(ts|js|mjs)$/.test(name) && !name.endsWith('.spec.ts') && !name.endsWith('.test.ts')) out.push(abs)
+      }
+    }
+    walkAll(root)
+  }
   return out.sort()
 }
 
@@ -56,8 +73,11 @@ function docOf(text: string, fnIndex: number): string {
   const docs: string[] = []
   for (let i = lines.length - 1; i >= 0; i--) {
     const t = lines[i]!.trim()
-    if (t.startsWith('*') || t.startsWith('/**') || t.startsWith('//')) docs.unshift(t.slice(t.indexOf('*') + 1).replace(/(^\s*\/\/\s*)|(^\s*\/\*\*?\s*)|(\*\/\s*$)|(^\s*\*\s*)/g, '').trim())
-    else break
+    if (t.startsWith('*') || t.startsWith('/**') || t.startsWith('//')) {
+      // 去掉注释标记：* / ** / // 前缀与 */ 后缀
+      const clean = t.replace(/^\/\*\*?/, '').replace(/^\/\//, '').replace(/\*\/$/, '').replace(/^\*/, '').replace(/^\* /, '').trim()
+      docs.unshift(clean)
+    } else break
   }
   return docs.join(' ').slice(0, 120)
 }
