@@ -168,9 +168,10 @@ export function apply(ctx: Context, config: Config): void {
       project: { type: 'string', description: '被观测项目目录（缺省为当前目录）' },
       entry: { type: 'string', description: '入口文件相对路径（缺省自动探测 src/index.ts 等）' },
       timeoutMs: { type: 'number', description: '探针超时（毫秒，默认 60000）' },
+      baseline: { type: 'boolean', description: '保存本次观测为行为基线（默认 false，只对比）' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-    async execute(args: { project?: string; entry?: string; timeoutMs?: number }) {
+    async execute(args: { project?: string; entry?: string; timeoutMs?: number; baseline?: boolean }): Promise<Record<string, JsonValue>> {
       const projectDir = resolveProject(args.project, process.cwd())
       const entryRel = args.entry ?? findEntry(projectDir) ?? ''
       if (!entryRel) {
@@ -183,12 +184,61 @@ export function apply(ctx: Context, config: Config): void {
       }
       const report = aopReportText(result)
       saveArtifact(projectDir, config.artifactsDir, 'last-aop.md', report)
+      const baselinePath = resolve(projectDir, config.artifactsDir, 'aop-baseline.json')
+      // 行为基线：保存本次热点快照，供下次对比漂移
+      if (args.baseline) {
+        saveArtifact(projectDir, config.artifactsDir, 'aop-baseline.json', { savedAt: new Date().toISOString(), hotspots: result.hotspots })
+        return {
+          status: 'ok',
+          data: {
+            calls: result.calls.length,
+            threw: result.threw,
+            hotspots: result.hotspots.slice(0, 10),
+            baselineSaved: true,
+            report,
+            artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
+          },
+        }
+      }
+      // 对比基线：报告行为漂移（函数耗时变化/新增热点/消失热点）
+      const { existsSync, readFileSync: rfs } = await import('node:fs')
+      if (existsSync(baselinePath)) {
+        const base = JSON.parse(rfs(baselinePath, 'utf8')) as { hotspots: Array<{ name: string; count: number; totalMs: number; avgMs: number; maxMs: number }> }
+        const baseMap = new Map(base.hotspots.map(h => [h.name, h]))
+        const curMap = new Map(result.hotspots.map(h => [h.name, h]))
+        const drift = []
+        for (const [name, h] of curMap) {
+          const b = baseMap.get(name)
+          if (!b) drift.push({ name, change: '新增热点', totalMs: h.totalMs })
+          else {
+            const pct = b.totalMs === 0 ? 0 : Math.round((h.totalMs - b.totalMs) / b.totalMs * 100)
+            if (Math.abs(pct) >= 20) drift.push({ name, change: pct > 0 ? '耗时上升 ' + pct + '%' : '耗时下降 ' + Math.abs(pct) + '%', totalMs: h.totalMs, baselineMs: b.totalMs })
+          }
+        }
+        for (const [name, h] of baseMap) {
+          if (!curMap.has(name)) drift.push({ name, change: '热点消失', baselineMs: h.totalMs })
+        }
+        return {
+          status: 'ok',
+          data: {
+            calls: result.calls.length,
+            threw: result.threw,
+            hotspots: result.hotspots.slice(0, 10),
+            baselineCompared: true,
+            behaviorDrift: drift,
+            report,
+            artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
+          },
+        }
+      }
       return {
         status: 'ok',
         data: {
           calls: result.calls.length,
           threw: result.threw,
           hotspots: result.hotspots.slice(0, 10),
+          baselineCompared: false,
+          note: '无基线（可用 baseline=true 保存首次观测）',
           report,
           artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
         },
@@ -245,4 +295,6 @@ export function apply(ctx: Context, config: Config): void {
 export { runArchChecks, collectSourceFiles } from './checks'
 export type { ArchFinding, ArchReport } from './checks'
 export { runAopProbe, aopReportText, findEntry } from './aop'
+export { fingerprintProject, diffFingerprints } from './fingerprint'
+export type { ArchFingerprint, FingerprintDiff } from './fingerprint'
 export type { AopResult, CallRecord } from './aop'
