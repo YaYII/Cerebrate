@@ -79,9 +79,14 @@ const wrap = (ns, prefix) => {
 }
 const mod = await import(${JSON.stringify('file://' + entryAbs)})
 const wrapped = wrap(mod.default ?? mod, '')
-// 触发入口（若默认导出为函数则调用之）
-if (typeof wrapped.default === 'function' && process.env.AOP_CALL_ENTRY === '1') {
-  try { await wrapped.default() } catch {}
+// 触发入口：优先 default 函数；否则尝试具名业务入口（processOrder/process/main/run/start/execute）
+const ENTRY_NAMES = ['default', 'processOrder', 'process', 'main', 'run', 'start', 'execute', 'handler']
+let entryFn = null
+for (const n of ENTRY_NAMES) {
+  if (typeof wrapped[n] === 'function') { entryFn = wrapped[n]; break }
+}
+if (entryFn && process.env.AOP_CALL_ENTRY === '1') {
+  try { await entryFn() } catch {}
 }
 process.stdout.write('\\n__AOP_RESULT__' + JSON.stringify(records) + '\\n')
 `
