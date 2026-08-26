@@ -119,7 +119,8 @@ export function checkCommentLanguage(absPath: string, relPath: string): ArchFind
     const text = trimmed
       .replace(/^\/\*\*?/, '').replace(/^\/\//, '').replace(/\*\/$/, '')
       .replace(/^\*/, '').replace(/^\* /, '').trim()
-    if (text.length === 0 || text.startsWith('@module')) continue
+    // JSDoc 标签行（@param/@returns/@module 等）是声明性文档，跳过英文词检测
+    if (text.length === 0 || text.startsWith('@')) continue
     const withoutAllowed = text.replace(allowedRe, '')
     if (EN_WORDS.some(w => new RegExp(`\\b${w}\\b`).test(withoutAllowed))) {
       findings.push({

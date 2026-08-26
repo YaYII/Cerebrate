@@ -109,7 +109,7 @@ export function vaultCommit(vaultRoot: string, message: string): { committed: bo
   // 非 git 仓库：无提交能力，静默返回（vault 可能只是普通目录）
   if (!existsSync(join(root, '.git'))) return { committed: false, head: '' }
   // 三步提交：add 全部 → 检查是否有变化 → commit。
-  // 用 --no-verify 跳过 vault 的 pre-commit 钩子（可能有格式检查导致 AI 写入失败）。
+  // 提交时跳过 vault 的提交前钩子校验（钩子可能含格式检查，会导致 AI 写入失败）。
   spawnSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' })
   const status = git(root, ['status', '--porcelain'])
   // 工作树干净：无变化可提交，但返回当前 head 供调用方感知
