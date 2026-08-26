@@ -1,0 +1,15 @@
+{
+  "name": "@deepseek-ai/dsh-code-architecture",
+  "description": "代码架构自检插件：注释语言/命名规范/重复功能/功能业务分离/依赖方向 + AOP 执行观测",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "test": "vitest run",
+    "check": "node scripts/check-all.mjs"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
