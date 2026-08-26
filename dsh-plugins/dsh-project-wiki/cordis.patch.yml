@@ -1,0 +1,10 @@
+# dsh-project-wiki profile patch layer — insert one loader entry for the
+# plugin package. Apply by appending this insert block to
+# ~/.dsh/profiles/<profile>/cordis.patch.yml, then restart the dsh service.
+- insert:
+    - id: project-wiki
+      name: '/home/as-workstation01/Documents/project/Cerebrate/dsh-plugins/dsh-project-wiki/lib/index.js'
+      config:
+        vaultDir: '~/Documents/team-kb'
+        kbRoot: '项目知识库'
+        injectGuidance: true

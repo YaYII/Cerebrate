@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@deepseek-ai/dsh-project-wiki — 架构分解图</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #fafafa; color: #111827; padding: 48px 24px; line-height: 1.5; }
+    .wrap { max-width: 1120px; margin: 0 auto; }
+    h1 { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+    .subtitle { font-size: 15px; color: #6b7280; margin-bottom: 32px; }
+    .diagram { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; }
+    svg { display: block; width: 100%; height: auto; }
+    .footnote { font-size: 12px; color: #9ca3af; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>@deepseek-ai/dsh-project-wiki — 架构分解图</h1>
+    <p class="subtitle">模块（目录）分解结构：节点 = 目录及文件/行数，边 = 目录包含关系。自动派生自代码扫描，可 diff。</p>
+    <div class="diagram">
+      <svg viewBox="0 0 540.8 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dg-title">
+        <title id="dg-title">@deepseek-ai/dsh-project-wiki 模块架构分解图</title>
+        <defs>
+          <marker id="tree-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#6b7280"/>
+          </marker>
+          <style>
+            .nbox { fill: #fff; stroke: #d1d5db; stroke-width: 1.5; }
+            .nbox-root { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+            .nlbl { font: 600 13px system-ui, sans-serif; fill: #111827; }
+            .nsub { font: 400 11px system-ui, sans-serif; fill: #6b7280; }
+            .nedge { fill: none; stroke: #9ca3af; stroke-width: 1.5; marker-end: url(#tree-arrow); }
+          </style>
+        </defs>
+        <rect class="nbox nbox-root" x="24" y="24" width="321" height="60" rx="8"/>
+        <text class="nlbl" x="44" y="51">@deepseek-ai/dsh-project-wiki (root)</text>
+        <text class="nsub" x="44" y="70">13 文件 / 2810 行</text>
+        <rect class="nbox" x="389" y="24" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="409" y="51">docs</text>
+        <text class="nsub" x="409" y="70">0 文件 / 0 行</text>
+        <rect class="nbox" x="389" y="110" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="409" y="137">src</text>
+        <text class="nsub" x="409" y="156">8 文件 / 2491 行</text>
+        <rect class="nbox" x="389" y="196" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="409" y="223">tests</text>
+        <text class="nsub" x="409" y="242">2 文件 / 285 行</text>
+        <path class="nedge" d="M345,54 L367,54 L367,54 L389,54"/>
+        <path class="nedge" d="M345,54 L367,54 L367,140 L389,140"/>
+        <path class="nedge" d="M345,54 L367,54 L367,226 L389,226"/>
+      </svg>
+    </div>
+    <p class="footnote">蓝色 = 项目根 ；方框 = 目录（文件/行数） ；箭头 = 目录包含（父 → 子）。 模块间 import 依赖见依赖图。</p>
+  </div>
+</body>
+</html>

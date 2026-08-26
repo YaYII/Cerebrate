@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@deepseek-ai/dsh-project-wiki — 模块依赖图</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #fafafa; color: #111827; padding: 48px 24px; line-height: 1.5; }
+    .wrap { max-width: 1120px; margin: 0 auto; }
+    h1 { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+    .subtitle { font-size: 15px; color: #6b7280; margin-bottom: 32px; }
+    .diagram { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; }
+    svg { display: block; width: 100%; height: auto; }
+    .footnote { font-size: 12px; color: #9ca3af; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>@deepseek-ai/dsh-project-wiki — 模块依赖图</h1>
+    <p class="subtitle">顶层模块间的本地 import 依赖（模块级聚合去重）。自动派生自代码扫描，可 diff。</p>
+    <div class="diagram">
+      <svg viewBox="0 0 760 164" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dg-title">
+        <title id="dg-title">@deepseek-ai/dsh-project-wiki 模块依赖图</title>
+        <defs>
+          <marker id="dep-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb"/>
+          </marker>
+          <style>
+            .dbox { fill: #fff; stroke: #d1d5db; stroke-width: 1.5; }
+            .dbox-root { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+            .dlbl { font: 600 13px system-ui, sans-serif; fill: #111827; }
+            .dedge { fill: none; stroke: #2563eb; stroke-width: 1.5; marker-end: url(#dep-arrow); }
+          </style>
+        </defs>
+        <rect class="dbox dbox-root" x="24" y="80" width="148" height="60" rx="8"/>
+        <text class="dlbl" x="40" y="114">@deepseek-ai/dsh-project-wiki (root)</text>
+        <rect class="dbox" x="212" y="80" width="148" height="60" rx="8"/>
+        <text class="dlbl" x="228" y="114">docs</text>
+        <rect class="dbox" x="400" y="80" width="148" height="60" rx="8"/>
+        <text class="dlbl" x="416" y="114">src</text>
+        <rect class="dbox" x="588" y="80" width="148" height="60" rx="8"/>
+        <text class="dlbl" x="604" y="114">tests</text>
+        <path class="dedge" d="M662,79 Q568,44 474,79"/>
+      </svg>
+    </div>
+    <p class="footnote">蓝色 = 项目根 。 箭头 = 模块 A import → 模块 B。</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<svg viewBox="0 0 712.8 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dg-title">
+        <title id="dg-title">@deepseek-ai/dsh-project-wiki 模块架构分解图</title>
+        <defs>
+          <marker id="tree-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#6b7280"/>
+          </marker>
+          <style>
+            .nbox { fill: #fff; stroke: #d1d5db; stroke-width: 1.5; }
+            .nbox-root { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+            .nlbl { font: 600 13px system-ui, sans-serif; fill: #111827; }
+            .nsub { font: 400 11px system-ui, sans-serif; fill: #6b7280; }
+            .nedge { fill: none; stroke: #9ca3af; stroke-width: 1.5; marker-end: url(#tree-arrow); }
+          </style>
+        </defs>
+        <rect class="nbox nbox-root" x="24" y="24" width="321" height="60" rx="8"/>
+        <text class="nlbl" x="44" y="51">@deepseek-ai/dsh-project-wiki (root)</text>
+        <text class="nsub" x="44" y="70">13 文件 / 2926 行</text>
+        <rect class="nbox" x="389" y="24" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="409" y="51">docs</text>
+        <text class="nsub" x="409" y="70">0 文件 / 0 行</text>
+        <rect class="nbox" x="561" y="24" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="581" y="51">diagrams</text>
+        <text class="nsub" x="581" y="70">0 文件 / 0 行</text>
+        <rect class="nbox" x="389" y="110" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="409" y="137">src</text>
+        <text class="nsub" x="409" y="156">8 文件 / 2565 行</text>
+        <rect class="nbox" x="389" y="196" width="128" height="60" rx="8"/>
+        <text class="nlbl" x="409" y="223">tests</text>
+        <text class="nsub" x="409" y="242">2 文件 / 327 行</text>
+        <path class="nedge" d="M345,54 L367,54 L367,54 L389,54"/>
+        <path class="nedge" d="M517,54 L539,54 L539,54 L561,54"/>
+        <path class="nedge" d="M345,54 L367,54 L367,140 L389,140"/>
+        <path class="nedge" d="M345,54 L367,54 L367,226 L389,226"/>
+      </svg>
