@@ -21,7 +21,7 @@ const SKIP_DIRS = new Set([
 /** 单文件质量指标。 */
 export interface FileMetrics {
   relPath: string
-  /** 圈复杂度（决策点+1：if/for/while/switch/case/&&/||/catch/?:）。 */
+  /** 圈复杂度：每个条件/循环/分支决策点加一，衡量代码路径复杂度。 */
   cyclomatic: number
   /** 行数。 */
   lines: number

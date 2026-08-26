@@ -56,14 +56,28 @@ const MUTATORS: Array<{ type: string; find: RegExp; replace: (m: string) => stri
   { type: 'M6-逻辑', find: /(&&|\|\|)/g, replace: m => m === '&&' ? '||' : '&&' },
 ]
 
+/** 跳过无变异价值的行：import/export 声明、纯注释、空行、类型声明。 */
+function isSkippableLine(line: string): boolean {
+  const t = line.trim()
+  if (t.length === 0) return true
+  if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.startsWith('/**')) return true
+  if (t.startsWith('import ') || t.startsWith('export type') || t.startsWith('export interface')) return true
+  if (t.startsWith('from ') || t.startsWith('export {') || t.startsWith('export *')) return true
+  return false
+}
+
 /** 对一行生成全部适用的变异体（每条规则取首个命中，避免爆炸）。 */
 function mutantsForLine(file: string, lineNo: number, line: string): Mutant[] {
+  if (isSkippableLine(line)) return []
   const out: Mutant[] = []
   let id = 0
   for (const mut of MUTATORS) {
     const m = mut.find.exec(line)
     if (!m) continue
     const original = m[0]!
+    // 跳过路径分隔符与字符串内的算术（如 import './x' 的 /）
+    if (original === '/' && /['"]/.test(line.slice(0, m.index))) continue
+    if (original === '*' && line.includes('**')) continue
     const mutated = mut.replace(original)
     if (mutated === original) continue
     out.push({ id, file, line: lineNo, type: mut.type, original, mutated })

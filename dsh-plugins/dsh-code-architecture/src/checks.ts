@@ -255,6 +255,8 @@ export function runArchChecks(root: string): ArchReport {
   let functions = 0
   for (const abs of files) {
     const rel = abs.slice(root.length + 1).replace(/\\/g, '/')
+    // tests/ 目录的故意违规样本（验证检查器的测试数据）不参与门禁
+    if (rel.startsWith('tests/')) continue
     const content = readFileSync(abs, 'utf8')
     const lines = content.split('\n')
     totalLines += lines.length

@@ -82,18 +82,33 @@ function docOf(text: string, fnIndex: number): string {
   return docs.join(' ').slice(0, 120)
 }
 
-/** 从函数名推断行为（驼峰 → 中文业务动作）。 */
+/** 业务词 → 中文映射（驼峰拆词后逐词翻译）。 */
+const WORD_MAP: Record<string, string> = {
+  create: '创建', get: '获取', list: '列出', update: '更新', delete: '删除', remove: '移除',
+  verify: '核验', process: '处理', submit: '提交', cancel: '取消', confirm: '确认',
+  check: '检查', validate: '校验', calculate: '计算', generate: '生成', parse: '解析',
+  save: '保存', load: '加载', send: '发送', receive: '接收', start: '启动', stop: '停止',
+  build: '构建', task: '任务', text: '文本', data: '数据', info: '信息', order: '订单',
+  orderNo: '订单号', user: '用户', auth: '认证', token: '令牌', file: '文件', page: '页面',
+  wiki: '知识库', project: '项目', code: '代码', review: '审查', metric: '指标',
+  report: '报告', result: '结果', query: '查询', search: '检索', config: '配置',
+  service: '服务', helper: '工具', util: '工具', cache: '缓存', key: '键',
+  value: '值', name: '名称', id: '标识', status: '状态', detail: '详情',
+  full: '完整', lead: '主导', ai: 'AI', scan: '扫描', evolve: '进化', digest: '摘要',
+  source: '源码', head: '提交号', snapshot: '快照', init: '初始化', fetch: '拉取',
+  push: '推送', merge: '合并', apply: '应用', sync: '同步', deploy: '部署',
+  test: '测试', run: '运行', main: '主', index: '索引', handler: '处理器', impl: '实现',
+  of: '的', dir: '目录', meta: '元数据', record: '记录', ref: '引用',
+  contract: '契约', write: '写入', read: '读取', diff: '差异', live: '实时',
+  resolve: '解析', agent: '代理', sub: '子',
+  tree: '目录树', entry: '入口',
+}
+
+/** 从函数名推断行为（驼峰 → 中文业务动作，逐词翻译）。 */
 function behaviorOf(fnName: string): string {
   const words = fnName.replace(/([A-Z])/g, ' $1').toLowerCase().trim().split(/\s+/)
-  const map: Record<string, string> = {
-    create: '创建', get: '获取', list: '列出', update: '更新', delete: '删除', remove: '移除',
-    verify: '核验', process: '处理', submit: '提交', cancel: '取消', confirm: '确认',
-    check: '检查', validate: '校验', calculate: '计算', generate: '生成', parse: '解析',
-    save: '保存', load: '加载', send: '发送', receive: '接收', start: '启动', stop: '停止',
-  }
-  const action = map[words[0] ?? ''] ?? words[0] ?? '处理'
-  const target = words.slice(1).join('') || '数据'
-  return action + target
+  const translated = words.map(w => WORD_MAP[w] ?? w).join('')
+  return translated || fnName
 }
 
 /** 从业务文件生成 Gherkin 场景骨架。 */

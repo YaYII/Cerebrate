@@ -61,7 +61,8 @@ function scanFile(abs) {
 }
 
 function main() {
-  const files = readdirSync(SRC).filter(f => f.endsWith('.ts')).sort()
+  // tests/ 目录的故意违规样本（验证检查器能力的测试数据）不参与门禁
+  const files = readdirSync(SRC).filter(f => f.endsWith('.ts') && !f.startsWith('tests')).sort()
   let total = 0
   const report = []
   for (const f of files) {
