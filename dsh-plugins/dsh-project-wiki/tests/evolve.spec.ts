@@ -192,4 +192,87 @@ describe('evolve (change detection)', () => {
     expect(task).toContain('/vault/项目知识库/demo/')
     expect(task).toContain('增量刷新')
   })
+
+
+describe('scanner 过滤逻辑（变异靶向）', () => {
+  it('过滤二进制/产物/隐藏目录，统计语言与行数', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scanspec-'))
+    mkdirSync(join(root, 'src'), { recursive: true })
+    mkdirSync(join(root, 'node_modules'), { recursive: true })
+    mkdirSync(join(root, '.hidden'), { recursive: true })
+    writeFileSync(join(root, 'src', 'a.ts'), 'export const a = 1\n')
+    writeFileSync(join(root, 'src', 'b.ts'), 'export const b = 2\n\n')
+    writeFileSync(join(root, 'node_modules', 'dep.ts'), 'export const x = 9')
+    writeFileSync(join(root, '.hidden', 'secret.ts'), 'export const s = 1')
+    writeFileSync(join(root, 'src', 'data.png'), 'PNG-BINARY')
+    try {
+      const s = scanProject(root)
+      // node_modules 与隐藏目录被排除
+      expect(s.files.some(f => f.relPath.includes('node_modules'))).toBe(false)
+      expect(s.files.some(f => f.relPath.includes('.hidden'))).toBe(false)
+      // 二进制 png 被排除
+      expect(s.files.some(f => f.relPath.includes('png'))).toBe(false)
+      // 语言计数与行数
+      expect(s.languages['ts']).toBe(2)
+      expect(s.totalLines).toBe(5) // a.ts 2 行（含结尾换行）+ b.ts 3 行（含两个换行）
+      // excluded 计数（node_modules + .hidden + png）
+      expect(Object.keys(s.excluded).length).toBeGreaterThanOrEqual(3)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('过滤超大文件（>256KB）与 NUL 字节二进制', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scanspec2-'))
+    mkdirSync(join(root, 'src'), { recursive: true })
+    try {
+      // 超大文件
+      writeFileSync(join(root, 'src', 'big.txt'), 'x'.repeat(300 * 1024))
+      // NUL 字节二进制（无扩展名识别）
+      writeFileSync(join(root, 'src', 'blob.dat'), 'AB\u0000\u0000CD')
+      const s = scanProject(root)
+      expect(s.files.some(f => f.relPath.includes('big'))).toBe(false)
+      expect(s.files.some(f => f.relPath.includes('blob'))).toBe(false)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+})
+
+
+
+  it('256KB 阈值边界：恰在阈值内被保留、超阈值被过滤（变异点：常量 256）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scanspec3-'))
+    mkdirSync(join(root, 'src'), { recursive: true })
+    try {
+      // 恰在阈值内（256KB - 1）→ 保留
+      writeFileSync(join(root, 'src', 'edge_ok.ts'), 'x'.repeat(256 * 1024 - 1))
+      // 恰超阈值（256KB + 1）→ 过滤
+      writeFileSync(join(root, 'src', 'edge_big.ts'), 'y'.repeat(256 * 1024 + 1))
+      const s = scanProject(root)
+      expect(s.files.some(f => f.relPath === 'src/edge_ok.ts')).toBe(true)
+      expect(s.files.some(f => f.relPath === 'src/edge_big.ts')).toBe(false)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('语言计数在重复扩展名时累加（变异点：计数 +）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scanspec4-'))
+    mkdirSync(join(root, 'src'), { recursive: true })
+    try {
+      writeFileSync(join(root, 'src', 'x1.ts'), 'a')
+      writeFileSync(join(root, 'src', 'x2.ts'), 'b')
+      writeFileSync(join(root, 'src', 'x3.ts'), 'c')
+      const s = scanProject(root)
+      expect(s.languages['ts']).toBe(3)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+
+
+  it('单文件语言计数从 1 起（变异点：?? 0 初始值）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scanspec5-'))
+    mkdirSync(join(root, 'src'), { recursive: true })
+    try {
+      writeFileSync(join(root, 'src', 'only.ts'), 'a')
+      const s = scanProject(root)
+      expect(s.languages['ts']).toBe(1)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
 })

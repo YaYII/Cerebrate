@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { projectTree, readFileBounded, safeVaultPath } from '../src/io'
 import { writePage, stampFrontmatter, listPages, wikiDirFor } from '../src/writer'
+import { sanitizeMermaidWarnings, verifyCiteRefs } from '../src/impls'
 
 function makeProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'wikiio-'))
@@ -168,4 +169,34 @@ describe('writer (AI page sink)', () => {
       rmSync(vault, { recursive: true, force: true })
     }
   })
+
+
+describe('impls 校验零件（wiki_write 拆分产物）', () => {
+  it('sanitizeMermaidWarnings 清洗风险块并报告警告', () => {
+    const body = '# t\n\n```mermaid\nflowchart TD\n  A[mpay:nonce:{nonce}]\n```\n'
+    const { body: fixed, warnings } = sanitizeMermaidWarnings(body)
+    // 花括号被清洗（R3）
+    expect(fixed).not.toContain('{nonce}')
+    expect(warnings.length).toBeGreaterThan(0)
+  })
+
+  it('sanitizeMermaidWarnings 无风险块时零警告且原样返回', () => {
+    const body = '# t\n\n```mermaid\nflowchart LR\n  A["正常节点"]\n```\n'
+    const { body: fixed, warnings } = sanitizeMermaidWarnings(body)
+    expect(warnings).toEqual([])
+    expect(fixed).toContain('正常节点')
+  })
+
+  it('verifyCiteRefs 检出缺失引用并忽略 http/含空格', () => {
+    const root = makeProject()
+    try {
+      // 存在的文件 + 缺失 + http + 含空格
+      const body = '<cite>README.md</cite> <cite>不存在.md</cite> <cite>https://example.com</cite> <cite>含 空格.md</cite>'
+      const warnings = verifyCiteRefs(body, root)
+      expect(warnings.length).toBe(1)
+      expect(warnings[0]).toContain('不存在.md')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+})
+
 })

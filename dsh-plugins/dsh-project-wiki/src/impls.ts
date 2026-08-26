@@ -39,6 +39,47 @@ function projectGitHead(projectRoot: string): string {
   }
 }
 
+/**
+ * 清洗 Mermaid 块并收集警告（wiki_write 写入前校验步骤 1）。
+ * 返回清洗后的正文与警告清单。
+ */
+export function sanitizeMermaidWarnings(body: string): { body: string; warnings: string[] } {
+  const warnings: string[] = []
+  const blocks = mermaidBlocks(body)
+  if (blocks.length === 0) return { body, warnings }
+  let rebuilt = ''
+  let cursor = 0
+  for (const b of blocks) {
+    rebuilt += body.slice(cursor, b.start)
+    const { fixed, remaining } = sanitizeMermaid(b.body)
+    if (fixed !== b.body) warnings.push('mermaid 块已自动清洗语法风险')
+    rebuilt += fixed
+    cursor = b.end
+    for (const issue of remaining) {
+      warnings.push('mermaid 块第 ' + issue.line + ' 行 [' + issue.rule + '] ' + issue.hint)
+    }
+  }
+  return { body: rebuilt + body.slice(cursor), warnings }
+}
+
+/**
+ * 校验证据引用 <cite>路径</cite> 真实存在（wiki_write 写入前校验步骤 2）。
+ * 返回缺失引用警告清单。
+ */
+export function verifyCiteRefs(body: string, sourceDir: string): string[] {
+  const warnings: string[] = []
+  const citeRe = /<cite>([^<]+)<\/cite>/g
+  let cm: RegExpExecArray | null
+  const missing: string[] = []
+  while ((cm = citeRe.exec(body)) !== null) {
+    const p = cm[1]!.trim().replace(/[()（）:：]$/, '')
+    if (p.startsWith('http') || p.includes(' ')) continue
+    if (!existsSync(join(sourceDir, p))) missing.push(p)
+  }
+  if (missing.length > 0) warnings.push('证据引用指向不存在文件：' + missing.slice(0, 5).join(', ') + (missing.length > 5 ? ' 等' + missing.length + ' 处' : ''))
+  return warnings
+}
+
 /** 实现注册表：6 个工具，行为全部委托给能力层。 */
 export function buildImpls(ctx: Context, config: { vaultDir: string; kbRoot: string }): ToolImpl[] {
   return [
@@ -69,36 +110,10 @@ export function buildImpls(ctx: Context, config: { vaultDir: string; kbRoot: str
         if (!project || !rel || !body) return { status: 'error', message: 'project/path/body 必填' }
         const sourceDir = resolveProject(String(args.source ?? ''), process.cwd())
 
-        // 写入前自动校验：Mermaid 语法风险 + 证据引用文件存在性
-        const warnings: string[] = []
-        // 1) Mermaid 检查：风险块自动清洗（尽力修复），残余问题进 warnings
-        const blocks = mermaidBlocks(body)
-        if (blocks.length > 0) {
-          let rebuilt = ''
-          let cursor = 0
-          for (const b of blocks) {
-            rebuilt += body.slice(cursor, b.start)
-            const { fixed, remaining } = sanitizeMermaid(b.body)
-            if (fixed !== b.body) warnings.push('mermaid 块已自动清洗语法风险')
-            rebuilt += fixed
-            cursor = b.end
-            for (const issue of remaining) {
-              warnings.push('mermaid 块第 ' + issue.line + ' 行 [' + issue.rule + '] ' + issue.hint)
-            }
-          }
-          rebuilt += body.slice(cursor)
-          body = rebuilt
-        }
-        // 2) 证据引用校验：<cite>路径</cite> 必须在项目内真实存在
-        const citeRe = /<cite>([^<]+)<\/cite>/g
-        let cm: RegExpExecArray | null
-        const missing: string[] = []
-        while ((cm = citeRe.exec(body)) !== null) {
-          const p = cm[1]!.trim().replace(/[()（）:：]$/, '')
-          if (p.startsWith('http') || p.includes(' ')) continue
-          if (!existsSync(join(sourceDir, p))) missing.push(p)
-        }
-        if (missing.length > 0) warnings.push('证据引用指向不存在文件：' + missing.slice(0, 5).join(', ') + (missing.length > 5 ? ' 等' + missing.length + ' 处' : ''))
+        // 写入前自动校验：Mermaid 语法风险 + 证据引用文件存在性（独立零件）
+        const mermaid = sanitizeMermaidWarnings(body)
+        body = mermaid.body
+        const warnings = [...mermaid.warnings, ...verifyCiteRefs(body, sourceDir)]
 
         const gitHead = projectGitHead(sourceDir)
         const res = writePage(vault, kb, project, rel, body, gitHead)

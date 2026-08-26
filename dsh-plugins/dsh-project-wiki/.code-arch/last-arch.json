@@ -4,16 +4,16 @@
       "rule": "N1",
       "severity": "P2",
       "file": "src/index.ts",
-      "line": 40,
+      "line": 33,
       "message": "标量常量建议全大写：name"
     }
   ],
   "stats": {
-    "files": 13,
-    "lines": 1529,
-    "comments": 294,
+    "files": 14,
+    "lines": 1551,
+    "comments": 304,
     "enCommentLines": 0,
-    "functions": 88,
+    "functions": 89,
     "duplicates": 0,
     "separations": 0
   }

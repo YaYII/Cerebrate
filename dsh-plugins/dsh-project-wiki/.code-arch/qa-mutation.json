@@ -1,68 +1,26 @@
 {
-  "total": 38,
-  "killed": 28,
-  "survived": 10,
-  "score": 0.74,
+  "total": 13,
+  "killed": 10,
+  "survived": 3,
+  "score": 0.77,
   "survivors": [
     {
-      "file": "src/mermaid.ts",
-      "line": 49,
+      "file": "src/scanner.ts",
+      "line": 110,
       "type": "M1-常量",
       "original": "0"
     },
     {
-      "file": "src/mermaid.ts",
-      "line": 49,
+      "file": "src/scanner.ts",
+      "line": 110,
       "type": "M2-算术",
       "original": "+"
     },
     {
-      "file": "src/mermaid.ts",
-      "line": 58,
-      "type": "M4-布尔",
-      "original": "true"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 61,
+      "file": "src/scanner.ts",
+      "line": 130,
       "type": "M1-常量",
       "original": "0"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 96,
-      "type": "M1-常量",
-      "original": "40"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 122,
-      "type": "M2-算术",
-      "original": "+"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 128,
-      "type": "M2-算术",
-      "original": "-"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 137,
-      "type": "M2-算术",
-      "original": "+"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 142,
-      "type": "M1-常量",
-      "original": "1"
-    },
-    {
-      "file": "src/mermaid.ts",
-      "line": 151,
-      "type": "M1-常量",
-      "original": "1"
     }
   ]
 }
