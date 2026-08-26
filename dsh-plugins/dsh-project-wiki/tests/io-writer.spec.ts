@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { projectTree, readFileBounded, safeVaultPath } from '../src/io'
 import { writePage, stampFrontmatter, listPages, wikiDirFor } from '../src/writer'
-import { sanitizeMermaidWarnings, verifyCiteRefs } from '../src/impls'
+import { sanitizeMermaidWarnings, verifyCiteRefs } from '../src/impls-write'
+import { executeWikiTree, executeWikiRead, executeWikiStatus } from '../src/impls'
 
 function makeProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'wikiio-'))
@@ -234,6 +235,45 @@ describe('writer 深层路径与 created 边界（变异冲刺）', () => {
       writePage(vault, '项目知识库', 'demo', 'README.md', '# 二', 'abc')
       const content2 = readFileSync(abs, 'utf8')
       expect(content2).toBe(content)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(vault, { recursive: true, force: true })
+    }
+  })
+})
+
+
+describe('impls 顶层执行函数（直接单元测试）', () => {
+  it('executeWikiTree 列出目录树', async () => {
+    const root = makeProject()
+    try {
+      const r = await executeWikiTree({ project: root })
+      const data = r.data as { top: Array<{ path: string }> }
+      expect(r.status).toBe('ok')
+      expect(data.top.map(t => t.path)).toContain('backend')
+      expect(data.top.map(t => t.path)).toContain('frontend')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('executeWikiRead 读文件与缺失报错', async () => {
+    const root = makeProject()
+    try {
+      const ok = await executeWikiRead({ project: root, path: 'README.md' })
+      expect(ok.status).toBe('ok')
+      const missing = await executeWikiRead({ project: root, path: 'nope.md' })
+      expect(missing.status).toBe('error')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('executeWikiStatus 无快照时 synced=false', async () => {
+    const root = makeProject()
+    const vault = mkdtempSync(join(tmpdir(), 'statusvault-'))
+    try {
+      const r = await executeWikiStatus({ vaultDir: vault, kbRoot: '项目知识库' }, { project: root })
+      const data = r.data as { synced: boolean; hasSnapshot: boolean }
+      expect(r.status).toBe('ok')
+      expect(data.hasSnapshot).toBe(false)
+      expect(data.synced).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
       rmSync(vault, { recursive: true, force: true })

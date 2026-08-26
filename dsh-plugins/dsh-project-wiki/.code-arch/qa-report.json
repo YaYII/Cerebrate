@@ -1,5 +1,5 @@
 {
-  "confidence": 71,
+  "confidence": 86,
   "gates": [
     {
       "name": "架构自检（P0/P1）",
@@ -33,8 +33,8 @@
     },
     {
       "name": "变异分数",
-      "pass": false,
-      "detail": "77%（阈值 ≥80%，测试有效性硬证据）"
+      "pass": true,
+      "detail": "84%（阈值 ≥80%，测试有效性硬证据）"
     }
   ]
 }
