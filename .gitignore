@@ -72,3 +72,6 @@ _restart.py
 
 # ───────── 知识吸入缓存 ─────────
 .ingest_cache.json
+
+# ───────── dsh-plugins 文档 / 个人资料（退出 git 管理，2026-08-26）─────────
+dsh-plugins/docs/
