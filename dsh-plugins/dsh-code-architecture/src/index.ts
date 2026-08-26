@@ -20,6 +20,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { runArchChecks } from './checks'
+import { fingerprintProject, diffFingerprints } from './fingerprint'
 import { runAopProbe, aopReportText, findEntry } from './aop'
 
 /** 插件标识与依赖注入。 */
@@ -96,6 +97,65 @@ export function apply(ctx: Context, config: Config): void {
             message: f.message,
           })),
           artifact: resolve(projectDir, config.artifactsDir, 'last-arch.json'),
+        },
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'arch_fingerprint',
+    description: '【架构指纹与漂移检测】生成项目架构指纹（文件清单+sha256/分层边界/依赖方向/导出计数）保存为基线；再次调用对比基线，报告漂移（新增/修改/删除文件、分层迁移、依赖倒转）。AI 防漂移锚点。',
+    parameters: {
+      project: { type: 'string', description: '被检查项目目录（缺省为当前目录）' },
+      save: { type: 'boolean', description: '是否把当前指纹保存为基线（默认 false，只对比）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    async execute(args: { project?: string; save?: boolean }) {
+      const projectDir = resolveProject(args.project, process.cwd())
+      const current = fingerprintProject(projectDir)
+      const baselinePath = resolve(projectDir, config.artifactsDir, 'arch-fingerprint.json')
+      const { existsSync } = await import('node:fs')
+      const baseline = existsSync(baselinePath)
+        ? JSON.parse(await import('node:fs').then(m => m.readFileSync(baselinePath, 'utf8')))
+        : null
+      if (args.save || !baseline) {
+        saveArtifact(projectDir, config.artifactsDir, 'arch-fingerprint.json', current)
+        return {
+          status: 'ok',
+          data: {
+            saved: true,
+            note: baseline ? '基线已更新' : '首次生成基线',
+            stats: {
+              files: Object.keys(current.files).length,
+              featureFiles: current.featureFiles.length,
+              businessFiles: current.businessFiles.length,
+              dependencyViolations: current.dependencyViolations.length,
+              exportCounts: current.exportCounts,
+            },
+          },
+        }
+      }
+      const diff = diffFingerprints(baseline, current)
+      return {
+        status: 'ok',
+        data: {
+          saved: false,
+          drifted: diff.drifted,
+          summary: {
+            added: diff.added.length,
+            modified: diff.modified.length,
+            deleted: diff.deleted.length,
+            layerMoved: diff.layerMoved.length,
+            dependencyChanged: diff.dependencyChanged.length,
+          },
+          details: {
+            added: diff.added.slice(0, 20),
+            modified: diff.modified.slice(0, 20),
+            deleted: diff.deleted.slice(0, 20),
+            layerMoved: diff.layerMoved.slice(0, 10),
+            dependencyChanged: diff.dependencyChanged.slice(0, 10),
+          },
+          baseline: baselinePath,
         },
       }
     },

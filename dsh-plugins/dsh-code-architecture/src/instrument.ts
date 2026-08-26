@@ -16,7 +16,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 const COLLECTOR = [
   'globalThis.__AOP_STACK = globalThis.__AOP_STACK ?? []',
   'globalThis.__AOP_RECORDS = globalThis.__AOP_RECORDS ?? []',
+  'globalThis.__AOP_MAX_DEPTH = 50',
   'globalThis.__AOP_PUSH = globalThis.__AOP_PUSH ?? ((name) => {',
+  '  if (globalThis.__AOP_STACK.length >= globalThis.__AOP_MAX_DEPTH) return',
   '  globalThis.__AOP_STACK.push({ name, t: Date.now() })',
   '})',
   'globalThis.__AOP_POP = globalThis.__AOP_POP ?? (() => {',

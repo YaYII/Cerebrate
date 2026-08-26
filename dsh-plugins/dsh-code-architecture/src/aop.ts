@@ -73,58 +73,28 @@ export function generateProbe(entryAbs: string, outDir: string): string {
 /** AOP 探针：包裹入口模块导出，输出调用树与耗时（JSON 到 stdout 末尾）。 */
 const records = []
 let seq = 0
-let depth = 0
-const wrap = (ns, prefix) => {
-  const out = {}
-  for (const [k, v] of Object.entries(ns)) {
-    if (typeof v === 'function') {
-      out[k] = async (...args) => {
-        const start = Date.now()
-        depth++
-        const mySeq = ++seq
-        let threw = false
-        try {
-          return await v.apply(ns, args)
-        } catch (e) {
-          threw = true
-          throw e
-        } finally {
-          records.push({ name: prefix + k, seq: mySeq, ms: Date.now() - start, start, threw, depth })
-          depth--
-        }
-      }
-    } else {
-      out[k] = v
-    }
-  }
-  return out
-}
+// 插桩模块已含 PUSH/POP（写入 globalThis.__AOP_RECORDS），此处只负责触发入口
 const mod = await import(${JSON.stringify('file://' + entryAbs)})
-const wrapped = wrap(mod.default ?? mod, '')
-// 递归包裹 import 的子模块导出，实现跨模块调用链观测（业务层 → 功能层砖块）
-const subWrapped = {}
-for (const [k, v] of Object.entries(mod)) {
-  if (k !== 'default' && typeof v === 'object' && v !== null) subWrapped[k] = wrap(v, k + '.')
-}
-// 触发入口：优先 default 函数；否则尝试具名业务入口（processOrder/process/main/run/start/execute）
+// 触发入口：优先 default 函数；否则尝试具名业务入口
 const ENTRY_NAMES = ['default', 'processVerify', 'processOrder', 'process', 'main', 'run', 'start', 'execute', 'handler']
 let entryFn = null
 for (const n of ENTRY_NAMES) {
-  if (typeof wrapped[n] === 'function') { entryFn = wrapped[n]; break }
+  if (typeof mod[n] === 'function') { entryFn = mod[n]; break }
 }
 // 兜底：未命中预设入口时，取第一个导出函数作为入口
 if (!entryFn) {
-  const first = Object.entries(wrapped).find(([, v]) => typeof v === 'function')
+  const first = Object.entries(mod).find(([, v]) => typeof v === 'function')
   if (first) entryFn = first[1]
 }
 if (entryFn && process.env.AOP_CALL_ENTRY === '1') {
   try {
-    // 入口可能声明参数：用空字符串/数字演示参数触发，让业务流转真实跑起来
+    // 入口可能声明参数：用演示参数触发，让业务流转真实跑起来
     await entryFn('demo-qr', 'demo-sign', 0)
   } catch (e) {
     records.push({ name: 'ENTRY_CALL_FAILED', seq: ++seq, ms: 0, start: Date.now(), threw: true, depth: 0 })
   }
 }
+// 收集插桩产生的内部调用记录（PUSH/POP 写入 globalThis.__AOP_RECORDS）
 const internal = globalThis.__AOP_RECORDS ?? []
 records.push(...internal.map((r, i) => ({ name: r.name, seq: records.length + i + 1, ms: r.ms, start: 0, threw: false, depth: r.depth + 1 })))
 process.stdout.write('\\n__AOP_RESULT__' + JSON.stringify(records) + '\\n')
