@@ -15,7 +15,7 @@ import { projectTree, readFileBounded, topLevelEntries } from '../features/io'
 import { scanProject } from '../features/scanner'
 import { wikiDirFor } from '../features/writer'
 import { runAiLeadBuild } from './build'
-import { diffAgainstSnapshot, loadWikiMeta } from '../features/evolve'
+import { diffAgainstSnapshot, fileDigests, listWikiPages, loadWikiMeta, saveWikiMeta, sourceDigestOf } from '../features/evolve'
 import { buildWriteImpl } from './impls-write'
 import { buildEvolveImpl } from './impls-evolve'
 
@@ -69,6 +69,18 @@ export async function executeWikiBuild(
   exec?: ToolRunContext,
 ): Promise<Record<string, unknown>> {
   const projectDir = resolveProject(String(args.project ?? ''), process.cwd())
+  // 构建前预建快照（页面=当前 vault 已有）：中断后 wiki_status/wiki_evolve 能识别进度续传，
+  // 而不是「首次生成」全量重来——分页落盘的断点续传地基。
+  const scan = scanProject(projectDir)
+  saveWikiMeta(config.vaultDir, config.kbRoot, scan.name, {
+    project: scan.name,
+    sourceRoot: projectDir,
+    gitHead: scan.gitHead,
+    scannedAt: new Date().toISOString(),
+    sourceDigest: sourceDigestOf(scan),
+    files: fileDigests(scan),
+    pages: listWikiPages(config.vaultDir, config.kbRoot, scan.name),
+  })
   const result = await runAiLeadBuild({
     ctx,
     projectPath: projectDir,

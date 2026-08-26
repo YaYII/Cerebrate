@@ -197,12 +197,15 @@ export function buildTaskText(projectName: string, vaultDir: string, kbRoot: str
     '3. 命令必须给出执行位置上下文（如「181 上执行」「本地执行」），并标注验证命令；',
     '4. 若有权威运维文档（如 DEPLOY.md、docs/ 下操作手册），先读并以其为准。',
     '',
-    '## 第四步：落盘',
-    '- 每完成一页立即用 wiki_write project=<项目名> path=<相对路径> body=<Markdown> commit=' + commit + ' 写入；',
-    '- 全部完成后用 wiki_tree 回读 vault 验证；',
+    '## 第四步：分页落盘（关键——防超时中断丢失进度）',
+    '- **每完成一页立即**用 wiki_write project=<项目名> path=<相对路径> body=<Markdown> commit=' + commit + ' 写入——不要攒到最后批量写；',
+    '- **分模块推进**：先写 01-系统架构（1-2 页）→ 落盘 → 再写 02-功能层（2-3 页）→ 落盘 → 依此类推；每批 2-3 页就是一个检查点；',
+    '- **中断续传**：若任务被中断（工具超时/进程重启），已落盘的页面在 vault 中保留；重新调用 wiki_status 查看进度，再用 wiki_evolve 或 wiki_build 继续未完成的模块——不要重复写已存在的页面（先 wiki_tree 回读 vault 确认）；',
+    '- 全部完成后用 wiki_tree 回读 vault 验证页数与结构；',
     '- 最后用一句话总结：知识库结构、页数、覆盖模块。',
     '',
     '> 记住：知识库是给后续 AI 与工程师看的 —— 重点写清架构决策、业务链路、模块边界。',
+    '> 长文档（超过 10 页）尤其要分批落盘：页面一旦写入 vault 就是安全的，中断只是暂停，不是失败。',
   ].join('\n')
 }
 
