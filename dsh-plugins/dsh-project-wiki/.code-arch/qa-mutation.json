@@ -1,80 +1,68 @@
 {
-  "total": 29,
-  "killed": 17,
-  "survived": 12,
-  "score": 0.59,
+  "total": 38,
+  "killed": 28,
+  "survived": 10,
+  "score": 0.74,
   "survivors": [
     {
-      "file": "src/evolve.ts",
-      "line": 62,
-      "type": "M2-算术",
-      "original": "-"
-    },
-    {
-      "file": "src/evolve.ts",
-      "line": 70,
-      "type": "M2-算术",
-      "original": "+"
-    },
-    {
-      "file": "src/evolve.ts",
-      "line": 101,
+      "file": "src/mermaid.ts",
+      "line": 49,
       "type": "M1-常量",
-      "original": "2"
+      "original": "0"
     },
     {
-      "file": "src/evolve.ts",
-      "line": 112,
-      "type": "M2-算术",
-      "original": "-"
-    },
-    {
-      "file": "src/evolve.ts",
-      "line": 116,
+      "file": "src/mermaid.ts",
+      "line": 49,
       "type": "M2-算术",
       "original": "+"
     },
     {
-      "file": "src/evolve.ts",
-      "line": 117,
-      "type": "M2-算术",
-      "original": "+"
-    },
-    {
-      "file": "src/evolve.ts",
-      "line": 133,
+      "file": "src/mermaid.ts",
+      "line": 58,
       "type": "M4-布尔",
       "original": "true"
     },
     {
-      "file": "src/evolve.ts",
-      "line": 149,
+      "file": "src/mermaid.ts",
+      "line": 61,
       "type": "M1-常量",
       "original": "0"
     },
     {
-      "file": "src/evolve.ts",
-      "line": 153,
+      "file": "src/mermaid.ts",
+      "line": 96,
       "type": "M1-常量",
-      "original": "0"
+      "original": "40"
     },
     {
-      "file": "src/evolve.ts",
-      "line": 188,
+      "file": "src/mermaid.ts",
+      "line": 122,
+      "type": "M2-算术",
+      "original": "+"
+    },
+    {
+      "file": "src/mermaid.ts",
+      "line": 128,
+      "type": "M2-算术",
+      "original": "-"
+    },
+    {
+      "file": "src/mermaid.ts",
+      "line": 137,
+      "type": "M2-算术",
+      "original": "+"
+    },
+    {
+      "file": "src/mermaid.ts",
+      "line": 142,
       "type": "M1-常量",
       "original": "1"
     },
     {
-      "file": "src/evolve.ts",
-      "line": 190,
+      "file": "src/mermaid.ts",
+      "line": 151,
       "type": "M1-常量",
-      "original": "3"
-    },
-    {
-      "file": "src/evolve.ts",
-      "line": 192,
-      "type": "M1-常量",
-      "original": "5"
+      "original": "1"
     }
   ]
 }

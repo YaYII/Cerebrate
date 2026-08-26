@@ -55,11 +55,45 @@ describe('mermaid lint (rules from production failures)', () => {
     expect(blocks[1]!.body).toContain('X[1]')
   })
 
+  it('mermaidBlocks offset 精确与无块时为空（变异点：offset/边界）', () => {
+    const md = '# t\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\ntext\n'
+    const blocks = mermaidBlocks(md)
+    expect(blocks.length).toBe(1)
+    // start 指向围栏起点，end 指向围栏结束；body 是围栏内正文
+    expect(md.slice(blocks[0]!.start, blocks[0]!.start + 3)).toBe('```')
+    expect(blocks[0]!.body).toContain('A --> B')
+    // 无 mermaid 围栏 → 空
+    expect(mermaidBlocks('plain text no fence')).toEqual([])
+    // 多块 offset 连续正确
+    const md2 = '```mermaid\nA\n```\n\n```mermaid\nB\n```'
+    const b2 = mermaidBlocks(md2)
+    expect(b2.length).toBe(2)
+    expect(b2[0]!.body.trim()).toBe('A')
+    expect(b2[1]!.body.trim()).toBe('B')
+    expect(b2[1]!.start).toBeGreaterThan(b2[0]!.end)
+  })
+
   it('lintDocumentMermaid returns per-block findings', () => {
     const md = '# t\n\n```mermaid\nflowchart LR\n  A[/x/]\n```\n'
     const res = lintDocumentMermaid(md)
     expect(res.length).toBe(1)
     expect(res[0]!.issues.some(i => i.rule === 'R1')).toBe(true)
+  })
+
+  it('lintMermaid 行号从 1 起且逐行精确（变异点：line 索引）', () => {
+    const body = [
+      'flowchart TD',
+      '  A[sha256Hex(x)]',
+      '  B[mpay:nonce:{nonce}]',
+    ].join('\n')
+    const issues = lintMermaid(body)
+    // 第 2 行 R4（函数调用），第 3 行 R3（花括号）
+    const r4 = issues.find(i => i.rule === 'R4')
+    const r3 = issues.find(i => i.rule === 'R3')
+    expect(r4?.line).toBe(2)
+    expect(r3?.line).toBe(3)
+    // 每行问题行号递增且 >= 1
+    for (const iss of issues) expect(iss.line).toBeGreaterThanOrEqual(1)
   })
 
   it('clean mermaid passes with no issues', () => {

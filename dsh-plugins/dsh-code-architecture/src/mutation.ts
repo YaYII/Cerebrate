@@ -75,8 +75,12 @@ function mutantsForLine(file: string, lineNo: number, line: string): Mutant[] {
     const m = mut.find.exec(line)
     if (!m) continue
     const original = m[0]!
-    // 跳过路径分隔符与字符串内的算术（如 import './x' 的 /）
-    if (original === '/' && /['"]/.test(line.slice(0, m.index))) continue
+    // 跳过字符串字面量内的命中（'--short'、提示文本数字、路径分隔符等——变异无意义）
+    const before = line.slice(0, m.index)
+    const inString = (before.match(/'/g) ?? []).length % 2 === 1 || (before.match(/"/g) ?? []).length % 2 === 1
+    if (inString) continue
+    // 跳过路径分隔符与 import/export 行的算术
+    if (original === '/' && /['"]/.test(before)) continue
     if (original === '*' && line.includes('**')) continue
     const mutated = mut.replace(original)
     if (mutated === original) continue
