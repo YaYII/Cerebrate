@@ -31,7 +31,8 @@
     "typecheck": "tsc --noEmit",
     "build": "tsdown",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check": "node scripts/check-all.mjs"
   },
   "dependencies": {},
   "devDependencies": {

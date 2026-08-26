@@ -61,6 +61,12 @@ wiki_write project=my-app path=02-后端/订单服务.md body=<AI 撰写的 Mark
 | evolveIntervalMs | 0 | 自动进化轮询间隔（ms）；0 = 关闭自动触发 |
 | evolveProjects | [] | 自动监控的项目目录（绝对路径）；代码变化自动触发 wiki_evolve |
 
+## 开发规范（项目宪法）
+
+- **CODE_STANDARDS.md** —— 代码规范总纲（注释中文/架构模式/命名/类型安全/提交规范/审查门禁）
+- **AGENTS.md** —— AI 开发守则（铁律 + 完成门禁），任何 AI 写代码前必读
+- **门禁**：pnpm check（注释语言 → 类型 → 测试 → 构建，全过才算完成）
+
 ## 开发
 
 ```bash
