@@ -1,6 +1,7 @@
 node_modules/
 lib/
 .code-review/
+.code-arch/
 .mmd-*.ts
 .evolve-test.ts
 .snap.ts
