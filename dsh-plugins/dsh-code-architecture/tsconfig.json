@@ -13,9 +13,8 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
-    "allowImportingTsExtensions": true,
-    "types": ["node"],
-    "outDir": "lib/types"
+    "noEmit": true,
+    "types": ["node"]
   },
   "include": ["src", "tests"],
   "exclude": ["lib"]

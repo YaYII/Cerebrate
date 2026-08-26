@@ -18,10 +18,10 @@
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true,
+    "noEmit": true,
     "types": [
       "node"
-    ],
-    "outDir": "lib/types"
+    ]
   },
   "include": [
     "src",
