@@ -26,7 +26,7 @@ const ALLOWED = new Set([
   '@module', 'requestContext', 'options', 'provider', 'model', 'agent', 'step',
   'start', 'end', 'body', 'null', 'git', 'head', 'root', 'session', 'task',
   'project', 'source', 'page', 'pages', 'meta', 'config', 'context', 'signal',
-  'commit', 'content', 'handle', 'diff', 'scan', 'wiki_tree', 'wiki_read', 'impls', 'write', 'ts', 'param', 'returns', '@param', '@returns',
+  'commit', 'content', 'handle', 'diff', 'scan', 'wiki_tree', 'wiki_read', 'impls', 'write', 'ts', 'param', 'returns', '@param', '@returns', 'args', 'returns', 'status', 'data',
   'wiki_write', 'wiki_build', 'wiki_status', 'wiki_evolve', 'taskOverride',
   'inheritAgent', 'subagent', 'JSDoc', 'wiki', 'vault', 'kb', 'frontend',
   'backend', 'docker', 'database', 'Markdown', 'mermaid', 'DSH', 'AI', 'IO',
@@ -75,7 +75,8 @@ function scanFile(absPath) {
       .replace(/\*\/$/, '')      // 结尾 */
       .replace(/^\*/,'').replace(/^\* /,'') // 续行 * 或 * 
       .trim()
-    if (text.length === 0 || text.startsWith('@module')) continue
+    // JSDoc 标签行（@param/@returns/@module 等）是声明性文档，跳过英文词检测
+    if (text.length === 0 || text.startsWith('@')) continue
     // 英文词命中检测（排除白名单词后仍有英文词才算违规）
     const withoutAllowed = text.replace(new RegExp(`\\b(${[...ALLOWED].join('|')})\\b`, 'g'), '')
     const words = EN_WORDS.filter(w => new RegExp(`\\b${w}\\b`).test(withoutAllowed))
