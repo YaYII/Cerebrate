@@ -46,7 +46,9 @@ export function sanitizeMermaidWarnings(body: string): { body: string; warnings:
     rebuilt += body.slice(cursor, b.start)
     const { fixed, remaining } = sanitizeMermaid(b.body)
     if (fixed !== b.body) warnings.push('mermaid 块已自动清洗语法风险')
-    rebuilt += fixed
+    // 重建时必须保留围栏（```mermaid 与 ```）：清洗只改写块内正文，丢围栏
+    // 会让 Obsidian 把图表当普通文本渲染——保留围栏是输出契约而非装饰。
+    rebuilt += '```mermaid\n' + fixed + '```'
     cursor = b.end
     for (const issue of remaining) {
       warnings.push('mermaid 块第 ' + issue.line + ' 行 [' + issue.rule + '] ' + issue.hint)

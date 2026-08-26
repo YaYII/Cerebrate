@@ -87,11 +87,13 @@ export const fixSubgraphSlash: LineFixer = (line) =>
   line.replace(/(subgraph\s+)([^\n]+)/g, (_, p: string, t: string) => t.includes('/') ? p + t.replace(/\//g, '与') : p + t)
 
 /**
- * R3 修复：{nonce} 会被渲染器当菱形节点（{...} 是菱形语法），导致节点变形；
+ * R3 修复：节点文本 [..] 内的 {nonce} 会被渲染器当菱形节点，导致节点变形；
  * 改写为「值 后缀」形态保留语义（mpay:nonce:{nonce} → mpay:nonce 值）。
+ * 只改写方括号节点内的花括号：菱形节点定义 X{是否启用} 是合法语法，
+ * 若全局替换会把菱形也改成「值 后缀」从而破坏图表结构。
  */
 export const fixBraces: LineFixer = (line) =>
-  line.replace(/\{([^}]*)\}/g, (_, t: string) => (t.trim() ? t.trim() + ' 值' : '值'))
+  line.replace(/(\[[^\[\]\n]*)\{([^}\n]*)\}([^\[\]\n]*\])/g, (_, pre: string, t: string, post: string) => pre + (t.trim() ? t.trim() + ' 值' : '值') + post)
 
 /**
  * R4 修复：函数调用括号 () 会被渲染器当形状参数，导致节点解析错乱；

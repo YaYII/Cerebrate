@@ -96,6 +96,21 @@ describe('mermaid lint (rules from production failures)', () => {
     for (const iss of issues) expect(iss.line).toBeGreaterThanOrEqual(1)
   })
 
+  it('fixBraces 不破坏菱形节点且仍清洗节点文本花括号（回归）', () => {
+    const body = [
+      'flowchart TD',
+      '  X{是否启用}',
+      '  Y[mpay:nonce:{nonce}]',
+      '  X -->|是| Y',
+    ].join('\n')
+    const { fixed, remaining } = sanitizeMermaid(body)
+    // 菱形节点定义是合法语法，必须原样保留
+    expect(fixed).toContain('X{是否启用}')
+    // 节点文本内的花括号仍被清洗（R3 语义不变）
+    expect(fixed).not.toContain('{nonce}')
+    expect(remaining.length).toBe(0)
+  })
+
   it('clean mermaid passes with no issues', () => {
     const body = [
       'flowchart TD',

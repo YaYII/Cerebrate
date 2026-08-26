@@ -280,3 +280,27 @@ describe('impls 顶层执行函数（直接单元测试）', () => {
     }
   })
 })
+
+
+describe('sanitizeMermaidWarnings 围栏保留（回归：清洗不能吞掉 ```mermaid 与 ```）', () => {
+  it('干净块清洗后围栏完整保留', () => {
+    const body = '# t\n\n```mermaid\nflowchart LR\n  A["正常节点"]\n```\n'
+    const { body: fixed, warnings } = sanitizeMermaidWarnings(body)
+    expect(warnings).toEqual([])
+    // 围栏必须成对出现（开 ```mermaid 与 闭 ```），否则 Obsidian 无法渲染图表
+    expect(fixed).toContain('```mermaid')
+    expect(fixed).toContain('flowchart LR')
+    expect((fixed.match(/```/g) ?? []).length).toBe(2)
+  })
+
+  it('含风险内容清洗后仍保留围栏（结构：围栏-正文-围栏）', () => {
+    const body = '# t\n\n```mermaid\nflowchart TD\n  A[mpay:nonce:{nonce}]\n```\n'
+    const { body: fixed, warnings } = sanitizeMermaidWarnings(body)
+    expect(warnings.length).toBeGreaterThan(0)
+    expect(fixed).toContain('```mermaid')
+    expect(fixed).not.toContain('{nonce}')
+    // 围栏前后无裸图：图表正文必须被围栏包裹
+    const fenced = fixed.match(/```mermaid\n([\s\S]*?)\n```/g)
+    expect(fenced?.length).toBe(1)
+  })
+})
