@@ -67,7 +67,7 @@ describe('writer (AI page sink)', () => {
       expect(content).toContain('generator: dsh-project-wiki-ai')
       expect(content).toContain('git_head: abc123')
       expect(content).toContain('# 后端')
-      // Idempotent: second write same body, no change.
+      // 幂等验证：同一正文第二次写入不应产生变化。
       const r2 = writePage(vault, '项目知识库', 'demo', '02-后端/README.md', '# 后端', 'abc123')
       expect(r2.written).toBe(false)
     } finally {

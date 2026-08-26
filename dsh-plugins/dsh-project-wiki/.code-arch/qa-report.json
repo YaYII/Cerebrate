@@ -1,0 +1,35 @@
+{
+  "confidence": 67,
+  "gates": [
+    {
+      "name": "架构自检（P0/P1）",
+      "pass": true,
+      "detail": "无阻塞级问题"
+    },
+    {
+      "name": "注释率",
+      "pass": true,
+      "detail": "19%（阈值 ≥10%）"
+    },
+    {
+      "name": "平均圈复杂度",
+      "pass": false,
+      "detail": "20.1（阈值 ≤10）"
+    },
+    {
+      "name": "高复杂度文件",
+      "pass": false,
+      "detail": "7 个文件 >15（阈值 0 个）"
+    },
+    {
+      "name": "测试存在性",
+      "pass": true,
+      "detail": "有测试目录（阈值 必须有）"
+    },
+    {
+      "name": "BDD 场景覆盖",
+      "pass": true,
+      "detail": "30 个业务函数已生成场景"
+    }
+  ]
+}

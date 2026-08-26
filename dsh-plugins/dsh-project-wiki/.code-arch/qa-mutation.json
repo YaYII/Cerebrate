@@ -1,0 +1,80 @@
+{
+  "total": 29,
+  "killed": 17,
+  "survived": 12,
+  "score": 0.59,
+  "survivors": [
+    {
+      "file": "src/evolve.ts",
+      "line": 62,
+      "type": "M2-算术",
+      "original": "-"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 70,
+      "type": "M2-算术",
+      "original": "+"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 101,
+      "type": "M1-常量",
+      "original": "2"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 112,
+      "type": "M2-算术",
+      "original": "-"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 116,
+      "type": "M2-算术",
+      "original": "+"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 117,
+      "type": "M2-算术",
+      "original": "+"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 133,
+      "type": "M4-布尔",
+      "original": "true"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 149,
+      "type": "M1-常量",
+      "original": "0"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 153,
+      "type": "M1-常量",
+      "original": "0"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 188,
+      "type": "M1-常量",
+      "original": "1"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 190,
+      "type": "M1-常量",
+      "original": "3"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 192,
+      "type": "M1-常量",
+      "original": "5"
+    }
+  ]
+}

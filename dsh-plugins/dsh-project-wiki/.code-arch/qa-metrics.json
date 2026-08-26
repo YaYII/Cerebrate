@@ -1,0 +1,9 @@
+{
+  "files": 10,
+  "lines": 1529,
+  "commentRatio": 19,
+  "avgCyclomatic": 20.1,
+  "maxCyclomatic": 57,
+  "highComplexityFiles": 7,
+  "noTests": false
+}

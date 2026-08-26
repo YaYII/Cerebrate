@@ -187,7 +187,7 @@ export function evolveTaskText(projectName: string, diff: ChangeDiff, vaultDir: 
     '## 步骤',
     '1. 用 wiki_tree/wiki_read 查看变化文件（重点：' + diff.newOrModified.slice(0, 20).join('、') + '）',
     '2. 判断哪些知识库页面需要更新（对应模块的 README/架构/业务页），用 wiki_write 更新它们',
-    '3. 若删除的文件曾影响页面（如某模块整体移除），同步调整对应页面',
+    '3. 已删除的文件：' + (diff.deleted.length > 0 ? diff.deleted.slice(0, 20).join('、') : '无') + '——若对应页面已失效则同步调整',
     '4. 只更新受影响的页面，不要重建整个知识库；未变化的模块保持原样',
     '5. 完成后总结：更新了哪些页面、依据哪些变化文件',
     '',
