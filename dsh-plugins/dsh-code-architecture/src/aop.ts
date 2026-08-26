@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { instrumentFile } from './instrument'
 
 /** 一次调用的观测记录。 */
 export interface CallRecord {
@@ -62,8 +63,8 @@ function stageEntry(entryAbs: string, outDir: string): string {
   return outAbs
 }
 export function generateProbe(entryAbs: string, outDir: string): string {
-  // 把入口 .ts 复制为临时 .mjs，并给相对导入补 .ts 后缀（Node ESM 需要显式扩展名）
-  entryAbs = stageEntry(entryAbs, outDir)
+  // 源码级插桩：包裹每个具名函数，观测模块内部调用链
+  entryAbs = instrumentFile(entryAbs)
 
 
   mkdirSync(outDir, { recursive: true })
@@ -119,11 +120,13 @@ if (!entryFn) {
 if (entryFn && process.env.AOP_CALL_ENTRY === '1') {
   try {
     // 入口可能声明参数：用空字符串/数字演示参数触发，让业务流转真实跑起来
-    await entryFn('', '', 0)
+    await entryFn('demo-qr', 'demo-sign', 0)
   } catch (e) {
     records.push({ name: 'ENTRY_CALL_FAILED', seq: ++seq, ms: 0, start: Date.now(), threw: true, depth: 0 })
   }
 }
+const internal = globalThis.__AOP_RECORDS ?? []
+records.push(...internal.map((r, i) => ({ name: r.name, seq: records.length + i + 1, ms: r.ms, start: 0, threw: false, depth: r.depth + 1 })))
 process.stdout.write('\\n__AOP_RESULT__' + JSON.stringify(records) + '\\n')
 `
   writeFileSync(probePath, script, 'utf8')
