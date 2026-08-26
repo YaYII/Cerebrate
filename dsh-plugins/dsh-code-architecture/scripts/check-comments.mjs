@@ -10,17 +10,17 @@ import { fileURLToPath } from 'node:url'
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
 
 const ALLOWED = new Set([
-  'Mermaid', 'Obsidian', 'DSH', 'API', 'ID', 'IO', 'URL', 'HTTP', 'JSON', 'TODO',
+  'Mermaid', 'Obsidian', 'DSH', 'API', 'QA', 'qa_metrics', 'qa_mutation', 'qa_gherkin', 'qa_report', 'ID', 'IO', 'URL', 'HTTP', 'JSON', 'TODO',
   'JSDoc', 'SVG', 'HTTPS', 'SHA256', 'Redis', 'MySQL', 'Git', 'Vite', 'Swarm',
   'Docker', 'Kotlin', 'Java', 'TypeScript', 'Cordis', 'LLM', 'AI', 'RSA', 'nonce',
-  'JWT', 'RBAC', 'TTL', 'ECS', 'VPN', 'UAT', 'PROD', 'CIDR', 'SETNX', 'MD', 'yml',
+  'JWT', 'RBAC', 'TTL', 'ECS', 'VPN', 'UAT', 'PROD', 'CIDR', 'SETNX', 'MD', 'yml', 'Unit', 'unit', 'test', 'quality',
   'frontmatter', 'DSEDT', 'Markdown', 'mermaid', 'sanitize', 'lint', 'requestContext',
-  'options', 'provider', 'model', 'agent', 'step', 'start', 'end', 'body', 'null',
-  'git', 'head', 'root', 'session', 'task', 'project', 'source', 'page', 'meta',
-  'config', 'context', 'signal', 'commit', 'content', 'handle', 'diff', 'scan',
-  'AOP', 'debug', 'CI', 'ESLint', 'npm', 'pnpm', 'yarn', 'tsc', 'vitest', 'tsdown',
-  'function', 'interface', 'type', 'return', 'param', 'value', 'const', 'export',
-  'async', 'await', 'import', 'default', 'true', 'false', 'null', 'undefined',
+  'options', 'provider', 'model', 'agent', 'step', 'start', 'end', 'body', 'null', 'maxFunctionLines', 'commentLines',
+  'git', 'head', 'root', 'session', 'arch_check', 'arch_aop', 'arch_guide', 'arch_fingerprint', 'task', 'project', 'source', 'page', 'meta', 'Given', 'When', 'Then', 'Gherkin', 'BDD',
+  'config', 'context', 'signal', 'commit', 'content', 'handle', 'diff', 'scan', 'generated', 'counts',
+  'AOP', 'debug', 'CI', 'ESLint', 'npm', 'pnpm', 'yarn', 'tsc', 'vitest', 'tsdown', 'if', 'for', 'while', 'switch', 'case', 'catch',
+  'function', 'interface', 'type', 'return', 'param', 'value', 'const', 'export', 'Mutation', 'mutant', 'cyclomatic',
+  'async', 'await', 'import', 'default', 'metric', 'Ratio', 'Tests', 'Feature', 'Scenario', 'true', 'false', 'null', 'undefined',
 ])
 
 const EN_WORDS = [

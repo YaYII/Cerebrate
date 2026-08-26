@@ -21,6 +21,9 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { runArchChecks } from './checks'
 import { fingerprintProject, diffFingerprints } from './fingerprint'
+import { qualityReport } from './metrics'
+import { runMutation } from './mutation'
+import { generateGherkin, gherkinFeatureText } from './gherkin'
 import { runAopProbe, aopReportText, findEntry } from './aop'
 
 /** 插件标识与依赖注入。 */
@@ -241,6 +244,128 @@ export function apply(ctx: Context, config: Config): void {
           note: '无基线（可用 baseline=true 保存首次观测）',
           report,
           artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
+        },
+      }
+    },
+  }))
+
+  // ── 质量保障体系：指标 / 变异 / Gherkin / 聚合报告 ──
+  ctx.tools.register(defineTool({
+    name: 'qa_metrics',
+    description: '【质量指标】计算项目质量指标：圈复杂度（平均/最大/高危文件）、注释率、函数数、最长函数、测试存在性。每个指标带阈值门禁判定（P0/P1）。',
+    parameters: {
+      project: { type: 'string', description: '被检查项目目录（缺省为当前目录）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    async execute(args: { project?: string }) {
+      const projectDir = resolveProject(args.project, process.cwd())
+      const report = qualityReport(projectDir)
+      saveArtifact(projectDir, config.artifactsDir, 'qa-metrics.json', report.totals)
+      return {
+        status: 'ok',
+        data: {
+          totals: report.totals,
+          gates: report.gates,
+          topComplexity: report.files.slice().sort((a, b) => b.cyclomatic - a.cyclomatic).slice(0, 5).map(f => ({ file: f.relPath, cyclomatic: f.cyclomatic, lines: f.lines })),
+          artifact: resolve(projectDir, config.artifactsDir, 'qa-metrics.json'),
+        },
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'qa_mutation',
+    description: '【变异测试】注入代码变异体（常量/算术/比较/布尔/条件/逻辑 6 类）跑测试，计算变异分数。分数低 = 测试是纸糊的（代码坏了测试看不出）。这是对代码信心的硬证据。',
+    parameters: {
+      project: { type: 'string', description: '被测试项目目录（缺省为当前目录，需含 vitest）' },
+      file: { type: 'string', description: '限定变异单个文件（相对路径，可选）' },
+      maxMutants: { type: 'number', description: '变异体数量上限（默认 30）' },
+      timeoutMs: { type: 'number', description: '单次测试超时（毫秒，默认 120000）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    async execute(args: { project?: string; file?: string; maxMutants?: number; timeoutMs?: number }) {
+      const projectDir = resolveProject(args.project, process.cwd())
+      const result = runMutation({
+        project: projectDir,
+        ...(args.file ? { file: args.file } : {}),
+        ...(args.maxMutants ? { maxMutants: args.maxMutants } : {}),
+        ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
+      })
+      if ('baselineFailed' in result) {
+        return { status: 'error', message: '基线测试未通过——变异测试要求先有全绿测试（测试存在且通过才有意义）' }
+      }
+      saveArtifact(projectDir, config.artifactsDir, 'qa-mutation.json', result)
+      return {
+        status: 'ok',
+        data: {
+          total: result.total,
+          killed: result.killed,
+          survived: result.survived,
+          score: result.score,
+          scorePercent: Math.round(result.score * 100) + '%',
+          quality: result.score >= 0.8 ? '优秀（测试有效）' : result.score >= 0.5 ? '及格（测试有盲区）' : '危险（测试是纸糊的）',
+          survivors: result.survivors.slice(0, 10),
+          artifact: resolve(projectDir, config.artifactsDir, 'qa-mutation.json'),
+        },
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'qa_gherkin',
+    description: '【Gherkin/BDD 场景】从业务层代码自动生成 Given/When/Then 场景骨架（正常/异常/边界三路径），输出特征文件文本。让测试从实现细节提升到业务行为。',
+    parameters: {
+      project: { type: 'string', description: '项目目录（缺省为当前目录）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    async execute(args: { project?: string }) {
+      const projectDir = resolveProject(args.project, process.cwd())
+      const scenarios = generateGherkin(projectDir)
+      const feature = gherkinFeatureText(scenarios)
+      saveArtifact(projectDir, config.artifactsDir, 'qa-gherkin.feature', feature)
+      return {
+        status: 'ok',
+        data: {
+          scenarioCount: scenarios.length,
+          functions: scenarios.map(s => ({ file: s.file, function: s.functionName, feature: s.feature })),
+          feature,
+          artifact: resolve(projectDir, config.artifactsDir, 'qa-gherkin.feature'),
+        },
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'qa_report',
+    description: '【质量聚合报告】汇总全部质量门禁（架构自检/质量指标/变异分数/覆盖率）给出信心指数与通过/不通过结论。只有全绿才值得信任。',
+    parameters: {
+      project: { type: 'string', description: '项目目录（缺省为当前目录）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    async execute(args: { project?: string }) {
+      const projectDir = resolveProject(args.project, process.cwd())
+      // 聚合：架构自检 + 质量指标 + Gherkin 场景数
+      const arch = runArchChecks(projectDir)
+      const metrics = qualityReport(projectDir)
+      const scenarios = generateGherkin(projectDir)
+      const p0p1 = arch.findings.filter(f => f.severity === 'P0' || f.severity === 'P1').length
+      const gateResults = [
+        { name: '架构自检（P0/P1）', pass: p0p1 === 0, detail: p0p1 === 0 ? '无阻塞级问题' : p0p1 + ' 个阻塞级问题' },
+        ...metrics.gates.map(g => ({ name: g.name, pass: g.pass, detail: g.value + '（阈值 ' + g.threshold + '）' })),
+        { name: 'BDD 场景覆盖', pass: scenarios.length > 0, detail: scenarios.length + ' 个业务函数已生成场景' },
+      ]
+      const passed = gateResults.filter(g => g.pass).length
+      const total = gateResults.length
+      const confidence = Math.round(passed / total * 100)
+      saveArtifact(projectDir, config.artifactsDir, 'qa-report.json', { confidence, gates: gateResults })
+      return {
+        status: 'ok',
+        data: {
+          confidence: confidence + '%',
+          conclusion: confidence >= 80 ? '可信任（建议补变异测试复核）' : confidence >= 50 ? '有风险（修复阻塞项）' : '不可信任（必须修复）',
+          passed: passed + '/' + total + ' 门禁通过',
+          gates: gateResults,
+          artifact: resolve(projectDir, config.artifactsDir, 'qa-report.json'),
         },
       }
     },
