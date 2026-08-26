@@ -78,3 +78,6 @@ dsh-plugins/docs/
 
 # ───────── node_modules（插件依赖，退出 git 管理，2026-08-26）─────────
 node_modules/
+
+# ───────── 配置备份文件（*.bak-时间戳）─────────
+*.bak-*
