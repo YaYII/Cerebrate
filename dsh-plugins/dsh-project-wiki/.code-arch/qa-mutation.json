@@ -1,24 +1,30 @@
 {
-  "total": 13,
-  "killed": 10,
-  "survived": 3,
-  "score": 0.77,
+  "total": 25,
+  "killed": 21,
+  "survived": 4,
+  "score": 0.84,
   "survivors": [
     {
-      "file": "src/scanner.ts",
-      "line": 110,
-      "type": "M1-常量",
-      "original": "0"
-    },
-    {
-      "file": "src/scanner.ts",
-      "line": 110,
+      "file": "src/evolve.ts",
+      "line": 70,
       "type": "M2-算术",
       "original": "+"
     },
     {
-      "file": "src/scanner.ts",
-      "line": 130,
+      "file": "src/evolve.ts",
+      "line": 101,
+      "type": "M1-常量",
+      "original": "2"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 149,
+      "type": "M1-常量",
+      "original": "0"
+    },
+    {
+      "file": "src/evolve.ts",
+      "line": 153,
       "type": "M1-常量",
       "original": "0"
     }

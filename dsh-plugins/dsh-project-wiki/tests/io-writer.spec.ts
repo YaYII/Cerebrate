@@ -200,3 +200,43 @@ describe('impls 校验零件（wiki_write 拆分产物）', () => {
 })
 
 })
+
+
+describe('writer 深层路径与 created 边界（变异冲刺）', () => {
+  it('listPages 三层嵌套路径拼接（变异点：rel + / + n）', () => {
+    const root = makeProject()
+    const vault = mkdtempSync(join(tmpdir(), 'wikivault6-'))
+    try {
+      writePage(vault, '项目知识库', 'demo', 'a/b/c/deep.md', '# 深', '')
+      const pages = listPages(vault, '项目知识库', 'demo')
+      expect(pages).toContain('a/b/c/deep.md')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(vault, { recursive: true, force: true })
+    }
+  })
+
+  it('writePage 覆盖有 created 的旧文件（变异点：!created 条件分支）', () => {
+    const root = makeProject()
+    const vault = mkdtempSync(join(tmpdir(), 'wikivault7-'))
+    try {
+      // 第一次写入带 created
+      writePage(vault, '项目知识库', 'demo', 'README.md', '# 一', 'abc')
+      // 第二次更新：created 保留（已测）；这里再验证 updated 变化
+      writePage(vault, '项目知识库', 'demo', 'README.md', '# 二', 'abc')
+      const abs = join(wikiDirFor(vault, '项目知识库', 'demo'), 'README.md')
+      const content = readFileSync(abs, 'utf8')
+      const created = /^created: (.+)$/m.exec(content)![1]
+      const updated = /^updated: (.+)$/m.exec(content)![1]
+      expect(created).toBeTruthy()
+      expect(updated).toBeTruthy()
+      // 再写一次相同内容：不变化（updated 不变）
+      writePage(vault, '项目知识库', 'demo', 'README.md', '# 二', 'abc')
+      const content2 = readFileSync(abs, 'utf8')
+      expect(content2).toBe(content)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(vault, { recursive: true, force: true })
+    }
+  })
+})

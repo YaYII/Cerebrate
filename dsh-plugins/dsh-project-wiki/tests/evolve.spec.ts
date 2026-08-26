@@ -275,4 +275,52 @@ describe('scanner 过滤逻辑（变异靶向）', () => {
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
 
+
+
+  it('排除目录计数精确累加（变异点：?? 0 初始值与 +1）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scanspec6-'))
+    mkdirSync(join(root, 'node_modules'), { recursive: true })
+    mkdirSync(join(root, 'node_modules', 'a'), { recursive: true })
+    mkdirSync(join(root, 'node_modules', 'b'), { recursive: true })
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src', 'x.ts'), 'a')
+    try {
+      const s = scanProject(root)
+      // node_modules 顶层排除计 1（子目录 a/b 因不在 SKIP_DIRS 会继续遍历，内部无文件不计入 excluded）
+      expect(s.excluded['node_modules']).toBe(1)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+
+
+  it('listWikiPages 三层嵌套路径（变异点：路径拼接 +）', () => {
+    const root = makeProject()
+    const vault = mkdtempSync(join(tmpdir(), 'evolvevault8-'))
+    try {
+      const s = scanProject(root)
+      saveWikiMeta(vault, '项目知识库', s.name, {
+        project: s.name, sourceRoot: root, gitHead: s.gitHead,
+        scannedAt: new Date().toISOString(), sourceDigest: sourceDigestOf(s),
+        files: Object.fromEntries(s.files.map(f => [f.relPath, f.sha256])), pages: [],
+      })
+      writePage(vault, '项目知识库', s.name, 'x/y/z/deep.md', '# 深', 'abc')
+      const pages = listWikiPages(vault, '项目知识库', s.name)
+      expect(pages).toContain('x/y/z/deep.md')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(vault, { recursive: true, force: true })
+    }
+  })
+
+  it('首次生成断言 gitHeadChanged（变异点：布尔 true）', () => {
+    const root = makeProject()
+    try {
+      const s = scanProject(root)
+      const d = diffAgainstSnapshot(s, null)
+      expect(d.gitHeadChanged).toBe(true)
+      expect(d.newOrModified.length).toBe(s.files.length)
+      expect(d.deleted).toEqual([])
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
 })
