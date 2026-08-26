@@ -25,9 +25,9 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { TOOL_CONTRACTS, contractOf } from './contracts'
-import type { ToolContract } from './contracts'
-import { buildImpls } from './impls'
+import { TOOL_CONTRACTS, contractOf } from './features/contracts'
+import type { ToolContract } from './features/contracts'
+import { buildImpls } from './business/impls'
 
 /** 插件标识，同时作为 Cordis 入口名与注入来源标签。 */
 export const name = 'dsh-project-wiki'
@@ -185,7 +185,7 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 /** 供程序化使用的再导出。 */
-export { projectTree, readFileBounded } from './io'
-export { writePage, vaultCommit, listPages, wikiDirFor, stampFrontmatter } from './writer'
-export { runAiLeadBuild, submitWikiBuild, buildTaskText } from './build'
-export { TOOL_CONTRACTS } from './contracts'
+export { projectTree, readFileBounded } from './features/io'
+export { writePage, vaultCommit, listPages, wikiDirFor, stampFrontmatter } from './features/writer'
+export { runAiLeadBuild, submitWikiBuild, buildTaskText } from './business/build'
+export { TOOL_CONTRACTS } from './features/contracts'

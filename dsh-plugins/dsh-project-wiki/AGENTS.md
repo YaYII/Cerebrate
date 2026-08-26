@@ -30,18 +30,27 @@ node node_modules/tsdown/dist/run.mjs           # 构建
 
 门禁不过 = 任务未完成。先修复，再重新跑门禁，直到全绿。
 
-## 架构地图
+## 架构地图（功能砖块 / 业务组合分层）
 
-| 文件 | 职责 | 依赖 |
-|---|---|---|
-| contracts.ts | 工具契约注册表（单一真源） | 无 |
-| io.ts | 目录树/读文件（纯 IO，零解析） | 无 |
-| writer.ts | 页面落盘/frontmatter/git | 无 |
-| mermaid.ts | Mermaid 语法检查与清洗（R1-R8） | 无 |
-| scanner.ts | 文件清单+sha256（变更检测地基） | 无 |
-| evolve.ts | 快照/判变/增量进化 | scanner |
-| build.ts | 子代理编排（模型继承/任务驱动） | dsh-agent |
-| index.ts | 装配工厂（契约×实现→工具） | 全部 |
+```
+src/
+├── index.ts              ← 装配层：契约×实现→工具注册（唯一引用业务层）
+├── features/             ← 功能砖块（纯能力，禁止 import 业务层）
+│   ├── contracts.ts      ← 工具契约注册表（单一真源）
+│   ├── io.ts             ← 目录树/读文件（纯 IO，零解析）
+│   ├── writer.ts         ← 页面落盘/frontmatter/git
+│   ├── mermaid.ts        ← Mermaid 检查清洗入口（R1-R8 编排）
+│   ├── mermaid-rules.ts  ← 规则零件（8 检查器 + 8 修复器）
+│   ├── scanner.ts        ← 文件清单+sha256（变更检测地基）
+│   └── evolve.ts         ← 快照/判变/增量进化引擎
+└── business/             ← 业务编排（组合功能砖块，可自由重组）
+    ├── impls.ts          ← 工具实现注册（顶层 execute 函数装配）
+    ├── impls-write.ts    ← wiki_write 落盘业务（校验+提交）
+    ├── impls-evolve.ts   ← wiki_evolve 刷新业务（判变+同步）
+    └── build.ts          ← 子代理编排（模型继承/任务驱动）
+```
+
+**分层铁律**：features 层禁止 import business 层（依赖单向）；业务词汇只出现在业务层。
 
 ## 提交规范
 

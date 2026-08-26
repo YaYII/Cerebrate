@@ -11,9 +11,9 @@ import { join, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { safeVaultPath } from './io'
-import { sanitizeMermaid, mermaidBlocks } from './mermaid'
-import { writePage, vaultCommit, wikiDirFor } from './writer'
+import { safeVaultPath } from '../features/io'
+import { sanitizeMermaid, mermaidBlocks } from '../features/mermaid'
+import { writePage, vaultCommit, wikiDirFor } from '../features/writer'
 import type { ToolImpl } from './impls'
 
 /** 把项目参数解析为绝对路径。 */

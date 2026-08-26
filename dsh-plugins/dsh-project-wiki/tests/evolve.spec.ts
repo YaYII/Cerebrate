@@ -2,9 +2,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { scanProject } from '../src/scanner'
-import { diffAgainstSnapshot, saveWikiMeta, loadWikiMeta, evolveTaskText, sourceDigestOf, listWikiPages, digest } from '../src/evolve'
-import { writePage } from '../src/writer'
+import { scanProject } from '../src/features/scanner'
+import { diffAgainstSnapshot, saveWikiMeta, loadWikiMeta, evolveTaskText, sourceDigestOf, listWikiPages, digest } from '../src/features/evolve'
+import { writePage } from '../src/features/writer'
 
 function makeProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'evolvespec-'))

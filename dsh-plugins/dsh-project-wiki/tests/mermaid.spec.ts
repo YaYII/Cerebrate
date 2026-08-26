@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lintMermaid, sanitizeMermaid, mermaidBlocks, lintDocumentMermaid } from '../src/mermaid'
+import { lintMermaid, sanitizeMermaid, mermaidBlocks, lintDocumentMermaid } from '../src/features/mermaid'
 
 describe('mermaid lint (rules from production failures)', () => {
   it('detects R1 slash-shape, R2 subgraph slash, R3 braces, R4 parens, R5 edge-label br, R6 nested brackets, R7 diamond ?', () => {

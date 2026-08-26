@@ -10,9 +10,9 @@
 import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { scanProject } from './scanner'
+import { scanProject } from '../features/scanner'
 import { runAiLeadBuild } from './build'
-import { diffAgainstSnapshot, evolveTaskText, fileDigests, listWikiPages, loadWikiMeta, saveWikiMeta, sourceDigestOf } from './evolve'
+import { diffAgainstSnapshot, evolveTaskText, fileDigests, listWikiPages, loadWikiMeta, saveWikiMeta, sourceDigestOf } from '../features/evolve'
 import type { ToolImpl } from './impls'
 
 /** 把项目参数解析为绝对路径。 */

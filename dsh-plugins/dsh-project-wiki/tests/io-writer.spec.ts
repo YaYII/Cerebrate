@@ -2,10 +2,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { projectTree, readFileBounded, safeVaultPath } from '../src/io'
-import { writePage, stampFrontmatter, listPages, wikiDirFor } from '../src/writer'
-import { sanitizeMermaidWarnings, verifyCiteRefs } from '../src/impls-write'
-import { executeWikiTree, executeWikiRead, executeWikiStatus } from '../src/impls'
+import { projectTree, readFileBounded, safeVaultPath } from '../src/features/io'
+import { writePage, stampFrontmatter, listPages, wikiDirFor } from '../src/features/writer'
+import { sanitizeMermaidWarnings, verifyCiteRefs } from '../src/business/impls-write'
+import { executeWikiTree, executeWikiRead, executeWikiStatus } from '../src/business/impls'
 
 function makeProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'wikiio-'))

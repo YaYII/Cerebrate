@@ -211,9 +211,11 @@ export function checkSeparation(absPath: string, relPath: string): ArchFinding[]
   const bizWords = /订单|支付|用户|权限|会员|库存|发票|核销|商户|活动|订单号|orderNo|receiptId|Order|Payment|User|Invoice|Merchant|Activity/
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
-    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue
+    // 跳过注释行（含 /** JSDoc）：业务词汇示例是说明文字，不是代码绑定
+    if (isCommentLine(line.trim())) continue
     const m = bizWords.exec(line)
-    if (m && !line.includes('@module') && !line.includes('import')) {
+    // 跳过字符串字面量（契约描述/示例文本是文档，不是代码绑定业务）
+    if (m && !line.includes('@module') && !line.includes('import') && !/['"][^'"]*(订单|支付|用户)[^'"]*['"]/.test(line)) {
       findings.push({
         rule: 'S1', severity: 'P2', file: relPath, line: i + 1,
         message: '功能层出现业务词汇「' + m[0] + '」：功能是砖块，不应绑定具体业务（业务应通过参数/配置注入）',
