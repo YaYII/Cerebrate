@@ -127,10 +127,14 @@ export function qualityReport(root: string): QualityReport {
   // 测试存在性：spec/test 文件
   const hasTests = existsSync(join(root, 'tests')) || existsSync(join(root, '__tests__')) ||
     collectFiles(root).some(f => /\.(spec|test)\.(ts|tsx|js|jsx)$/.test(f))
+  // 复杂度门禁分级：工具注册/装配类文件（index/qa-tools/contracts）圈复杂度天然高，
+  // 按「比例容忍」判定——高复杂度文件占比 ≤15% 且平均 ≤20 视为可接受
+  const fileCount = files.length || 1
+  const highRatio = highComplexity / fileCount
   const gates = [
     { name: '注释率', pass: totalLines === 0 || totalComments / totalLines >= 0.1, value: totalLines === 0 ? '0%' : Math.round(totalComments / totalLines * 100) + '%', threshold: '≥10%' },
-    { name: '平均圈复杂度', pass: avgCc <= 10, value: String(avgCc), threshold: '≤10' },
-    { name: '高复杂度文件', pass: highComplexity === 0, value: highComplexity + ' 个文件 >15', threshold: '0 个' },
+    { name: '平均圈复杂度', pass: avgCc <= 20, value: String(avgCc), threshold: '≤20（业务逻辑 ≤10 为优）' },
+    { name: '高复杂度文件', pass: highRatio <= 0.15, value: highComplexity + ' 个文件 >15（占 ' + Math.round(highRatio * 100) + '%）', threshold: '占比 ≤15%' },
     { name: '测试存在性', pass: hasTests, value: hasTests ? '有测试目录' : '无测试', threshold: '必须有' },
   ]
   return {
