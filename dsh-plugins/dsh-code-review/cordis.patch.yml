@@ -1,0 +1,11 @@
+# dsh-code-review profile patch layer — insert one loader entry for the
+# plugin package. Apply by appending this insert block to
+# ~/.dsh/profiles/<profile>/cordis.patch.yml, then restart the dsh service.
+- insert:
+    - id: code-review
+      name: '/home/as-workstation01/Documents/project/Cerebrate/dsh-plugins/dsh-code-review/lib/index.js'
+      config:
+        artifactsDir: '.code-review'
+        injectGuidance: true
+        benchIterations: 5
+        testTimeoutMs: 300000

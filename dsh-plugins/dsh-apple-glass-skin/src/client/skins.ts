@@ -1,0 +1,477 @@
+/**
+ * Tech-Space skin catalog: two third-party themes for the built-in
+ * ThemeRuntime in a deep-space sci-fi style. Each skin carries an id, the
+ * base palette it builds on (colorScheme drives `body[data-ds-dark-theme]`),
+ * alias-token overrides applied as inline custom properties on <body> by
+ * ui-layout's ThemePresenter, and a CSS gradient backdrop the fixed backdrop
+ * layer shows through the translucent surfaces.
+ *
+ * Values are concrete CSS colors (no var() indirection), tuned per skin for
+ * contrast on both surface and text roles. Surfaces use translucent rgba so
+ * the HUD backdrop reads through them, while label and state colors stay
+ * opaque for readability.
+ */
+
+/** One Tech-Space skin (id, palette, backdrop gradient). */
+export interface AppleSkin {
+  /** Theme id (the setTheme argument for this skin). */
+  id: string
+  /** Settings-row locale key for the display name. */
+  labelKey: 'default' | 'light' | 'dark' | 'matrix'
+  /** Which base palette this skin builds on. */
+  colorScheme: 'light' | 'dark'
+  /** Alias-token overrides applied over the base palette. */
+  tokens: Record<string, string>
+  /** Fixed backdrop layer gradient (CSS background value). */
+  backdrop: string
+  /** Animated backdrop palette for the Canvas HUD layer. */
+  motion: BackdropMotion
+}
+
+/**
+ * Selectable 3D-scene backdrop themes. Each renders a distinct programmatic
+ * scene on the fixed Canvas layer: a deep-space vista, a cyberpunk skyline,
+ * or an underwater world.
+ */
+export type BackdropScene = 'space' | 'city' | 'ocean' | 'matrix'
+
+/** Per-scene visual palette and tuning for one skin. */
+export interface SceneConfig {
+  /** Background gradient, top to bottom (scene sky/water). */
+  base: readonly [string, string]
+  /** Primary accent (nebula/neon/light shafts). */
+  accent: string
+  /** Secondary accent (planet ring/sign glow/school of fish). */
+  accent2: string
+  /** Drifting particle color (stars/rain/bubbles). */
+  particle: string
+  /** Particle count per 1000px of width. */
+  particleDensity: number
+  /** Slow scene drift speed multiplier. */
+  speed: number
+}
+
+/** Palette driving the animated Canvas backdrop for one skin. */
+export interface BackdropMotion {
+  /** Active scene theme. */
+  scene: BackdropScene
+  /** Scene palettes, keyed by scene id (all three stay configurable). */
+  scenes: Record<BackdropScene, SceneConfig>
+}
+
+/** Sentinel meaning "no custom skin — follow the built-in appearance". */
+export const DEFAULT_SKIN = 'system'
+
+/** The Tech-Space skin catalog in settings-row order. */
+export const SKINS: readonly AppleSkin[] = [
+  {
+    id: 'tech-space',
+    labelKey: 'dark',
+    colorScheme: 'dark',
+    tokens: {
+      '--dsw-alias-bg-base': 'rgba(7, 11, 20, 0.50)',
+      '--dsw-alias-bg-layer-1': 'rgba(13, 20, 36, 0.66)',
+      '--dsw-alias-bg-layer-2': 'rgba(18, 28, 48, 0.58)',
+      '--dsw-alias-bg-layer-3': 'rgba(24, 36, 60, 0.52)',
+      '--dsw-alias-bg-overlay': 'rgba(10, 16, 30, 0.88)',
+      '--dsw-alias-bg-mask': 'rgba(7, 11, 20, 0.88)',
+      '--dsw-alias-bg-mask-drop': 'rgba(7, 11, 20, 0.88)',
+      '--dsw-alias-bg-mask-photo': 'rgba(7, 11, 20, 0.74)',
+      '--dsw-alias-border-l1': 'rgba(0, 229, 255, 0.16)',
+      '--dsw-alias-border-l2': 'rgba(0, 229, 255, 0.28)',
+      '--dsw-alias-border-inverted': 'rgba(255, 255, 255, 0.85)',
+      '--dsw-alias-label-primary': '#e8f4ff',
+      '--dsw-alias-label-secondary': 'rgba(200, 225, 255, 0.78)',
+      '--dsw-alias-label-tertiary': 'rgba(170, 200, 235, 0.55)',
+      '--dsw-alias-label-dimmed': 'rgba(150, 180, 215, 0.42)',
+      '--dsw-alias-label-caption': 'rgba(190, 215, 245, 0.62)',
+      '--dsw-alias-brand-primary': '#00e5ff',
+      '--dsw-alias-brand-text': '#001018',
+      '--dsw-alias-button-primary-fill': '#0a84ff',
+      '--dsw-alias-button-primary-hover': '#2f9bff',
+      '--dsw-alias-button-primary-dimmed': 'rgba(10, 132, 255, 0.55)',
+      '--dsw-alias-state-success-primary': '#00e676',
+      '--dsw-alias-state-success-secondary': 'rgba(0, 230, 118, 0.16)',
+      '--dsw-alias-state-warn-primary': '#ffb300',
+      '--dsw-alias-state-warn-secondary': 'rgba(255, 179, 0, 0.16)',
+      '--dsw-alias-state-error-primary': '#ff5252',
+      '--dsw-alias-state-error-secondary': 'rgba(255, 82, 82, 0.14)',
+      '--dsw-alias-interactive-bg-hover': 'rgba(0, 229, 255, 0.08)',
+      '--dsw-alias-interactive-bg-active': 'rgba(0, 229, 255, 0.14)',
+      '--dsw-alias-interactive-bg-hover-accent': 'rgba(0, 229, 255, 0.12)',
+      '--dsw-alias-scrollbar-bg-l1': 'rgba(0, 229, 255, 0.14)',
+      '--dsw-alias-scrollbar-bg-l2': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-alias-scrollbar-hover-l1': 'rgba(0, 229, 255, 0.32)',
+      '--dsw-alias-scrollbar-hover-l2': 'rgba(0, 229, 255, 0.24)',
+      '--dsw-alias-markdown-code-block': 'rgba(10, 16, 30, 0.86)',
+      '--dsw-alias-markdown-inline-code': 'rgba(0, 229, 255, 0.12)',
+      '--dsw-alias-markdown-code-segment-unselected': 'rgba(120, 190, 255, 0.10)',
+      '--dsw-alias-markdown-code-segment-selected': 'rgba(0, 229, 255, 0.18)',
+      '--dsw-alias-markdown-code-block-banner': 'rgba(0, 140, 255, 0.16)',
+      '--dsw-alias-markdown-placeholder': 'rgba(170, 200, 235, 0.45)',
+      '--dsw-alias-markdown-tag': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-alias-markdown-citation': 'rgba(0, 229, 255, 0.14)',
+      '--dsw-alias-toast-bg': 'rgba(20, 30, 50, 0.96)',
+      '--dsw-alias-tooltip-bg': 'rgba(16, 24, 42, 0.97)',
+      '--dsw-alias-bg-mask-1': 'rgba(0, 0, 0, 0.5)',
+      '--dsw-alias-bg-mask-2': 'rgba(0, 0, 0, 0.2)',
+      '--dsw-alias-bg-mask-3': 'rgba(0, 0, 0, 0.48)',
+      '--dsw-alias-bg-skeleton': 'rgba(255, 255, 255, 0.08)',
+      '--dsw-alias-bg-multi-select': 'rgba(18, 28, 48, 0.9)',
+      '--dsw-alias-bg-module-platform': 'rgba(13, 20, 36, 0.94)',
+      '--dsw-alias-border-l3': 'rgba(0, 229, 255, 0.22)',
+      '--dsw-alias-border-l4': 'rgba(0, 229, 255, 0.30)',
+      '--dsw-alias-border-inverted2': 'rgba(255, 255, 255, 0.12)',
+      '--dsw-alias-button-ghost-active-fill': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-alias-button-ghost-active-hover': 'rgba(0, 229, 255, 0.16)',
+      '--dsw-alias-button-ghost-active-border': 'rgba(0, 229, 255, 0.30)',
+      '--dsw-alias-button-elevated-fill': 'rgba(24, 36, 60, 0.9)',
+      '--dsw-alias-button-floating-fill': 'rgba(16, 24, 42, 0.92)',
+      '--dsw-alias-button-floating-hover': 'rgba(22, 33, 55, 0.95)',
+      '--dsw-alias-button-info-fill': 'rgba(0, 140, 255, 0.16)',
+      '--dsw-alias-button-info-hover': 'rgba(0, 140, 255, 0.24)',
+      '--dsw-alias-button-contrast-fill': '#0a84ff',
+      '--dsw-alias-button-tool-bar-fill': 'rgba(13, 20, 36, 0.85)',
+      '--dsw-alias-button-tool-bar-hover': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-alias-button-tool-bar-fill-invisible': 'rgba(0, 0, 0, 0)',
+      '--dsw-alias-interactive-bg-hover-danger': 'rgba(255, 82, 82, 0.14)',
+      '--dsw-alias-interactive-bg-hover-solid': 'rgba(0, 229, 255, 0.14)',
+      '--dsw-alias-label-primary-bluish': '#e8f4ff',
+      '--dsw-alias-label-primary-dimmed': 'rgba(232, 244, 255, 0.72)',
+      '--dsw-alias-label-primary-foreground': '#e8f4ff',
+      '--dsw-alias-label-primary-inverted': '#0b1c33',
+      '--dsw-alias-state-warn-label': '#ffd166',
+      '--dsw-alias-state-warn-tertiary': 'rgba(255, 179, 0, 0.08)',
+      '--dsw-alias-state-success-tertiary': 'rgba(0, 230, 118, 0.08)',
+      '--dsw-alias-state-business-primary': '#4da3ff',
+      '--dsw-alias-state-business-tertiary': 'rgba(77, 163, 255, 0.12)',
+      '--dsw-alias-brand-primary-invert': 'rgba(255, 255, 255, 0.9)',
+      '--dsw-alias-brand-primary-new-colorprimary-new-color': '#0a84ff',
+      '--dsw-alias-border-l2-darkmode-thin': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-specific-sidebar-fill': 'rgba(10, 16, 30, 0.96)',
+      '--dsw-specific-sidebar-nav-item-active': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-specific-sidebar-nav-item-active-accent': 'rgba(0, 140, 255, 0.18)',
+      '--dsw-specific-sidebar-nav-item-hover': 'rgba(0, 229, 255, 0.07)',
+      '--dsw-specific-tip': 'rgba(13, 20, 36, 0.94)',
+      '--dsw-specific-menu': 'rgba(18, 28, 48, 0.94)',
+      '--dsw-specific-selector': 'rgba(0, 229, 255, 0.10)',
+      '--dsw-specific-bubble': 'rgba(0, 140, 255, 0.12)',
+      '--dsw-specific-bubble-highlight': 'rgba(0, 229, 255, 0.16)',
+      '--dsw-specific-input-major': 'rgba(10, 16, 30, 0.9)',
+      '--dsw-specific-login-input': 'rgba(10, 16, 30, 0.9)',
+    },
+    backdrop: 'linear-gradient(160deg, #02040a 0%, #050a18 32%, #0a1630 66%, #060e20 100%)',
+    motion: {
+      scene: 'space',
+      scenes: {
+        space: {
+          base: ['#02040a', '#0a1630'] as const,
+          accent: 'rgba(0, 180, 255, 0.55)',
+          accent2: 'rgba(140, 90, 255, 0.40)',
+          particle: 'rgba(200, 235, 255, 0.95)',
+          particleDensity: 36,
+          speed: 0.6,
+        },
+        city: {
+          base: ['#05070f', '#101c30'] as const,
+          accent: 'rgba(0, 229, 255, 0.50)',
+          accent2: 'rgba(255, 90, 160, 0.35)',
+          particle: 'rgba(150, 220, 255, 0.80)',
+          particleDensity: 24,
+          speed: 0.5,
+        },
+        ocean: {
+          base: ['#02121f', '#04304a'] as const,
+          accent: 'rgba(0, 200, 255, 0.40)',
+          accent2: 'rgba(90, 220, 255, 0.35)',
+          particle: 'rgba(190, 240, 255, 0.85)',
+          particleDensity: 30,
+          speed: 0.5,
+        },
+        matrix: {
+          base: ['#000805', '#001a0d'] as const,
+          accent: 'rgba(0, 255, 65, 0.55)',
+          accent2: 'rgba(0, 200, 90, 0.30)',
+          particle: 'rgba(0, 255, 65, 0.9)',
+          particleDensity: 40,
+          speed: 0.7,
+        },
+      },
+    },
+  },
+  {
+    id: 'tech-space-light',
+    labelKey: 'light',
+    colorScheme: 'light',
+    tokens: {
+      '--dsw-alias-bg-base': 'rgba(245, 249, 255, 0.80)',
+      '--dsw-alias-bg-layer-1': 'rgba(255, 255, 255, 0.74)',
+      '--dsw-alias-bg-layer-2': 'rgba(250, 253, 255, 0.66)',
+      '--dsw-alias-bg-layer-3': 'rgba(240, 247, 255, 0.58)',
+      '--dsw-alias-bg-overlay': 'rgba(250, 252, 255, 0.92)',
+      '--dsw-alias-bg-mask': 'rgba(245, 249, 255, 0.92)',
+      '--dsw-alias-bg-mask-drop': 'rgba(245, 249, 255, 0.92)',
+      '--dsw-alias-bg-mask-photo': 'rgba(245, 249, 255, 0.76)',
+      '--dsw-alias-border-l1': 'rgba(10, 108, 255, 0.16)',
+      '--dsw-alias-border-l2': 'rgba(10, 108, 255, 0.28)',
+      '--dsw-alias-border-inverted': 'rgba(255, 255, 255, 0.85)',
+      '--dsw-alias-label-primary': '#0b1c33',
+      '--dsw-alias-label-secondary': 'rgba(28, 60, 96, 0.80)',
+      '--dsw-alias-label-tertiary': 'rgba(28, 60, 96, 0.56)',
+      '--dsw-alias-label-dimmed': 'rgba(28, 60, 96, 0.42)',
+      '--dsw-alias-label-caption': 'rgba(28, 60, 96, 0.64)',
+      '--dsw-alias-brand-primary': '#0a6cff',
+      '--dsw-alias-brand-text': '#ffffff',
+      '--dsw-alias-button-primary-fill': '#0a6cff',
+      '--dsw-alias-button-primary-hover': '#2f84ff',
+      '--dsw-alias-button-primary-dimmed': 'rgba(10, 108, 255, 0.55)',
+      '--dsw-alias-state-success-primary': '#00875a',
+      '--dsw-alias-state-success-secondary': 'rgba(0, 135, 90, 0.14)',
+      '--dsw-alias-state-warn-primary': '#b26a00',
+      '--dsw-alias-state-warn-secondary': 'rgba(178, 106, 0, 0.14)',
+      '--dsw-alias-state-error-primary': '#d7003f',
+      '--dsw-alias-state-error-secondary': 'rgba(215, 0, 63, 0.12)',
+      '--dsw-alias-interactive-bg-hover': 'rgba(10, 108, 255, 0.08)',
+      '--dsw-alias-interactive-bg-active': 'rgba(10, 108, 255, 0.14)',
+      '--dsw-alias-interactive-bg-hover-accent': 'rgba(10, 108, 255, 0.12)',
+      '--dsw-alias-scrollbar-bg-l1': 'rgba(10, 108, 255, 0.14)',
+      '--dsw-alias-scrollbar-bg-l2': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-alias-scrollbar-hover-l1': 'rgba(10, 108, 255, 0.30)',
+      '--dsw-alias-scrollbar-hover-l2': 'rgba(10, 108, 255, 0.22)',
+      '--dsw-alias-markdown-code-block': 'rgba(244, 249, 255, 0.92)',
+      '--dsw-alias-markdown-inline-code': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-alias-markdown-code-segment-unselected': 'rgba(10, 108, 255, 0.08)',
+      '--dsw-alias-markdown-code-segment-selected': 'rgba(10, 108, 255, 0.16)',
+      '--dsw-alias-markdown-code-block-banner': 'rgba(10, 108, 255, 0.12)',
+      '--dsw-alias-markdown-placeholder': 'rgba(28, 60, 96, 0.42)',
+      '--dsw-alias-markdown-tag': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-alias-markdown-citation': 'rgba(10, 108, 255, 0.14)',
+      '--dsw-alias-toast-bg': 'rgba(250, 252, 255, 0.97)',
+      '--dsw-alias-tooltip-bg': 'rgba(245, 249, 255, 0.98)',
+      '--dsw-alias-bg-mask-1': 'rgba(0, 0, 0, 0.24)',
+      '--dsw-alias-bg-mask-2': 'rgba(0, 0, 0, 0.12)',
+      '--dsw-alias-bg-mask-3': 'rgba(0, 0, 0, 0.22)',
+      '--dsw-alias-bg-skeleton': 'rgba(10, 108, 255, 0.06)',
+      '--dsw-alias-bg-multi-select': 'rgba(250, 253, 255, 0.95)',
+      '--dsw-alias-bg-module-platform': 'rgba(244, 249, 255, 0.96)',
+      '--dsw-alias-border-l3': 'rgba(10, 108, 255, 0.22)',
+      '--dsw-alias-border-l4': 'rgba(10, 108, 255, 0.30)',
+      '--dsw-alias-border-inverted2': 'rgba(0, 0, 0, 0.08)',
+      '--dsw-alias-button-ghost-active-fill': 'rgba(10, 108, 255, 0.08)',
+      '--dsw-alias-button-ghost-active-hover': 'rgba(10, 108, 255, 0.14)',
+      '--dsw-alias-button-ghost-active-border': 'rgba(10, 108, 255, 0.30)',
+      '--dsw-alias-button-elevated-fill': 'rgba(255, 255, 255, 0.92)',
+      '--dsw-alias-button-floating-fill': 'rgba(255, 255, 255, 0.95)',
+      '--dsw-alias-button-floating-hover': 'rgba(250, 253, 255, 0.98)',
+      '--dsw-alias-button-info-fill': 'rgba(10, 108, 255, 0.12)',
+      '--dsw-alias-button-info-hover': 'rgba(10, 108, 255, 0.18)',
+      '--dsw-alias-button-contrast-fill': '#0a6cff',
+      '--dsw-alias-button-tool-bar-fill': 'rgba(244, 249, 255, 0.9)',
+      '--dsw-alias-button-tool-bar-hover': 'rgba(10, 108, 255, 0.08)',
+      '--dsw-alias-button-tool-bar-fill-invisible': 'rgba(0, 0, 0, 0)',
+      '--dsw-alias-interactive-bg-hover-danger': 'rgba(215, 0, 63, 0.12)',
+      '--dsw-alias-interactive-bg-hover-solid': 'rgba(10, 108, 255, 0.12)',
+      '--dsw-alias-label-primary-bluish': '#0b1c33',
+      '--dsw-alias-label-primary-dimmed': 'rgba(11, 28, 51, 0.72)',
+      '--dsw-alias-label-primary-foreground': '#0b1c33',
+      '--dsw-alias-label-primary-inverted': '#ffffff',
+      '--dsw-alias-state-warn-label': '#b26a00',
+      '--dsw-alias-state-warn-tertiary': 'rgba(178, 106, 0, 0.08)',
+      '--dsw-alias-state-success-tertiary': 'rgba(0, 135, 90, 0.08)',
+      '--dsw-alias-state-business-primary': '#0a6cff',
+      '--dsw-alias-state-business-tertiary': 'rgba(10, 108, 255, 0.12)',
+      '--dsw-alias-brand-primary-invert': 'rgba(11, 28, 51, 0.9)',
+      '--dsw-alias-brand-primary-new-colorprimary-new-color': '#0a6cff',
+      '--dsw-alias-border-l2-darkmode-thin': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-specific-sidebar-fill': 'rgba(244, 249, 255, 0.96)',
+      '--dsw-specific-sidebar-nav-item-active': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-specific-sidebar-nav-item-active-accent': 'rgba(10, 108, 255, 0.16)',
+      '--dsw-specific-sidebar-nav-item-hover': 'rgba(10, 108, 255, 0.06)',
+      '--dsw-specific-tip': 'rgba(244, 249, 255, 0.96)',
+      '--dsw-specific-menu': 'rgba(250, 253, 255, 0.96)',
+      '--dsw-specific-selector': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-specific-bubble': 'rgba(10, 108, 255, 0.10)',
+      '--dsw-specific-bubble-highlight': 'rgba(10, 108, 255, 0.14)',
+      '--dsw-specific-input-major': 'rgba(250, 253, 255, 0.95)',
+      '--dsw-specific-login-input': 'rgba(250, 253, 255, 0.95)',
+    },
+    backdrop: 'linear-gradient(160deg, #eef4ff 0%, #e3ecff 40%, #d8e4ff 75%, #eef2fb 100%)',
+    motion: {
+      scene: 'space',
+      scenes: {
+        space: {
+          base: ['#eef4ff', '#c8d8f5'] as const,
+          accent: 'rgba(10, 120, 255, 0.35)',
+          accent2: 'rgba(120, 90, 255, 0.25)',
+          particle: 'rgba(30, 110, 255, 0.60)',
+          particleDensity: 28,
+          speed: 0.6,
+        },
+        city: {
+          base: ['#e8eefc', '#c4d4ef'] as const,
+          accent: 'rgba(10, 108, 255, 0.35)',
+          accent2: 'rgba(255, 90, 160, 0.22)',
+          particle: 'rgba(40, 120, 255, 0.55)',
+          particleDensity: 20,
+          speed: 0.5,
+        },
+        ocean: {
+          base: ['#e6f4ff', '#bcdcf2'] as const,
+          accent: 'rgba(10, 150, 255, 0.30)',
+          accent2: 'rgba(60, 190, 255, 0.28)',
+          particle: 'rgba(30, 140, 255, 0.55)',
+          particleDensity: 24,
+          speed: 0.5,
+        },
+        matrix: {
+          base: ['#e8f5ec', '#c8e8d4'] as const,
+          accent: 'rgba(0, 160, 60, 0.35)',
+          accent2: 'rgba(0, 200, 90, 0.25)',
+          particle: 'rgba(0, 150, 60, 0.7)',
+          particleDensity: 34,
+          speed: 0.7,
+        },
+      },
+    },
+  },
+  {
+    id: 'tech-matrix',
+    labelKey: 'matrix',
+    colorScheme: 'dark',
+    tokens: {
+      '--dsw-alias-bg-base': 'rgba(0, 10, 5, 0.55)',
+      '--dsw-alias-bg-layer-1': 'rgba(0, 22, 12, 0.70)',
+      '--dsw-alias-bg-layer-2': 'rgba(0, 30, 16, 0.62)',
+      '--dsw-alias-bg-layer-3': 'rgba(0, 38, 20, 0.55)',
+      '--dsw-alias-bg-overlay': 'rgba(0, 14, 8, 0.92)',
+      '--dsw-alias-bg-mask': 'rgba(0, 10, 5, 0.90)',
+      '--dsw-alias-bg-mask-drop': 'rgba(0, 10, 5, 0.90)',
+      '--dsw-alias-bg-mask-photo': 'rgba(0, 10, 5, 0.74)',
+      '--dsw-alias-border-l1': 'rgba(0, 255, 65, 0.20)',
+      '--dsw-alias-border-l2': 'rgba(0, 255, 65, 0.32)',
+      '--dsw-alias-border-inverted': 'rgba(255, 255, 255, 0.85)',
+      '--dsw-alias-label-primary': '#d4ffe4',
+      '--dsw-alias-label-secondary': 'rgba(180, 255, 205, 0.80)',
+      '--dsw-alias-label-tertiary': 'rgba(140, 225, 170, 0.55)',
+      '--dsw-alias-label-dimmed': 'rgba(120, 200, 150, 0.42)',
+      '--dsw-alias-label-caption': 'rgba(160, 235, 185, 0.62)',
+      '--dsw-alias-brand-primary': '#00ff41',
+      '--dsw-alias-brand-text': '#001a0d',
+      '--dsw-alias-button-primary-fill': '#00b336',
+      '--dsw-alias-button-primary-hover': '#00d442',
+      '--dsw-alias-button-primary-dimmed': 'rgba(0, 179, 54, 0.55)',
+      '--dsw-alias-state-success-primary': '#00e676',
+      '--dsw-alias-state-success-secondary': 'rgba(0, 230, 118, 0.16)',
+      '--dsw-alias-state-warn-primary': '#ffd600',
+      '--dsw-alias-state-warn-secondary': 'rgba(255, 214, 0, 0.16)',
+      '--dsw-alias-state-error-primary': '#ff5252',
+      '--dsw-alias-state-error-secondary': 'rgba(255, 82, 82, 0.14)',
+      '--dsw-alias-interactive-bg-hover': 'rgba(0, 255, 65, 0.10)',
+      '--dsw-alias-interactive-bg-active': 'rgba(0, 255, 65, 0.16)',
+      '--dsw-alias-interactive-bg-hover-accent': 'rgba(0, 255, 65, 0.14)',
+      '--dsw-alias-scrollbar-bg-l1': 'rgba(0, 255, 65, 0.16)',
+      '--dsw-alias-scrollbar-bg-l2': 'rgba(0, 255, 65, 0.12)',
+      '--dsw-alias-scrollbar-hover-l1': 'rgba(0, 255, 65, 0.34)',
+      '--dsw-alias-scrollbar-hover-l2': 'rgba(0, 255, 65, 0.26)',
+      '--dsw-alias-markdown-code-block': 'rgba(0, 14, 8, 0.88)',
+      '--dsw-alias-markdown-inline-code': 'rgba(0, 255, 65, 0.12)',
+      '--dsw-alias-markdown-code-segment-unselected': 'rgba(120, 255, 160, 0.10)',
+      '--dsw-alias-markdown-code-segment-selected': 'rgba(0, 255, 65, 0.18)',
+      '--dsw-alias-markdown-code-block-banner': 'rgba(0, 200, 90, 0.16)',
+      '--dsw-alias-markdown-placeholder': 'rgba(140, 225, 170, 0.45)',
+      '--dsw-alias-markdown-tag': 'rgba(0, 255, 65, 0.10)',
+      '--dsw-alias-markdown-citation': 'rgba(0, 255, 65, 0.14)',
+      '--dsw-alias-toast-bg': 'rgba(0, 20, 10, 0.96)',
+      '--dsw-alias-tooltip-bg': 'rgba(0, 16, 8, 0.97)',
+      '--dsw-alias-bg-mask-1': 'rgba(0, 0, 0, 0.5)',
+      '--dsw-alias-bg-mask-2': 'rgba(0, 0, 0, 0.2)',
+      '--dsw-alias-bg-mask-3': 'rgba(0, 0, 0, 0.48)',
+      '--dsw-alias-bg-skeleton': 'rgba(0, 255, 65, 0.08)',
+      '--dsw-alias-bg-multi-select': 'rgba(0, 30, 16, 0.9)',
+      '--dsw-alias-bg-module-platform': 'rgba(0, 22, 12, 0.94)',
+      '--dsw-alias-border-l3': 'rgba(0, 255, 65, 0.26)',
+      '--dsw-alias-border-l4': 'rgba(0, 255, 65, 0.34)',
+      '--dsw-alias-border-inverted2': 'rgba(255, 255, 255, 0.12)',
+      '--dsw-alias-button-ghost-active-fill': 'rgba(0, 255, 65, 0.10)',
+      '--dsw-alias-button-ghost-active-hover': 'rgba(0, 255, 65, 0.16)',
+      '--dsw-alias-button-ghost-active-border': 'rgba(0, 255, 65, 0.30)',
+      '--dsw-alias-button-elevated-fill': 'rgba(0, 38, 20, 0.9)',
+      '--dsw-alias-button-floating-fill': 'rgba(0, 24, 13, 0.92)',
+      '--dsw-alias-button-floating-hover': 'rgba(0, 34, 18, 0.95)',
+      '--dsw-alias-button-info-fill': 'rgba(0, 200, 90, 0.16)',
+      '--dsw-alias-button-info-hover': 'rgba(0, 200, 90, 0.24)',
+      '--dsw-alias-button-contrast-fill': '#00b336',
+      '--dsw-alias-button-tool-bar-fill': 'rgba(0, 22, 12, 0.85)',
+      '--dsw-alias-button-tool-bar-hover': 'rgba(0, 255, 65, 0.10)',
+      '--dsw-alias-button-tool-bar-fill-invisible': 'rgba(0, 0, 0, 0)',
+      '--dsw-alias-interactive-bg-hover-danger': 'rgba(255, 82, 82, 0.14)',
+      '--dsw-alias-interactive-bg-hover-solid': 'rgba(0, 255, 65, 0.14)',
+      '--dsw-alias-label-primary-bluish': '#d4ffe4',
+      '--dsw-alias-label-primary-dimmed': 'rgba(212, 255, 228, 0.72)',
+      '--dsw-alias-label-primary-foreground': '#d4ffe4',
+      '--dsw-alias-label-primary-inverted': '#001a0d',
+      '--dsw-alias-state-warn-label': '#ffea00',
+      '--dsw-alias-state-warn-tertiary': 'rgba(255, 214, 0, 0.08)',
+      '--dsw-alias-state-success-tertiary': 'rgba(0, 230, 118, 0.08)',
+      '--dsw-alias-state-business-primary': '#00e676',
+      '--dsw-alias-state-business-tertiary': 'rgba(0, 230, 118, 0.12)',
+      '--dsw-alias-brand-primary-invert': 'rgba(255, 255, 255, 0.9)',
+      '--dsw-alias-brand-primary-new-colorprimary-new-color': '#00b336',
+      '--dsw-alias-border-l2-darkmode-thin': 'rgba(0, 255, 65, 0.12)',
+      '--dsw-specific-sidebar-fill': 'rgba(0, 12, 6, 0.96)',
+      '--dsw-specific-sidebar-nav-item-active': 'rgba(0, 255, 65, 0.12)',
+      '--dsw-specific-sidebar-nav-item-active-accent': 'rgba(0, 200, 90, 0.20)',
+      '--dsw-specific-sidebar-nav-item-hover': 'rgba(0, 255, 65, 0.08)',
+      '--dsw-specific-tip': 'rgba(0, 20, 10, 0.94)',
+      '--dsw-specific-menu': 'rgba(0, 30, 16, 0.94)',
+      '--dsw-specific-selector': 'rgba(0, 255, 65, 0.10)',
+      '--dsw-specific-bubble': 'rgba(0, 200, 90, 0.12)',
+      '--dsw-specific-bubble-highlight': 'rgba(0, 255, 65, 0.16)',
+      '--dsw-specific-input-major': 'rgba(0, 20, 10, 0.9)',
+      '--dsw-specific-login-input': 'rgba(0, 20, 10, 0.9)',
+    },
+    backdrop: 'linear-gradient(180deg, #000805 0%, #001a0d 50%, #002411 100%)',
+    motion: {
+      scene: 'matrix',
+      scenes: {
+        space: {
+          base: ['#000805', '#001a0d'] as const,
+          accent: 'rgba(0, 255, 65, 0.40)',
+          accent2: 'rgba(0, 200, 90, 0.25)',
+          particle: 'rgba(0, 255, 65, 0.85)',
+          particleDensity: 36,
+          speed: 0.6,
+        },
+        city: {
+          base: ['#000805', '#002411'] as const,
+          accent: 'rgba(0, 255, 65, 0.45)',
+          accent2: 'rgba(160, 255, 100, 0.30)',
+          particle: 'rgba(120, 255, 160, 0.8)',
+          particleDensity: 24,
+          speed: 0.5,
+        },
+        ocean: {
+          base: ['#000805', '#001a0d'] as const,
+          accent: 'rgba(0, 200, 90, 0.35)',
+          accent2: 'rgba(80, 255, 150, 0.30)',
+          particle: 'rgba(140, 255, 180, 0.8)',
+          particleDensity: 28,
+          speed: 0.5,
+        },
+        matrix: {
+          base: ['#000502', '#001a0d'] as const,
+          accent: 'rgba(0, 255, 65, 0.50)',
+          accent2: 'rgba(0, 200, 90, 0.25)',
+          particle: 'rgba(0, 255, 65, 0.95)',
+          particleDensity: 48,
+          speed: 0.8,
+        },
+      },
+    },
+  },
+]
+
+/** Find a skin by id, or undefined when the id is not one of ours. */
+export function findSkin(id: string): AppleSkin | undefined {
+  return SKINS.find((skin) => skin.id === id)
+}
