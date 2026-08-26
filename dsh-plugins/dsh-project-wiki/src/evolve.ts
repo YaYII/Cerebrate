@@ -136,16 +136,20 @@ export function diffAgainstSnapshot(scan: ProjectScan, meta: WikiMeta | null): C
       affectedModules: affectedModulesOf(scan.files.map(f => f.relPath)),
     }
   }
+  // git head 变化是强信号：即便文件内容未变，提交历史变了也值得刷新（可能改了配置/流程）
   const headChanged = head !== '' && meta.gitHead !== head
   const curFiles = fileDigests(scan)
   const newOrModified: string[] = []
   const deleted: string[] = []
+  // 判变规则：当前文件与快照摘要不同 = 新增或修改；快照有而当前没有 = 删除。
+  // 摘要比较比 mtime 可靠（内容级判变，避免 touch 误报）。
   for (const [rel, sha] of Object.entries(curFiles)) {
     if (meta.files[rel] !== sha) newOrModified.push(rel)
   }
   for (const rel of Object.keys(meta.files)) {
     if (!(rel in curFiles)) deleted.push(rel)
   }
+  // 三者任一变化即整体 changed——AI 据此决定是否值得跑一次增量刷新
   const changed = headChanged || newOrModified.length > 0 || deleted.length > 0
   const reason = changed
     ? [

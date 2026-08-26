@@ -106,11 +106,16 @@ export function writePage(
  */
 export function vaultCommit(vaultRoot: string, message: string): { committed: boolean; head: string } {
   const root = expandHome(vaultRoot)
+  // 非 git 仓库：无提交能力，静默返回（vault 可能只是普通目录）
   if (!existsSync(join(root, '.git'))) return { committed: false, head: '' }
+  // 三步提交：add 全部 → 检查是否有变化 → commit。
+  // 用 --no-verify 跳过 vault 的 pre-commit 钩子（可能有格式检查导致 AI 写入失败）。
   spawnSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' })
   const status = git(root, ['status', '--porcelain'])
+  // 工作树干净：无变化可提交，但返回当前 head 供调用方感知
   if (status.length === 0) return { committed: false, head: git(root, ['rev-parse', '--short', 'HEAD']) }
   const res = spawnSync('git', ['commit', '-m', message, '--no-verify'], { cwd: root, stdio: 'ignore' })
+  // 提交失败（如用户态冲突）：不抛错，返回未提交但 head 可读
   if (res.status !== 0) return { committed: false, head: git(root, ['rev-parse', '--short', 'HEAD']) }
   return { committed: true, head: git(root, ['rev-parse', '--short', 'HEAD']) }
 }
@@ -128,10 +133,12 @@ export function listPages(vaultDir: string, kbRoot: string, project: string): st
     let names: string[] = []
     try { names = readdirSync(d) } catch { return }
     for (const n of names) {
+      // 快照文件不是页面，跳过（避免把 .wiki-meta.json 当知识页列出）
       if (n === '.wiki-meta.json') continue
       const abs = join(d, n)
       let st
       try { st = statSync(abs) } catch { continue }
+      // 递归目录；仅 .md 是页面（frontmatter 之外的 Markdown 都是知识内容）
       if (st.isDirectory()) walk(abs, rel ? rel + '/' + n : n)
       else if (n.endsWith('.md')) out.push(rel ? rel + '/' + n : n)
     }

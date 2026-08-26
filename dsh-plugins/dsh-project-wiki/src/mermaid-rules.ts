@@ -72,19 +72,31 @@ export function checkDiamondQuestion(trimmed: string, add: (rule: string, hint: 
 
 // ── 修复器零件 ──
 
-/** R1 修复：[/text/] → [\"text\"]。 */
+/**
+ * R1 修复：[/text/] 形状语法与文本内斜杠冲突（渲染器把 / 当形状结束符），
+ * 统一改为引号节点——文本原样保留，形状语义由方括号表达。
+ */
 export const fixShapeSlash: LineFixer = (line) =>
   line.replace(/\[\/([^\]\n]*?)\/\]/g, (_, t: string) => '[\"' + t.trim() + '\"]')
 
-/** R2 修复：subgraph 标题斜杠 → 与。 */
+/**
+ * R2 修复：渲染器把 subgraph 标题中的 / 当层级分隔符（子图路径），导致标题断裂；
+ * 用中文「与」替换是最贴近原意且无歧义的写法。
+ */
 export const fixSubgraphSlash: LineFixer = (line) =>
   line.replace(/(subgraph\s+)([^\n]+)/g, (_, p: string, t: string) => t.includes('/') ? p + t.replace(/\//g, '与') : p + t)
 
-/** R3 修复：花括号内容 → 值后缀。 */
+/**
+ * R3 修复：{nonce} 会被渲染器当菱形节点（{...} 是菱形语法），导致节点变形；
+ * 改写为「值 后缀」形态保留语义（mpay:nonce:{nonce} → mpay:nonce 值）。
+ */
 export const fixBraces: LineFixer = (line) =>
   line.replace(/\{([^}]*)\}/g, (_, t: string) => (t.trim() ? t.trim() + ' 值' : '值'))
 
-/** R4 修复：函数调用括号 → 空格连接。 */
+/**
+ * R4 修复：函数调用括号 () 会被渲染器当形状参数，导致节点解析错乱；
+ * 改写为「函数名 参数」空格连接，语义不变、语法安全。
+ */
 export const fixParens: LineFixer = (line) =>
   line.replace(/([a-zA-Z0-9_]+)\(([a-zA-Z0-9_, .'\u4e00-\u9fff]*)\)/g, (_, fn: string, args: string) => {
     const a = args.trim()
@@ -92,19 +104,31 @@ export const fixParens: LineFixer = (line) =>
     return a ? fn + ' ' + a.split(',').join(' ').trim() : fn
   })
 
-/** R5 修复：边标签内去除 br。 */
+/**
+ * R5 修复：边标签 |...| 内的 <br/> 会被渲染器当标签分隔符，
+ * 导致边标签断裂；改为空格连接（换行说明移入节点文本）。
+ */
 export const fixEdgeLabelBr: LineFixer = (line) =>
   line.replace(/\|([^|]*?)<br\/?>([^|]*)\|/g, (_, a: string, b: string) => '|' + (a + ' ' + b).trim() + '|')
 
-/** R6 修复：嵌套方括号 → 合并。 */
+/**
+ * R6 修复：节点文本内的嵌套方括号 [a[b]] 会被渲染器当子节点定义，
+ * 导致结构错乱；合并内层括号为文字描述。
+ */
 export const fixNestedBracket: LineFixer = (line) =>
   line.replace(/\[([^\[\]\n]*)\[([^\[\]]+)\]([^\[\]\n]*)\]/g, (_, pre: string, inner: string, post: string) => '[' + pre + ' ' + inner + post + ']')
 
-/** R8 修复：残缺节点 → 完整引号节点。 */
+/**
+ * R8 修复：残缺节点（] 后接 <br/> 文本再 ]）是生成器拼接错误，
+ * 渲染器直接失败；重建为完整引号节点。
+ */
 export const fixBrokenNode: LineFixer = (line) =>
   line.replace(/([A-Za-z0-9_]+)\[([^\[\]\n]*)\]<br\/?>([^\]\n]*)\]/g, (_, id: string, a: string, b: string) => id + '[\"' + a.trim() + '<br/>' + b.trim() + '\"]')
 
-/** R7 修复：菱形节点尾部问号。 */
+/**
+ * R7 修复：菱形节点文本以 ? 结尾会被渲染器当条件语法的一部分，
+ * 导致歧义；去掉尾部问号（语义由菱形形状表达）。
+ */
 export const fixDiamondQuestion: LineFixer = (line) =>
   line.replace(/(\{[^}]*)\?\}/g, '$1}')
 

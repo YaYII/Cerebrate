@@ -26,7 +26,7 @@ const ALLOWED = new Set([
   '@module', 'requestContext', 'options', 'provider', 'model', 'agent', 'step',
   'start', 'end', 'body', 'null', 'git', 'head', 'root', 'session', 'task',
   'project', 'source', 'page', 'pages', 'meta', 'config', 'context', 'signal',
-  'commit', 'content', 'handle', 'diff', 'scan', 'wiki_tree', 'wiki_read', 'impls', 'write', 'ts',
+  'commit', 'content', 'handle', 'diff', 'scan', 'wiki_tree', 'wiki_read', 'impls', 'write', 'ts', 'param', 'returns', '@param', '@returns',
   'wiki_write', 'wiki_build', 'wiki_status', 'wiki_evolve', 'taskOverride',
   'inheritAgent', 'subagent', 'JSDoc', 'wiki', 'vault', 'kb', 'frontend',
   'backend', 'docker', 'database', 'Markdown', 'mermaid', 'DSH', 'AI', 'IO',

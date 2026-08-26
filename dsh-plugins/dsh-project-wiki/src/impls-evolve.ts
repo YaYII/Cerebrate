@@ -33,7 +33,14 @@ function refreshSnapshot(config: { vaultDir: string; kbRoot: string }, projectDi
   })
 }
 
-/** wiki_evolve 顶层执行函数（判变 → 子代理刷新 → 快照同步），独立可测。 */
+/**
+ * wiki_evolve 顶层执行函数（判变 → 子代理刷新 → 快照同步），独立可测。
+ * @param ctx - Cordis 上下文（agents/llm 注入源）。
+ * @param config - vault 目录与知识库根目录配置。
+ * @param args - 工具入参：project（项目目录）/commit（是否提交）。
+ * @param exec - 工具执行上下文（提供调用方 agent 的模型路由继承）。
+ * @returns { status, data: { project, changed, reason, report, affectedModules } }。
+ */
 export async function executeWikiEvolve(
   ctx: Context,
   config: { vaultDir: string; kbRoot: string },

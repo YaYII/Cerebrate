@@ -122,12 +122,16 @@ function collectSources(root: string): SourceCollector {
 function collectFile(collector: SourceCollector, abs: string, relPath: string, name: string): void {
   let st: ReturnType<typeof statSync>
   try { st = statSync(abs) } catch { return }
+  // 过滤链（顺序敏感）：锁文件/超大文件 → 二进制 → 计入。
+  // 256KB 上限防「超大文件把 AI 上下文打爆」；锁文件（package-lock 等）变化频繁且无知识价值。
   if (SKIP_FILES.has(name) || st.size > 256 * 1024) { collector.excluded[name] = (collector.excluded[name] ?? 0) + 1; return }
   let text = ''
   try { text = readFileSync(abs, 'utf8') } catch { return }
-  // 二进制嗅探（NUL 字节）或已知二进制扩展名 → 跳过（不参与 digest，AI 也读不了）
+  // 二进制嗅探（NUL 字节）或已知二进制扩展名 → 跳过（不参与 digest，AI 也读不了）。
+  // 扩展名黑名单兜底已知二进制；NUL 嗅探兜底无扩展名/未知二进制——双层防护。
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
   if (SKIP_EXTS.has(ext) || !isTextFile(text)) { collector.excluded[ext || name] = (collector.excluded[ext || name] ?? 0) + 1; return }
+  // 计入：语言统计（供知识库识别技术栈）+ 行数（供规模感知）
   const lang = ext ? ext.slice(1) : 'txt'
   collector.languages[lang] = (collector.languages[lang] ?? 0) + 1
   const lines = text.split('\n').length

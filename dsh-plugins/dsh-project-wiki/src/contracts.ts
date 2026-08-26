@@ -38,8 +38,9 @@ export interface ToolContract {
   whenToUse: string
 }
 
-/** 契约注册表——每个工具一个声明块。 */
+/** 契约注册表——每个工具一个声明块，注册与文档共享单一真源。 */
 export const TOOL_CONTRACTS: ToolContract[] = [
+  // wiki_tree：AI 认识项目的第一步——看真实目录树，识别模块边界。
   {
     id: 'wiki_tree',
     name: '浏览项目目录树',
@@ -56,6 +57,7 @@ export const TOOL_CONTRACTS: ToolContract[] = [
     example: 'wiki_tree project=/path/to/project',
     whenToUse: '构建知识库第一步：先看真实目录，识别模块边界。',
   },
+  // wiki_read：有界读取文件内容，供 AI 通读理解架构——不解析、不摘要。
   {
     id: 'wiki_read',
     name: '读项目文件',
@@ -73,6 +75,7 @@ export const TOOL_CONTRACTS: ToolContract[] = [
     example: 'wiki_read project=/path path=backend/pom.xml',
     whenToUse: '通读 README/依赖清单/入口/配置，理解模块职责与业务链路。',
   },
+  // wiki_write：AI 之手伸进 vault——frontmatter 戳记 + Mermaid 清洗 + 证据校验 + git 提交。
   {
     id: 'wiki_write',
     name: '写入知识库页面',
@@ -94,6 +97,7 @@ export const TOOL_CONTRACTS: ToolContract[] = [
     example: 'wiki_write project=my-app path=02-后端/订单服务.md body=正文',
     whenToUse: 'AI 写好一页后立即落盘；逐页增量提交。',
   },
+  // wiki_build：完整构建委托给 DSH 子代理（AI 自行完成全流程）——插件只编排。
   {
     id: 'wiki_build',
     name: 'AI 主导构建知识库',
@@ -111,6 +115,7 @@ export const TOOL_CONTRACTS: ToolContract[] = [
     example: 'wiki_build project=/path/to/project',
     whenToUse: '一键让 AI 通读项目并构建完整知识库；或作为团队成员入口。',
   },
+  // wiki_status：只读判变（git head + 文件摘要）——快速判断是否需要增量刷新。
   {
     id: 'wiki_status',
     name: '知识库同步状态',
@@ -128,6 +133,7 @@ export const TOOL_CONTRACTS: ToolContract[] = [
     example: 'wiki_status project=/path/to/project',
     whenToUse: '代码变更后例行检查；确认是否需要 wiki_evolve。',
   },
+  // wiki_evolve：代码变化后只刷新受影响页面——增量，不重建整个知识库。
   {
     id: 'wiki_evolve',
     name: '知识库增量进化',

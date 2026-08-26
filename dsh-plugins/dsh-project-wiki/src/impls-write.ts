@@ -32,7 +32,9 @@ function projectGitHead(projectRoot: string): string {
 
 /**
  * 清洗 Mermaid 块并收集警告（写入前校验步骤 1）。
- * 返回清洗后的正文与警告清单。
+ * 对正文中每个 mermaid 围栏做语法风险清洗，残余风险转警告。
+ * @param body - 待校验的 Markdown 正文。
+ * @returns 清洗后的正文与警告清单。
  */
 export function sanitizeMermaidWarnings(body: string): { body: string; warnings: string[] } {
   const warnings: string[] = []
@@ -55,7 +57,10 @@ export function sanitizeMermaidWarnings(body: string): { body: string; warnings:
 
 /**
  * 校验证据引用 <cite>路径</cite> 真实存在（写入前校验步骤 2）。
- * 返回缺失引用警告清单。
+ * http 链接与含空格路径跳过（外部引用/描述性文本不校验）。
+ * @param body - 待校验的 Markdown 正文。
+ * @param sourceDir - 源码根目录（相对引用以它解析）。
+ * @returns 缺失引用警告清单。
  */
 export function verifyCiteRefs(body: string, sourceDir: string): string[] {
   const warnings: string[] = []
@@ -71,7 +76,12 @@ export function verifyCiteRefs(body: string, sourceDir: string): string[] {
   return warnings
 }
 
-/** wiki_write 顶层执行函数（校验 + 落盘 + git 提交），独立可测。 */
+/**
+ * wiki_write 顶层执行函数（校验 + 落盘 + git 提交），独立可测。
+ * @param config - vault 目录与知识库根目录配置。
+ * @param args - 工具入参：project（知识库项目名）/path（vault 相对路径）/body（Markdown 正文）/source（源码目录）/commit（是否 git 提交）。
+ * @returns 状态与数据：{ status, data: { path, written, changed, committed, vaultHead, dir, warnings } }。
+ */
 export async function executeWikiWrite(
   config: { vaultDir: string; kbRoot: string },
   args: Record<string, unknown>,

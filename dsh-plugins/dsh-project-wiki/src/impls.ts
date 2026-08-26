@@ -32,13 +32,21 @@ function resolveProject(project: string | undefined, cwd: string): string {
 
 // ── 顶层执行函数（独立可测） ──
 
-/** wiki_tree：列出项目目录树，供 AI 识别模块边界。 */
+/**
+ * wiki_tree 顶层执行函数：列出项目真实目录树，供 AI 识别模块边界。
+ * @param args - 工具入参：project（项目目录）。
+ * @returns { status, data: { root, tree, top } }。
+ */
 export async function executeWikiTree(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const projectDir = resolveProject(String(args.project ?? ''), process.cwd())
   return { status: 'ok', data: { root: projectDir, tree: projectTree(projectDir), top: topLevelEntries(projectDir) } }
 }
 
-/** wiki_read：有界读取文件内容。 */
+/**
+ * wiki_read 顶层执行函数：有界读取文件内容（96KB/40000 字符），不解析不摘要。
+ * @param args - 工具入参：project（项目目录）/path（相对路径）。
+ * @returns { status, data: { found, content, truncated } }。
+ */
 export async function executeWikiRead(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const projectDir = resolveProject(String(args.project ?? ''), process.cwd())
   const rel = String(args.path ?? '').replace(/\\/g, '/')
@@ -46,7 +54,14 @@ export async function executeWikiRead(args: Record<string, unknown>): Promise<Re
   return { status: r.found ? 'ok' : 'error', data: r, ...(r.found ? {} : { message: '文件不存在或不可读：' + rel }) }
 }
 
-/** wiki_build：提交完整知识库构建任务给子代理。 */
+/**
+ * wiki_build 顶层执行函数：把完整知识库构建任务提交给 DSH 子代理（AI 自行完成全流程）。
+ * @param ctx - Cordis 上下文（agents/llm 注入源）。
+ * @param config - vault 目录与知识库根目录配置。
+ * @param args - 工具入参：project（项目目录）/commit（是否提交）。
+ * @param exec - 工具执行上下文（提供调用方 agent 的模型路由继承）。
+ * @returns { status, data: { project, report, dir } }。
+ */
 export async function executeWikiBuild(
   ctx: Context,
   config: { vaultDir: string; kbRoot: string },
@@ -67,7 +82,12 @@ export async function executeWikiBuild(
   return { status: 'ok', data: { project: basename(projectDir), report: result.report, dir: wikiDirFor(config.vaultDir, config.kbRoot, basename(projectDir)) } }
 }
 
-/** wiki_status：检查代码与知识库快照同步状态。 */
+/**
+ * wiki_status 顶层执行函数：检查代码与知识库快照同步状态（git head + 文件摘要判变）。
+ * @param config - vault 目录与知识库根目录配置。
+ * @param args - 工具入参：project（项目目录）。
+ * @returns { status, data: { synced, reason, affectedModules, newOrModified, deleted } }。
+ */
 export async function executeWikiStatus(
   config: { vaultDir: string; kbRoot: string },
   args: Record<string, unknown>,
