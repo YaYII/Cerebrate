@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { fingerprintProject, diffFingerprints } from '../src/fingerprint'
+import { fingerprintProject, diffFingerprints } from '../src/features/fingerprint'
 
 /** 构造分层项目。 */
 function makeProject(): string {

@@ -2,8 +2,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { qualityReport } from '../src/metrics'
-import { generateGherkin, gherkinFeatureText } from '../src/gherkin'
+import { qualityReport } from '../src/features/metrics'
+import { generateGherkin, gherkinFeatureText } from '../src/features/gherkin'
 
 /** 构造带业务层的项目。 */
 function makeProject(): string {

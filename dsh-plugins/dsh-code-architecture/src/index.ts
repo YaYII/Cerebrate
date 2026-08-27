@@ -1,31 +1,31 @@
 /**
  * dsh-code-architecture —— 代码架构自检插件（注册进 DSH 供 AI 自检）。
  *
- * 三个工具：
- *   arch_check —— 静态架构检查（注释语言/命名/重复功能/功能业务分离/依赖方向）
- *   arch_aop   —— AOP 执行观测（函数调用链 + 耗时热点，定位瓶颈与异常）
- *   arch_guide —— 架构哲学指引（功能砖块/业务组合/AOP 思维）
+ * 八个工具：
+ *   arch_check     —— 静态架构检查（注释语言/命名/重复功能/功能业务分离/依赖方向）
+ *   arch_aop       —— AOP 执行观测（函数调用链 + 耗时热点，定位瓶颈与异常）
+ *   arch_fingerprint —— 架构指纹与漂移检测（AI 防漂移锚点）
+ *   arch_guide     —— 架构哲学指引（功能砖块/业务组合/AOP 思维）
+ *   qa_metrics     —— 质量指标（圈复杂度/注释率/测试存在性 + 门禁）
+ *   qa_mutation    —— 变异测试（变异分数 = 测试有效性硬证据）
+ *   qa_gherkin     —— Gherkin/BDD 场景生成
+ *   qa_report      —— 质量聚合报告（信心指数）
  *
  * 设计哲学：功能是砖块（原子、不随业务改变、只增不减）；业务是组合
  * （自由重组）。检查器只报事实，AI 依据事实决策。
  *
+ * 架构分层：本文件是装配层（工具注册 + 引导注入）；行为在 business/
+ * （tools.ts 顶层 execute 编排）与 features/（纯能力砖块）。
+ *
  * @module @deepseek-ai/dsh-code-architecture
  */
 
-import { resolve, basename } from 'node:path'
-import { mkdirSync, writeFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
-import { runArchChecks } from './checks'
-import { fingerprintProject, diffFingerprints } from './fingerprint'
-import { qualityReport } from './metrics'
-import { runMutation } from './mutation'
-import { generateGherkin, gherkinFeatureText } from './gherkin'
-import { runAopProbe, aopReportText, findEntry } from './aop'
-import { registerQaTools } from './qa-tools'
+import { executeArchCheck, executeFingerprint, executeAop, executeGuide, executeQaMetrics, executeQaMutation, executeQaGherkin, executeQaReport } from './business/tools'
+import type { ArchToolConfig } from './business/tools'
 
 /** 插件标识与依赖注入。 */
 export const name = 'dsh-code-architecture'
@@ -61,22 +61,15 @@ function renderJson(_args: unknown, value: unknown) {
   return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
 }
 
-/** 解析项目路径。 */
-function resolveProject(project: string | undefined, cwd: string): string {
-  return resolve(project ?? cwd)
-}
-
-/** 保存产物到 .code-arch/。 */
-function saveArtifact(projectDir: string, dir: string, name: string, data: unknown): string {
-  const absDir = resolve(projectDir, dir)
-  mkdirSync(absDir, { recursive: true })
-  const path = resolve(absDir, name)
-  writeFileSync(path, typeof data === 'string' ? data : JSON.stringify(data, null, 2), 'utf8')
-  return path
-}
-
-/** 注册三个工具。 */
+/**
+ * 注册八个工具，并按配置注入架构哲学引导。每个工具的 execute 委托给
+ * business 层顶层函数（可独立测试）。
+ * @param ctx - 携带工具注册表的注册上下文。
+ * @param config - 插件配置。
+ */
 export function apply(ctx: Context, config: Config): void {
+  const toolConfig: ArchToolConfig = { artifactsDir: config.artifactsDir }
+
   ctx.tools.register(defineTool({
     name: 'arch_check',
     description: '【代码架构自检】扫描项目（注释语言/命名规范/重复功能/功能业务分离/依赖方向），返回归一化问题清单（P0/P1 阻塞级、P2 建议级）与统计。功能是砖块、业务是组合的强制检查。',
@@ -84,26 +77,7 @@ export function apply(ctx: Context, config: Config): void {
       project: { type: 'string', description: '被检查项目目录（缺省为当前目录）' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-    async execute(args: { project?: string }) {
-      const projectDir = resolveProject(args.project, process.cwd())
-      const report = runArchChecks(projectDir)
-      saveArtifact(projectDir, config.artifactsDir, 'last-arch.json', report)
-      const blockers = report.findings.filter(f => f.severity === 'P0' || f.severity === 'P1').length
-      return {
-        status: 'ok',
-        data: {
-          stats: report.stats,
-          total: report.findings.length,
-          blockers,
-          findings: report.findings.slice(0, 50).map(f => ({
-            rule: f.rule, severity: f.severity, file: f.file,
-            ...(f.line !== undefined ? { line: f.line } : {}),
-            message: f.message,
-          })),
-          artifact: resolve(projectDir, config.artifactsDir, 'last-arch.json'),
-        },
-      }
-    },
+    execute: (args: { project?: string }) => executeArchCheck(toolConfig, args),
   }))
 
   ctx.tools.register(defineTool({
@@ -114,55 +88,7 @@ export function apply(ctx: Context, config: Config): void {
       save: { type: 'boolean', description: '是否把当前指纹保存为基线（默认 false，只对比）' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-    async execute(args: { project?: string; save?: boolean }) {
-      const projectDir = resolveProject(args.project, process.cwd())
-      const current = fingerprintProject(projectDir)
-      const baselinePath = resolve(projectDir, config.artifactsDir, 'arch-fingerprint.json')
-      const { existsSync } = await import('node:fs')
-      const baseline = existsSync(baselinePath)
-        ? JSON.parse(await import('node:fs').then(m => m.readFileSync(baselinePath, 'utf8')))
-        : null
-      if (args.save || !baseline) {
-        saveArtifact(projectDir, config.artifactsDir, 'arch-fingerprint.json', current)
-        return {
-          status: 'ok',
-          data: {
-            saved: true,
-            note: baseline ? '基线已更新' : '首次生成基线',
-            stats: {
-              files: Object.keys(current.files).length,
-              featureFiles: current.featureFiles.length,
-              businessFiles: current.businessFiles.length,
-              dependencyViolations: current.dependencyViolations.length,
-              exportCounts: current.exportCounts,
-            },
-          },
-        }
-      }
-      const diff = diffFingerprints(baseline, current)
-      return {
-        status: 'ok',
-        data: {
-          saved: false,
-          drifted: diff.drifted,
-          summary: {
-            added: diff.added.length,
-            modified: diff.modified.length,
-            deleted: diff.deleted.length,
-            layerMoved: diff.layerMoved.length,
-            dependencyChanged: diff.dependencyChanged.length,
-          },
-          details: {
-            added: diff.added.slice(0, 20),
-            modified: diff.modified.slice(0, 20),
-            deleted: diff.deleted.slice(0, 20),
-            layerMoved: diff.layerMoved.slice(0, 10),
-            dependencyChanged: diff.dependencyChanged.slice(0, 10),
-          },
-          baseline: baselinePath,
-        },
-      }
-    },
+    execute: (args: { project?: string; save?: boolean }) => executeFingerprint(toolConfig, args),
   }))
 
   ctx.tools.register(defineTool({
@@ -175,108 +101,59 @@ export function apply(ctx: Context, config: Config): void {
       baseline: { type: 'boolean', description: '保存本次观测为行为基线（默认 false，只对比）' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-    async execute(args: { project?: string; entry?: string; timeoutMs?: number; baseline?: boolean }): Promise<Record<string, JsonValue>> {
-      const projectDir = resolveProject(args.project, process.cwd())
-      const entryRel = args.entry ?? findEntry(projectDir) ?? ''
-      if (!entryRel) {
-        return { status: 'error', message: '未找到入口文件（尝试 src/index.ts、src/main.ts、index.ts），请用 entry 参数指定' }
-      }
-      const entryAbs = resolve(projectDir, entryRel)
-      const result = runAopProbe({ entryAbs, cwd: projectDir, ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}) })
-      if (result.calls.length === 0) {
-        return { status: 'ok', data: { calls: 0, note: '未观测到调用（入口可能未自动执行；可设置 AOP_CALL_ENTRY=1 或用 CLI 型入口）' } }
-      }
-      const report = aopReportText(result)
-      saveArtifact(projectDir, config.artifactsDir, 'last-aop.md', report)
-      const baselinePath = resolve(projectDir, config.artifactsDir, 'aop-baseline.json')
-      // 行为基线：保存本次热点快照，供下次对比漂移
-      if (args.baseline) {
-        saveArtifact(projectDir, config.artifactsDir, 'aop-baseline.json', { savedAt: new Date().toISOString(), hotspots: result.hotspots })
-        return {
-          status: 'ok',
-          data: {
-            calls: result.calls.length,
-            threw: result.threw,
-            hotspots: result.hotspots.slice(0, 10),
-            baselineSaved: true,
-            report,
-            artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
-          },
-        }
-      }
-      // 对比基线：报告行为漂移（函数耗时变化/新增热点/消失热点）
-      const { existsSync, readFileSync: rfs } = await import('node:fs')
-      if (existsSync(baselinePath)) {
-        const base = JSON.parse(rfs(baselinePath, 'utf8')) as { hotspots: Array<{ name: string; count: number; totalMs: number; avgMs: number; maxMs: number }> }
-        const baseMap = new Map(base.hotspots.map(h => [h.name, h]))
-        const curMap = new Map(result.hotspots.map(h => [h.name, h]))
-        const drift = []
-        for (const [name, h] of curMap) {
-          const b = baseMap.get(name)
-          if (!b) drift.push({ name, change: '新增热点', totalMs: h.totalMs })
-          else {
-            const pct = b.totalMs === 0 ? 0 : Math.round((h.totalMs - b.totalMs) / b.totalMs * 100)
-            if (Math.abs(pct) >= 20) drift.push({ name, change: pct > 0 ? '耗时上升 ' + pct + '%' : '耗时下降 ' + Math.abs(pct) + '%', totalMs: h.totalMs, baselineMs: b.totalMs })
-          }
-        }
-        for (const [name, h] of baseMap) {
-          if (!curMap.has(name)) drift.push({ name, change: '热点消失', baselineMs: h.totalMs })
-        }
-        return {
-          status: 'ok',
-          data: {
-            calls: result.calls.length,
-            threw: result.threw,
-            hotspots: result.hotspots.slice(0, 10),
-            baselineCompared: true,
-            behaviorDrift: drift,
-            report,
-            artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
-          },
-        }
-      }
-      return {
-        status: 'ok',
-        data: {
-          calls: result.calls.length,
-          threw: result.threw,
-          hotspots: result.hotspots.slice(0, 10),
-          baselineCompared: false,
-          note: '无基线（可用 baseline=true 保存首次观测）',
-          report,
-          artifact: resolve(projectDir, config.artifactsDir, 'last-aop.md'),
-        },
-      }
-    },
+    execute: (args: { project?: string; entry?: string; timeoutMs?: number; baseline?: boolean }) => executeAop(toolConfig, args),
   }))
-
-  // ── 质量保障体系：指标 / 变异 / Gherkin / 聚合报告（独立模块承载） ──
-  registerQaTools(ctx, config)
 
   ctx.tools.register(defineTool({
     name: 'arch_guide',
     description: '【架构哲学指引】功能砖块 + 业务组合 + AOP 观测思维——给 AI 的工程分层方法论。',
     parameters: {},
     output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-    async execute() {
-      return {
-        status: 'ok',
-        data: {
-          philosophy: [
-            '1. 功能是砖块：功能层（utils/core/shared/features）的代码是原子的、可复用的、',
-            '   不随业务改变的。它只增不减——新增功能 = 新增砖块，绝不改旧砖块。',
-            '2. 业务是组合：业务层（services/controllers/business）只做编排组合，',
-            '   把砖块按业务规则拼起来。业务可以自由重组，而砖块保持不变。',
-            '3. 强制分离：功能层禁止 import 业务层（依赖单向）；功能层禁止出现业务专属词汇',
-            '   （订单/支付/用户等——业务通过参数与配置注入）。',
-            '4. AOP 观测思维：给函数加观测（耗时/调用链/异常），得到业务流转的实测证据，',
-            '   定位「哪里与预期不符、哪里耗时、瓶颈在哪」——debug 不靠猜，靠证据。',
-            '5. 检查闭环：写完代码 arch_check 自检规范；跑业务 arch_aop 实测流转；',
-            '   问题即证据，修复后再自检，直到全绿。',
-          ].join('\n'),
-        },
-      }
+    execute: () => executeGuide(),
+  }))
+
+  // ── 质量保障体系：指标 / 变异 / Gherkin / 聚合报告 ──
+  ctx.tools.register(defineTool({
+    name: 'qa_metrics',
+    description: '【质量指标】计算项目质量指标：圈复杂度（平均/最大/高危文件）、注释率、函数数、最长函数、测试存在性。每个指标带阈值门禁判定（P0/P1）。',
+    parameters: {
+      project: { type: 'string', description: '被检查项目目录（缺省为当前目录）' },
     },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    execute: (args: { project?: string }) => executeQaMetrics(toolConfig, args),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'qa_mutation',
+    description: '【变异测试】注入代码变异体（常量/算术/比较/布尔/条件/逻辑 6 类）跑测试，计算变异分数。分数低 = 测试是纸糊的（代码坏了测试看不出）。这是对代码信心的硬证据。',
+    parameters: {
+      project: { type: 'string', description: '被测试项目目录（缺省为当前目录，需含 vitest）' },
+      file: { type: 'string', description: '限定变异单个文件（相对路径，可选）' },
+      maxMutants: { type: 'number', description: '变异体数量上限（默认 30）' },
+      timeoutMs: { type: 'number', description: '单次测试超时（毫秒，默认 120000）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    execute: (args: { project?: string; file?: string; maxMutants?: number; timeoutMs?: number }) => executeQaMutation(toolConfig, args),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'qa_gherkin',
+    description: '【Gherkin/BDD 场景】从业务层代码自动生成 Given/When/Then 场景骨架（正常/异常/边界三路径），输出特征文件文本。让测试从实现细节提升到业务行为。',
+    parameters: {
+      project: { type: 'string', description: '项目目录（缺省为当前目录）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    execute: (args: { project?: string }) => executeQaGherkin(toolConfig, args),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'qa_report',
+    description: '【质量聚合报告】汇总全部质量门禁（架构自检/质量指标/变异分数/覆盖率）给出信心指数与通过/不通过结论。只有全绿才值得信任。',
+    parameters: {
+      project: { type: 'string', description: '项目目录（缺省为当前目录）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    execute: (args: { project?: string }) => executeQaReport(toolConfig, args),
   }))
 
   if (config.injectGuidance) {
@@ -298,14 +175,13 @@ export function apply(ctx: Context, config: Config): void {
   }
 }
 
-/** 供程序化使用的再导出。 */
-export { runArchChecks, collectSourceFiles } from './checks'
-export type { ArchFinding, ArchReport } from './checks'
-export { runAopProbe, aopReportText, findEntry } from './aop'
-export { fingerprintProject, diffFingerprints } from './fingerprint'
-export type { ArchFingerprint, FingerprintDiff } from './fingerprint'
-export { qualityReport } from './metrics'
-export { runMutation } from './mutation'
-export { generateGherkin, gherkinFeatureText } from './gherkin'
-export type { AopResult, CallRecord } from './aop'
-export { registerQaTools } from './qa-tools'
+/** 供程序化使用的再导出（来自 features 能力层）。 */
+export { runArchChecks, collectSourceFiles } from './features/checks'
+export type { ArchFinding, ArchReport } from './features/checks'
+export { runAopProbe, aopReportText, findEntry } from './features/aop'
+export type { AopResult, CallRecord } from './features/aop'
+export { fingerprintProject, diffFingerprints } from './features/fingerprint'
+export type { ArchFingerprint, FingerprintDiff } from './features/fingerprint'
+export { qualityReport } from './features/metrics'
+export { runMutation } from './features/mutation'
+export { generateGherkin, gherkinFeatureText } from './features/gherkin'
