@@ -282,9 +282,8 @@ export function apply(ctx: Context, config: Config): void {
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
       execute: async (args) => {
-        const topics = Array.isArray(args.topics)
-          ? args.topics.map(String)
-          : String(args.topics ?? '').split(',').map(s => s.trim()).filter(Boolean)
+        // topics 契约是逗号分隔字符串（schema 已约束，无数组形态）
+        const topics = String(args.topics ?? '').split(',').map(s => s.trim()).filter(Boolean)
         return brainCall(config, 'POST', '/v1/knowledge', {
           title: String(args.title),
           content: String(args.content),
