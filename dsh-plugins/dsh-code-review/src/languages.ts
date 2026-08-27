@@ -126,6 +126,12 @@ export function detectToolchains(projectDir: string): Toolchain[] {
  * @returns absolute path when found in the project, otherwise the bare name.
  */
 export function resolveBin(projectDir: string, bin: string): string {
+  // .bin/vitest 是 #!/bin/sh shell 脚本：runCommand 直接 spawn 会把它当 JS 执行报错，
+  // 必须解析到真实 JS 入口（vitest.mjs）——否则 vitest 输出为空、摘要解析必然失败。
+  if (bin === 'vitest') {
+    const mjs = join(projectDir, 'node_modules', 'vitest', 'vitest.mjs')
+    if (existsSync(mjs)) return mjs
+  }
   const local = join(projectDir, 'node_modules', '.bin', bin)
   if (existsSync(local)) return local
   return bin
