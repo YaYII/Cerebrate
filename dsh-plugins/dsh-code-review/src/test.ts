@@ -78,6 +78,10 @@ interface TestSummary {
 
 /** Parse runner-specific summary lines into numbers. */
 export function parseTestSummary(toolchain: Toolchain, combined: string): TestSummary | undefined {
+  // 运行环境无 NO_COLOR 时（如 DSH 插件进程），vitest 会给摘要 token 逐段上色，
+  // 色码（\x1b[32m 等）插在 "Tests" 与数字之间会破坏 "Tests N passed" 正则——
+  // 解析前统一剥离 ANSI 转义序列，保证两种环境下解析结果一致。
+  combined = combined.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '')
   if (toolchain.language === 'js-ts') {
     // vitest 全绿: "Tests  45 passed (45)"（无 failed 段）；有失败: "Tests  45 passed | 2 failed"。
     // failed 段可选：全绿时 failed=0；解析失败时返回带明确提示的 note，让 AI 能定位问题。

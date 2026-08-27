@@ -109,6 +109,18 @@ describe('test summary parsers', () => {
     expect(summary).toMatchObject({ total: 6, passed: 5, failed: 1 })
   })
 
+  it('strips ANSI color codes before parsing (回归：DSH 插件进程无 NO_COLOR 时 vitest 上色破坏正则)', () => {
+    const jsTs = TOOLCHAINS.find(c => c.language === 'js-ts')!
+    // 真实失败样本：色码插在 "Tests" 与 "45" 之间，\s+ 无法跨过转义序列
+    const colored = '\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m\n'
+      + '\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m45 passed\u001b[39m\u001b[22m\u001b[90m (45)\u001b[39m\n'
+      + '\u001b[2m   Duration \u001b[22m 969ms\u001b[39m\n'
+      + 'All files          |   68.73 |   58.92 |   71.84 |   69.89'
+    const summary = parseTestSummary(jsTs, colored)
+    expect(summary).toMatchObject({ total: 45, passed: 45, failed: 0 })
+    expect(summary?.coveragePct).toBe(68.73)
+  })
+
   it('parses pytest output', () => {
     const py = TOOLCHAINS.find(c => c.language === 'python')!
     const summary = parseTestSummary(py, 'collected 10 items\n===== 8 passed, 2 failed, 1 skipped in 1.23s =====')
