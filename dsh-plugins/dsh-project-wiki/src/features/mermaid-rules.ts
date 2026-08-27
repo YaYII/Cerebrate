@@ -70,6 +70,30 @@ export function checkDiamondQuestion(trimmed: string, add: (rule: string, hint: 
   }
 }
 
+/**
+ * R9 检查：mindmap 块的安全风险。
+ * mindmap 语法（Mermaid 思维导图）节点用 () 包裹、层级用缩进表达——
+ * 节点文本内的 ( ) 会与节点语法冲突、/ 会与形状冲突、花括号会触发菱形。
+ */
+export function checkMindmap(trimmed: string, add: (rule: string, hint: string) => void): void {
+  // mindmap 节点行：非空、非注释、非结束标记
+  if (trimmed.length === 0 || trimmed.startsWith('end') || trimmed.startsWith('%%')) return
+  // 节点文本含斜杠（渲染器当形状分隔）——用 indexOf 判断
+  if (trimmed.indexOf('/') >= 0 && !trimmed.startsWith('root')) {
+    add('R9', 'mindmap 节点文本含 /：渲染器当形状分隔，改为「与」或引号')
+  }
+  // 节点文本含花括号（渲染器当菱形）
+  if (trimmed.indexOf('{') >= 0 || trimmed.indexOf('}') >= 0) {
+    add('R9', 'mindmap 节点文本含 {}：渲染器当菱形，改为文字描述')
+  }
+  // 节点文本含嵌套括号（如 root((a(b)))）——数括号配对
+  const opens = (trimmed.match(/\(/g) || []).length
+  const closes = (trimmed.match(/\)/g) || []).length
+  if (opens > closes) {
+    add('R9', 'mindmap 节点括号不配对：补全括号或改为文字描述')
+  }
+}
+
 // ── 修复器零件 ──
 
 /**
@@ -143,6 +167,7 @@ export const LINE_CHECKERS: LineChecker[] = [
   checkNodeBraces,
   checkBrokenNode,
   checkDiamondQuestion,
+  checkMindmap,
 ]
 
 /** 全部行修复器（sanitize 按序应用）。 */

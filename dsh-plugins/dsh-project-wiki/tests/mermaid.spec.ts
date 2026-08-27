@@ -123,4 +123,26 @@ describe('mermaid lint (rules from production failures)', () => {
     ].join('\n')
     expect(lintMermaid(body)).toEqual([])
   })
+
+
+  it('mindmap 块触发 R9，flowchart 的同类语法不误报（块类型感知）', () => {
+    // mindmap 块：节点含斜杠/花括号 → R9
+    const mm = [
+      'mindmap',
+      '  root((核验平台))',
+      '    后端/服务',
+      '    配置{env}',
+    ].join('\n')
+    const mmIssues = lintMermaid(mm)
+    expect(mmIssues.some(i => i.rule === 'R9')).toBe(true)
+    // flowchart 块：菱形节点 { } 是合法语法 → 不报 R9
+    const fc = [
+      'flowchart TD',
+      '  C{是否启用}',
+      '  A -->|调用| B',
+    ].join('\n')
+    const fcIssues = lintMermaid(fc)
+    expect(fcIssues.some(i => i.rule === 'R9')).toBe(false)
+  })
+
 })

@@ -19,7 +19,7 @@
  * @module @deepseek-ai/dsh-project-wiki
  */
 
-import { LINE_CHECKERS, LINE_FIXERS } from './mermaid-rules'
+import { LINE_CHECKERS, LINE_FIXERS, checkMindmap } from './mermaid-rules'
 
 /** 一条检查发现。 */
 export interface MermaidIssue {
@@ -61,6 +61,9 @@ export function lintMermaid(body: string): MermaidIssue[] {
   const add = (rule: string, i: number, hint: string, autoFixable = true) => {
     issues.push({ rule, line: i + 1, hint, autoFixable })
   }
+  // 块类型判定：首行声明 mindmap 才启用 R9（思维导图语法与 flowchart 不同，
+  // 花括号/斜杠在 flowchart 里是合法形状语法，不能误报）
+  const isMindmap = (lines[0] ?? '').trim().startsWith('mindmap')
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i]!.trim()
     if (!trimmed || trimmed.startsWith('%%')) continue
@@ -70,7 +73,12 @@ export function lintMermaid(body: string): MermaidIssue[] {
       if (title.includes('/')) add('R2', i, 'subgraph 标题不能含斜杠 /，请改用「与」或引号包裹')
       continue
     }
-    for (const checker of LINE_CHECKERS) checker(trimmed, (r, h) => add(r, i, h))
+    // mindmap 块：只派发 R9；其余块：派发 R1-R8（排除 R9）
+    if (isMindmap) checkMindmap(trimmed, (r, h) => add(r, i, h))
+    else for (const checker of LINE_CHECKERS) {
+      if (checker === checkMindmap) continue
+      checker(trimmed, (r, h) => add(r, i, h))
+    }
   }
   return issues
 }
