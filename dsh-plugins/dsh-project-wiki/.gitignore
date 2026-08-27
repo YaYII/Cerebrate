@@ -2,6 +2,7 @@ node_modules/
 lib/
 .code-review/
 .code-arch/
+coverage/
 .mmd-*.ts
 .evolve-test.ts
 .snap.ts

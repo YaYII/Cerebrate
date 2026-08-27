@@ -2,3 +2,4 @@ node_modules/
 lib/
 .code-arch/
 .code-review/
+coverage/
