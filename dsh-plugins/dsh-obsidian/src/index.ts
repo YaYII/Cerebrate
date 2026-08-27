@@ -1,75 +1,55 @@
 /**
- * Obsidian team-knowledge-base client for DeepSeek Harness.
+ * DeepSeek Harness 的 Obsidian 团队知识库客户端。
  *
- * Talks to a local Obsidian vault over the Local REST API community plugin
- * (secure HTTPS on 127.0.0.1:27124 by default, self-signed cert) and
- * registers native `obsidian_*` and `knowledge_*` tools, so the team
- * knowledge base participates in the agent loop directly, plugin-only —
- * no MCP anywhere in the path.
+ * 通过 Local REST API 社区插件（默认 127.0.0.1:27124 安全 HTTPS、自签名
+ * 证书）与本地 Obsidian vault 通信，并注册原生 `obsidian_*` 与
+ * `knowledge_*` 工具——团队知识库直接参与 agent 循环，纯插件路径，
+ * 全程无 MCP。
  *
- * Two knowledge layers, one plugin:
- *   1. obsidian_* tools  — the vault file layer (read/write/search/patch/
- *                          list/command/open on plain Markdown files).
- *   2. knowledge_* tools — the Brain Server authoritative team knowledge
- *                          base (vector-semantic search + tiered write:
- *                          ordinary knowledge writable by any logged-in
- *                          agent, policy/authoritative docs admin-only).
+ * 两层知识，一个插件：
+ *   1. obsidian_* 工具  — vault 文件层（对普通 Markdown 文件的读写/搜索/
+ *                         补丁/列表/命令/打开）。
+ *   2. knowledge_* 工具 — Brain 服务端权威团队知识库（向量语义检索 +
+ *                         分级写入：普通知识任何登录 agent 可写，
+ *                         policy/权威文档仅管理员可写）。
  *
- * The guidance injection folds a plugin-sourced instructions message into
- * the first agent step explaining the memory vs knowledge distinction and
- * the concrete tools to use for each.
+ * 引导注入把插件来源的说明消息折叠进首个 agent step，讲清记忆与知识库的
+ * 区别及各自的具体工具。
+ *
+ * 架构分层：本文件是装配层（工具注册 + 引导注入 + 自愈触发）；能力在
+ * features/（rest 底层 HTTP、obsidian 客户端、brain 客户端、launcher 自愈）。
  *
  * @module @deepseek-ai/dsh-obsidian
  */
 
 import os from 'node:os'
-import { readFile } from 'node:fs/promises'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
-import http from 'node:http'
-import https from 'node:https'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { obsidianCall, obsidianError, obsidianStatus, vaultPath, toJson } from './features/obsidian'
+import { brainCall } from './features/brain'
+import { ensureObsidianRunning } from './features/launcher'
+import type { ClientConfig } from './features/rest'
 
-/** Plugin identifier, used as the cordis entry name and injection source tag. */
+/** 插件标识，同时作为 Cordis 入口名与注入来源标签。 */
 export const name = 'dsh-obsidian'
 export const inject = ['tools']
 
-/** Plugin configuration. */
-export interface Config {
-  /** Obsidian Local REST API base URL (defaults to the secure port). */
-  baseUrl: string
-  /** Environment-variable name holding the Obsidian API key. */
-  apiKeyEnv: string
-  /** Local file holding the Obsidian API key (JSON {"apiKey": ...} or bare text). */
-  apiKeyFile: string
-  /** Allow HTTPS with a self-signed certificate (Local REST API default). */
-  tlsRejectUnauthorized: boolean
-  /** Brain Server base URL for the knowledge_* tools. */
-  brainUrl: string
-  /** Environment-variable name holding the Brain Server master/user token. */
-  brainTokenEnv: string
-  /** Local file holding the Brain Server token (JSON {"token": ...} or bare text). */
-  brainTokenFile: string
-  /** Default user id sent with brain knowledge writes. */
-  user: string
-  /** Default agent id recorded on brain knowledge operations. */
-  agentId: string
-  /** Whether the knowledge-first guidance message is injected on the first step. */
+/** 插件配置（实现 features/rest 的 ClientConfig 形状 + 自愈参数）。 */
+export interface Config extends ClientConfig {
+  /** 是否在首个 step 注入知识优先引导。 */
   injectGuidance: boolean
-  /** Auto-start a local Obsidian when the REST API is unreachable (self-heal). */
+  /** REST API 不可达时自动拉起本地 Obsidian（自愈）。 */
   autoStart: boolean
-  /** Absolute path to the Obsidian executable used for auto-start. */
+  /** 自动启动使用的 Obsidian 可执行文件绝对路径。 */
   obsidianBin: string
-  /** How long to wait for the auto-started Obsidian to serve the API, ms. */
+  /** 等待自动启动的 Obsidian 服务 API 的最长时间，ms。 */
   launchTimeoutMs: number
 }
 
-/** Schemastery configuration schema. */
+/** Schemastery 配置模式。 */
 export const Config: z<Config> = z.object({
   baseUrl: z.string().default('https://127.0.0.1:27124'),
   apiKeyEnv: z.string().default('OBSIDIAN_API_KEY'),
@@ -86,214 +66,7 @@ export const Config: z<Config> = z.object({
   launchTimeoutMs: z.number().default(45000),
 })
 
-/** One v5-protocol envelope from the Brain Server. */
-interface Envelope {
-  status: string
-  data?: unknown
-  error?: { code?: number | string; message?: string }
-}
-
-/** A generic JSON value map that survives lossless JSON round-trips. */
-type JsonMap = Record<string, JsonValue>
-
-/** Parsed response of an Obsidian REST call. */
-interface ObsidianResult {
-  /** HTTP status code. */
-  status: number
-  /** Parsed body (JSON when applicable, else raw text). */
-  body: unknown
-  /** Raw response text. */
-  raw: string
-}
-
-/**
- * Resolve a secret from an environment variable first, then a local file
- * (JSON envelope with the named key, or bare text). Shared shape for both
- * the Obsidian API key and the Brain Server token.
- */
-async function resolveSecret(envName: string, file: string, jsonKey: string): Promise<string> {
-  const fromEnv = process.env[envName]
-  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim()
-  const path = file.replace(/^~/, os.homedir())
-  try {
-    const raw = (await readFile(path, 'utf8')).trim()
-    if (raw.length === 0) return ''
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      if (typeof parsed === 'object' && parsed !== null && jsonKey in parsed) {
-        const v = (parsed as Record<string, unknown>)[jsonKey]
-        return typeof v === 'string' ? v : ''
-      }
-    } catch {
-      // Not JSON — treat the whole line as the secret.
-    }
-    return raw
-  } catch {
-    return ''
-  }
-}
-
-/** Build the concrete request per config (https vs http base URL). */
-function requestBuilder(baseUrl: string, rejectUnauthorized: boolean) {
-  const mod = baseUrl.startsWith('https') ? https : http
-  return () => mod
-}
-
-/**
- * Perform one HTTP request to the Obsidian Local REST API (or any base URL).
- * Resolves with status + parsed body; network failures degrade to a
- * structured error so the model sees a reason instead of a thrown exception.
- */
-function rawRequest(
-  baseUrl: string,
-  rejectUnauthorized: boolean,
-  method: string,
-  apiPath: string,
-  headers: Record<string, string>,
-  bodyText?: string,
-): Promise<ObsidianResult> {
-  const url = new URL(baseUrl.replace(/\/+$/, '') + apiPath)
-  return new Promise<ObsidianResult>((resolve) => {
-    const mod = url.protocol === 'https:' ? https : http
-    // 直接传 url.pathname 避免二次编码：URL 对象再序列化时会把已编码的
-    // %XX 转成 %25XX（中文笔记名路径会因此 404）；pathname 保留原始编码。
-    const req = mod.request({
-      hostname: url.hostname,
-      port: url.port || undefined,
-      protocol: url.protocol,
-      path: url.pathname + url.search,
-      method,
-      headers: { ...headers, ...(bodyText !== undefined ? { 'Content-Length': Buffer.byteLength(bodyText) } : {}) },
-      rejectUnauthorized,
-    }, (res) => {
-      const chunks: Buffer[] = []
-      res.on('data', (c: Buffer) => chunks.push(c))
-      res.on('end', () => {
-        const raw = Buffer.concat(chunks).toString('utf8')
-        let body: unknown = raw
-        try { body = JSON.parse(raw) } catch { /* non-JSON body */ }
-        resolve({ status: res.statusCode ?? 0, body, raw })
-      })
-    })
-    req.on('error', (error) => {
-      const reason = error instanceof Error ? error.message : String(error)
-      resolve({ status: 503, body: { error: { message: `无法连接 ${baseUrl}: ${reason}` } }, raw: '' })
-    })
-    if (bodyText !== undefined) req.write(bodyText)
-    req.end()
-  })
-}
-
-/**
- * Resolve the Obsidian API key for the plugin in the Brave-mode sense: env
- * then file. Empty when neither source carries one (the tools then fail with
- * guidance instead of crashing).
- */
-async function resolveApiKey(config: Config): Promise<string> {
-  return resolveSecret(config.apiKeyEnv, config.apiKeyFile, 'apiKey')
-}
-
-/** Call the Obsidian REST API; injects the Bearer key and JSON headers. */
-async function obsidianCall(
-  config: Config,
-  method: string,
-  apiPath: string,
-  bodyText?: string,
-  extraHeaders: Record<string, string> = {},
-): Promise<ObsidianResult> {
-  const key = await resolveApiKey(config)
-  const mod = requestBuilder(config.baseUrl, config.tlsRejectUnauthorized)
-  if (mod() === https) {
-    // no-op; requestBuilder is just a discriminator for clarity
-  }
-  return rawRequest(config.baseUrl, config.tlsRejectUnauthorized, method, apiPath, {
-    ...(key.length > 0 ? { Authorization: `Bearer ${key}` } : {}),
-    ...(bodyText !== undefined ? { 'Content-Type': 'application/json' } : {}),
-    ...extraHeaders,
-  }, bodyText)
-}
-
-/** Human-readable summarizer for non-2xx Obsidian responses. */
-function obsidianError(result: ObsidianResult, op: string): JsonMap {
-  if (typeof result.body === 'object' && result.body !== null && 'message' in result.body) {
-    const m = (result.body as Record<string, unknown>).message
-    return { ok: false, op, status: result.status, error: String(m) }
-  }
-  return { ok: false, op, status: result.status, error: result.raw.slice(0, 300) }
-}
-
-/** Check availability of the Obsidian REST API (no auth needed for /). */
-async function obsidianStatus(config: Config): Promise<JsonMap> {
-  const result = await rawRequest(config.baseUrl, config.tlsRejectUnauthorized, 'GET', '/', {}, undefined)
-  const key = await resolveApiKey(config)
-  if (result.status >= 200 && result.status < 300) {
-    return { ok: true, baseUrl: config.baseUrl, authenticated: key.length > 0 }
-  }
-  return { ok: false, baseUrl: config.baseUrl, status: result.status, error: result.raw.slice(0, 200) }
-}
-
-/**
- * Coerce an arbitrary parsed body into a lossless JSON value. JSON.parse
- * output is already a JSON value, so this is a type-level bridge for
- * `unknown` bodies; null/undefined fall back to an object so renderers
- * always see a valid record.
- */
-function toJson(value: unknown): JsonValue {
-  if (value === null || value === undefined) return { empty: true }
-  return value as JsonValue
-}
-
-/** Render one tool result to the model as pretty-printed JSON text. */
-function renderJson(_args: unknown, value: unknown) {
-  return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
-}
-
-/** Tool call presentation card. */
-function presentCall(title: string, args: unknown) {
-  return { card: 'generic' as const, title, kind: 'other' as const, rawInput: args }
-}
-
-/** Concatenate a path into a vault-relative URL-encoded path (with /vault/ prefix). */
-function vaultPath(path: string): string {
-  const segments = path.split('/').map(encodeURIComponent).join('/')
-  return segments.length === 0 ? '/vault/' : '/vault/' + segments
-}
-
-// ── Brain Server knowledge tools ──────────────────────────────────────
-
-/** Call one Brain Server endpoint and return its v5 envelope. */
-async function brainCall(config: Config, method: string, apiPath: string, body?: unknown): Promise<JsonMap> {
-  const token = await resolveSecret(config.brainTokenEnv, config.brainTokenFile, 'token')
-  const url = `${config.brainUrl.replace(/\/$/, '')}${apiPath}`
-  try {
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token.length > 0 ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    const text = await response.text()
-    try {
-      return JSON.parse(text) as JsonMap
-    } catch {
-      return { status: 'error', error: { code: response.status, message: text } }
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    return { status: 'error', error: { code: 503, message: `无法连接脑虫服务 ${url}: ${reason}` } }
-  }
-}
-
-// ── Knowledge-first guidance ───────────────────────────────────────────
-
-/**
- * Guidance folded into the first agent step. States the memory-vs-knowledge
- * split and the concrete tools, so the model reaches for the vault file
- * layer for documents and the brain knowledge base for authoritative
- * retrieval.
- */
+/** 折叠进首个 agent step 的知识优先引导：讲清记忆与知识库的区别及工具用法。 */
 const GUIDANCE = [
   '【团队知识库】本会话已连接两个团队知识载体：',
   '1. Obsidian 知识库（obsidian_* 工具）：纯 Markdown 文件库，用于读写/搜索团队文档、设计、归档。',
@@ -305,95 +78,10 @@ const GUIDANCE = [
   '确属团队级权威知识再 knowledge_store 沉淀（策略/权威文档仅管理员可写）。',
 ].join('\n')
 
-/** Plugin source tag carried by this package's injected messages. */
+/** 本包注入消息的来源插件标签。 */
 const PLUGIN_TAG = 'dsh-obsidian'
 
-/**
- * Probe whether the Obsidian Local REST API is reachable (no API key needed for /).
- */
-async function probeObsidian(config: Config): Promise<boolean> {
-  try {
-    const result = await rawRequest(config.baseUrl, config.tlsRejectUnauthorized, 'GET', '/', {}, undefined)
-    return result.status >= 200 && result.status < 300
-  } catch {
-    return false
-  }
-}
-
-/**
- * Self-heal: launch a local Obsidian so the team knowledge-base file layer
- * stays available. Called on plugin apply when the REST API is unreachable,
- * so this plugin owns its dependency instead of depending on a manually
- * configured systemd service or a session terminal that a restart may kill.
- *
- * The child is detached (own process group) and the parent waits up to
- * launchTimeoutMs for the API to come up; any failure degrades to a warning
- * (never a crash) so the plugin still loads for the Brain knowledge tools.
- */
-async function ensureObsidianRunning(config: Config): Promise<void> {
-  if (!config.autoStart) return
-  // Fast path: REST already reachable.
-  if (await probeObsidian(config)) return
-  // An Obsidian main process (or its Electron singleton lock) already exists:
-  // never spawn a second instance — wait for the existing one to serve the API.
-  const instanceExists = obsidianProcessExists(config.obsidianBin) || obsidianSingletonLockExists()
-  if (instanceExists) {
-    console.log('[dsh-obsidian] Obsidian instance already present; waiting for REST API (no new spawn)')
-    const waiting = Date.now() + config.launchTimeoutMs
-    while (Date.now() < waiting) {
-      await new Promise(r => setTimeout(r, 1500))
-      if (await probeObsidian(config)) {
-        console.log('[dsh-obsidian] Obsidian REST API is up')
-        return
-      }
-    }
-    console.warn('[dsh-obsidian] existing Obsidian instance did not serve the API within', config.launchTimeoutMs, 'ms')
-    return
-  }
-  if (!existsSync(config.obsidianBin)) {
-    console.warn('[dsh-obsidian] Obsidian unreachable and binary not found:', config.obsidianBin)
-    return
-  }
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    DISPLAY: process.env.DISPLAY ?? ':0',
-    WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? 'wayland-0',
-    XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${os.userInfo().uid ?? ''}`,
-    HOME: os.homedir(),
-  }
-  // Resolve the X11 auth cookie present in a running Wayland/Xorg session.
-  const runDir = `/run/user/${os.userInfo().uid ?? ''}`
-  let xauth = process.env.XAUTHORITY ?? ''
-  if (!xauth || !existsSync(xauth)) {
-    try {
-      const match = readdirSync(runDir).find(n => n.startsWith('.mutter-Xwaylandauth'))
-      if (match) xauth = `${runDir}/${match}`
-    } catch { /* no run dir */ }
-  }
-  if (!xauth) {
-    console.warn('[dsh-obsidian] no XAUTHORITY found; launching headless is not possible')
-    return
-  }
-  env.XAUTHORITY = xauth
-  console.log('[dsh-obsidian] starting Obsidian:', config.obsidianBin)
-  const child = spawn(config.obsidianBin, ['--no-sandbox'], {
-    env,
-    detached: true,
-    stdio: 'ignore',
-  })
-  child.unref()
-  // Wait for the REST API to come up.
-  const deadline = Date.now() + config.launchTimeoutMs
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1500))
-    if (await probeObsidian(config)) {
-      console.log('[dsh-obsidian] Obsidian REST API is up')
-      return
-    }
-  }
-  console.warn('[dsh-obsidian] Obsidian did not serve the API within', config.launchTimeoutMs, 'ms')
-}
-/** Whether the guidance already lives in the session's visible surface. */
+/** 引导消息是否已存在于会话可见面。 */
 function guidanceAlreadyInjected(agent: Agent): boolean {
   return agent.session.surface.nodes.some((seq) => {
     const event = agent.session.events[seq]
@@ -403,58 +91,25 @@ function guidanceAlreadyInjected(agent: Agent): boolean {
   })
 }
 
-/**
- * Register the `obsidian_*` and `knowledge_*` tool set and, when enabled,
- * the knowledge-first guidance injection on the first agent step.
- * @param ctx - registrant context carrying the tool registry.
- * @param config - plugin configuration.
- */
+/** 把工具返回值以美化 JSON 文本呈现给模型。 */
+function renderJson(_args: unknown, value: unknown) {
+  return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+}
 
-/**
- * Whether an Obsidian instance is already running on this machine. Electron
- * is single-instance per user-data-dir so spawning a second main process when
- * one already exists is wasteful (and can leave Multi-process race). Detected
- * via (a) a matching main-process command line and (b) the SingletonLock file
- * Electron drops in the user-data dir. Either present => instance exists.
- */
-function obsidianProcessExists(binPath: string): boolean {
-  try {
-    const list = readdirSync('/proc').filter(n => /^\d+$/.test(n))
-    if (list.includes(String(process.pid))) list.splice(list.indexOf(String(process.pid)), 1)
-    for (const pid of list) {
-      try {
-        const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ')
-        // Precise main-process match: the executable's own argv[0] is our
-        // obsidian binary (a lone token/path), not an arbitrary mention of
-        // "obsidian" somewhere in the command line (e.g. a node script that
-        // happens to reference the path). Electron subrenders carry --type=
-        // and are skipped; only the root main process is the singleton owner.
-        const argv0 = cmd.split(' ')[0] ?? ''
-        const isMain = !cmd.includes('--type=')
-        const exact = argv0 === binPath || argv0 === binPath.split('/').pop()
-        if (exact && isMain) return true
-      } catch { /* pid vanished */ }
-    }
-  } catch { /* procfs unavailable */ }
-  return false
+/** 工具调用展示卡片。 */
+function presentCall(title: string, args: unknown) {
+  return { card: 'generic' as const, title, kind: 'other' as const, rawInput: args }
 }
 
 /**
- * Check the Electron singleton marker Obsidian drops in its user-data dir.
- * The lock name embeds the hostname; we match by the Singleton prefix.
+ * 注册 `obsidian_*` 与 `knowledge_*` 工具集，并按配置注入知识优先引导。
+ * 自愈启动为 fire-and-forget，工具注册从不被慢启动阻塞。
+ * @param ctx - 携带工具注册表的注册上下文。
+ * @param config - 插件配置。
  */
-function obsidianSingletonLockExists(): boolean {
-  const conf = `${os.homedir()}/.config/obsidian`
-  try {
-    return readdirSync(conf).some(n => n.startsWith('Singleton'))
-  } catch {
-    return false
-  }
-}
 export function apply(ctx: Context, config: Config): void {
-  // Self-heal the dependency: if the Obsidian REST API is not reachable,
-  // launch a local instance. Fire-and-forget so tool registration never
-  // blocks on a slow spawn; failures degrade to a warning.
+  // 自愈依赖：REST API 不可达时拉起本地实例。fire-and-forget，
+  // 失败降级为警告。
   void ensureObsidianRunning(config)
 
   const tools = {

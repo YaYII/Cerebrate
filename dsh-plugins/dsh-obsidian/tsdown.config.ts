@@ -1,7 +1,6 @@
 /**
- * Standalone tsdown config for dsh-obsidian. Mirrors the repository shape:
- * a node ESM lib half. The plugin exposes only a host loader entry (tools),
- * no browser/client bundle, so there is only the node ESM output.
+ * dsh-obsidian 的独立 tsdown 配置。镜像仓库形态：node ESM 库半体。
+ * 插件只暴露 host 加载入口（工具），无浏览器/client 包，因此只有 node ESM 输出。
  */
 import { defineConfig } from 'tsdown'
 
