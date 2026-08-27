@@ -126,6 +126,21 @@ describe('test summary parsers', () => {
   it('extracts coverage percentages', () => {
     expect(extractCoveragePct('All files  82.35%')).toBe(82.35)
     expect(extractCoveragePct('All files          |   68.73 |   58.92 |   71.84 |   69.89')).toBe(68.73)
+    // vitest 全绿格式（无 failed 段）→ failed=0
+    const jsTs = TOOLCHAINS.find(c => c.language === 'js-ts')!
+    const green = parseTestSummary(jsTs, ' Test Files  3 passed (3)' + '\n' + '      Tests  45 passed (45)' + '\n' + 'All files          |   68.73 |   58.92 |   71.84 |   69.89')
+    expect(green?.passed).toBe(45)
+    expect(green?.failed).toBe(0)
+    expect(green?.coveragePct).toBe(68.73)
+    // 有 failed 段 → failed 正确
+    const mixed = parseTestSummary(jsTs, 'Tests  10 passed | 2 failed (12)')
+    expect(mixed?.passed).toBe(10)
+    expect(mixed?.failed).toBe(2)
+    // 完全无法解析 → 返回带明确 note 的对象而非 undefined
+    const broken = parseTestSummary(jsTs, 'garbage output no tests')
+    expect(broken).toBeDefined()
+    expect(broken?.note).toContain('解析失败')
+
     expect(extractCoveragePct('% Coverage: 91.2')).toBe(91.2)
     expect(extractCoveragePct('TOTAL   150      40     73.33%')).toBe(73.33)
   })

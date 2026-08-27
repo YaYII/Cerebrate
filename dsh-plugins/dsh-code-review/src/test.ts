@@ -68,26 +68,31 @@ interface TestSummary {
   failed: number
   skipped: number
   coveragePct?: number
+  /** 解析告警：覆盖率未提取 / 摘要格式变化时的明确提示（绝不静默 undefined）。 */
+  note?: string
 }
 
 /** Parse runner-specific summary lines into numbers. */
 export function parseTestSummary(toolchain: Toolchain, combined: string): TestSummary | undefined {
   if (toolchain.language === 'js-ts') {
-    // vitest: " Test Files  1 passed | 0 failed", " Tests  3 passed | 0 failed (5)".
-    const tests = /Tests\s+(\d+)\s+passed\s*\|\s*(\d+)\s+failed(?:\s*\(\s*(\d+)\s*\))?/.exec(combined)
+    // vitest 全绿: "Tests  45 passed (45)"（无 failed 段）；有失败: "Tests  45 passed | 2 failed"。
+    // failed 段可选：全绿时 failed=0；解析失败时返回带明确提示的 note，让 AI 能定位问题。
+    const tests = /Tests\s+(\d+)\s+passed(?:\s*\|\s*(\d+)\s+failed)?(?:\(\s*(\d+)\s*\))?/.exec(combined)
     if (tests) {
       const passed = Number(tests[1])
-      const failed = Number(tests[2])
+      const failed = tests[2] !== undefined ? Number(tests[2]) : 0
+      const skipped = tests[3] !== undefined ? Number(tests[3]) : 0
       const coveragePct = extractCoveragePct(combined)
       return {
         total: passed + failed,
         passed,
         failed,
-        skipped: 0,
+        skipped,
         ...(coveragePct !== undefined ? { coveragePct } : {}),
+        ...(coveragePct === undefined ? { note: '覆盖率未提取：未在 vitest 输出中找到 "All files | xx%" 表格行（可能 --coverage 未生效或输出格式变更）' } : {}),
       }
     }
-    // jest: "Tests: 3 passed, 3 total".
+    // jest: "Tests: 3 passed, 3 total"（vitest 匹配失败时回退尝试）
     const jest = /Tests:\s+(\d+)\s+failed,\s+(\d+)\s+passed,\s+(\d+)\s+total/.exec(combined)
     if (jest) {
       const coveragePct = extractCoveragePct(combined)
@@ -97,7 +102,16 @@ export function parseTestSummary(toolchain: Toolchain, combined: string): TestSu
         failed: Number(jest[1]),
         skipped: 0,
         ...(coveragePct !== undefined ? { coveragePct } : {}),
+        ...(coveragePct === undefined ? { note: '覆盖率未提取：未在 jest 输出中找到 "All files" 行' } : {}),
       }
+    }
+    // vitest/jest 输出格式均无法解析：明确提示原始输出尾部，绝不静默返回 undefined
+    return {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      note: '测试摘要解析失败：输出中未找到 "Tests N passed"（vitest）或 "Tests: N passed"（jest）行（格式变更？），原始输出尾部：' + combined.slice(-300),
     }
   }
   if (toolchain.language === 'python') {
