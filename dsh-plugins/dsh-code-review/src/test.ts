@@ -17,6 +17,8 @@ export interface TestOptions {
   timeoutMs?: number
   /** Extra CLI args appended to the test command, e.g. `--coverage`. */
   extraArgs?: string[]
+  /** 输出捕获上限（字节）。覆盖率表格可能很大，默认 64KB 会截断中间的摘要行——需调大。 */
+  maxOutputBytes?: number
 }
 
 /**
@@ -36,6 +38,8 @@ export async function runTests(projectDir: string, toolchain: Toolchain, options
   const result = await runCommand(bin, args, {
     cwd: options.cwd ?? projectDir,
     timeoutMs: options.timeoutMs ?? 300_000,
+    // 覆盖率表格 + 文件列表 + 摘要行需要较大输出预算（默认 64KB 会截断中间的 Tests 行）
+    ...(options.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : { maxOutputBytes: 512 * 1024 }),
   })
 
   const combined = `${result.stdout}\n${result.stderr}`
