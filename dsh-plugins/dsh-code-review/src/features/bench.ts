@@ -1,13 +1,11 @@
 /**
- * Performance tooling: program-level benchmarking and function-level CPU
- * profiling.
+ * 性能工具：程序级基准与函数级 CPU 剖析。
  *
- * - `runBench` runs a command N times and reports p50/p90/mean/min/max plus
- *   peak RSS — this answers "how much does this program cost to run".
- * - `runProfile` drives the language's profiler (v8 `--cpu-prof` for
- *   JS/TS, `cProfile` for Python; JFR/Xdebug templates are registered for
- *   Java/PHP and reported as pending) and parses the artifact into a Top-N
- *   hot-function list — this is where performance bugs surface.
+ * - `runBench` 运行一条命令 N 次，报告 p50/p90/均值/最小/最大以及内存峰值
+ *   RSS——回答「这个程序运行消耗多少性能」。
+ * - `runProfile` 驱动语言的剖析器（JS/TS 用 v8 `--cpu-prof`，Python 用
+ *   `cProfile`；Java/PHP 注册了 JFR/Xdebug 模板并以 pending 报告）并把产物
+ *   解析为 Top-N 热点函数列表——性能 bug 的直接证据。
  * @module @deepseek-ai/dsh-code-review
  */
 
@@ -18,18 +16,18 @@ import { runCommand, quantile } from './runner'
 import { resolveBin, type Toolchain } from './languages'
 import type { BenchResult, BenchSample, ProfileEntry, ProfileResult } from './types'
 
-/** Options for {@link runBench}. */
+/** {@link runBench} 的选项。 */
 export interface BenchOptions {
-  /** Full command line to benchmark, e.g. `node dist/index.js --quick`. */
+  /** 待基准的完整命令行，如 `node dist/index.js --quick`。 */
   command: string
   cwd?: string
   iterations?: number
   timeoutMs?: number
 }
 
-/** Options for {@link runProfile}. */
+/** {@link runProfile} 的选项。 */
 export interface ProfileOptions {
-  /** Command to profile (without the profiler wrapper), e.g. `dist/index.js --quick`. */
+  /** 待剖析的命令（不含剖析器包装），如 `dist/index.js --quick`。 */
   command: string
   cwd?: string
   toolchain: Toolchain
@@ -37,11 +35,10 @@ export interface ProfileOptions {
 }
 
 /**
- * Run a command repeatedly and aggregate timings. The first run is tagged as
- * the cold start and excluded from aggregates so JIT/module-load warm-up does
- * not distort the numbers.
- * @param options - bench options.
- * @returns aggregated result.
+ * 反复运行一条命令并聚合时序。首次运行标记为冷启动，不参与聚合，避免
+ * JIT/模块加载预热扭曲数字。
+ * @param options - 基准选项。
+ * @returns 聚合结果。
  */
 export async function runBench(options: BenchOptions): Promise<BenchResult> {
   const iterations = Math.max(2, options.iterations ?? 5)
@@ -83,9 +80,9 @@ export async function runBench(options: BenchOptions): Promise<BenchResult> {
 }
 
 /**
- * Profile a command with the toolchain's profiler and return hot functions.
- * @param options - profile options.
- * @returns profile result (engine `pending` when the parser is not wired).
+ * 用工具链的剖析器剖析一条命令并返回热点函数。
+ * @param options - 剖析选项。
+ * @returns 剖析结果（解析器未接入时引擎为 `pending`）。
  */
 export async function runProfile(options: ProfileOptions): Promise<ProfileResult> {
   const profileDir = join(os.tmpdir(), `dsh-code-review-${process.pid}-${Date.now()}`)
@@ -110,7 +107,7 @@ export async function runProfile(options: ProfileOptions): Promise<ProfileResult
     try {
       rmSync(profileDir, { recursive: true, force: true })
     } catch {
-      // Best effort cleanup.
+      // 尽力清理。
     }
   }
 }
@@ -120,7 +117,7 @@ async function profileWithV8(
   profileDir: string,
   targetParts: string[],
 ): Promise<ProfileResult> {
-  // node --cpu-prof --cpu-prof-dir=<dir> --cpu-prof-name=out.cpuprofile <target...>
+  // 命令形态：node --cpu-prof --cpu-prof-dir=<目录> --cpu-prof-name=out.cpuprofile <目标...>（产物落在剖析目录）
   const profileArgs = [
     '--cpu-prof',
     `--cpu-prof-dir=${profileDir}`,
@@ -159,7 +156,7 @@ async function profileWithCProfile(
   targetParts: string[],
 ): Promise<ProfileResult> {
   const artifact = join(profileDir, 'out.prof')
-  // python3 -m cProfile -o out.prof <target...>  →  then render with pstats.
+  // python3 -m cProfile -o out.prof <target...>  →  再用 pstats 渲染。
   const pythonBin = options.cwd ? resolveBin(options.cwd, 'python3') : 'python3'
   const run = await runCommand(pythonBin, ['-m', 'cProfile', '-o', artifact, ...targetParts], {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
@@ -188,9 +185,8 @@ async function profileWithCProfile(
 }
 
 /**
- * Parse a v8 `.cpuprofile` JSON into hot functions ranked by self time.
- * Aggregation key is `url:line:functionName` so samples from the same frame
- * collapse into one entry.
+ * 把 v8 `.cpuprofile` JSON 解析为按自耗时排序的热点函数。
+ * 聚合键是 `url:line:functionName`，同一帧的样本合并为一条。
  */
 export function parseV8CpuProfile(raw: string): ProfileEntry[] {
   let profile: {
@@ -216,8 +212,8 @@ export function parseV8CpuProfile(raw: string): ProfileEntry[] {
       line: (node.callFrame?.lineNumber ?? 0) + 1,
     })
   }
-  // Aggregate by node id (unique per call frame) — samples reference node ids
-  // directly, so no string-key round-trip is needed.
+  // 按节点 id 聚合（每个调用帧唯一）——样本直接引用节点 id，
+  // 无需字符串键的往返转换。
   const selfNs = new Map<number, number>()
   const samples = profile.samples ?? []
   const timeDeltas = profile.timeDeltas ?? []
@@ -231,8 +227,8 @@ export function parseV8CpuProfile(raw: string): ProfileEntry[] {
   const entries: ProfileEntry[] = [...selfNs.entries()]
     .map(([nodeId, self]) => {
       const frame = nodeById.get(nodeId)!
-      // v8 cpuprofile nodes carry no parent pointers, so total time cannot be
-      // derived without reconstructing stacks; total is reported as self.
+      // v8 cpuprofile 节点不带父指针，不重建栈就无法推导总耗时；
+      // 因此 total 按 self 报告。
       return {
         functionName: frame.functionName,
         url: frame.url,
@@ -255,8 +251,8 @@ export function parseV8CpuProfile(raw: string): ProfileEntry[] {
 }
 
 /**
- * Parse `pstats` text output: `ncalls  tottime  percall  cumtime  percall  filename:lineno(function)`.
- * Best-effort; malformed lines are skipped.
+ * 解析 `pstats` 文本输出：`ncalls  tottime  percall  cumtime  percall  filename:lineno(function)`。
+ * 尽力而为；畸形行跳过。
  */
 export function parseCProfileText(output: string): ProfileEntry[] {
   const entries: ProfileEntry[] = []
@@ -283,7 +279,7 @@ export function parseCProfileText(output: string): ProfileEntry[] {
       calls: Number(match[1]) || 0,
     })
   }
-  // Normalize percentages against the largest total time.
+  // 按最大总耗时归一化百分比。
   const maxTotal = entries.reduce((max, entry) => Math.max(max, entry.totalMs), 0)
   for (const entry of entries) {
     entry.selfPct = entry.totalMs > 0 ? Math.round((entry.selfMs / entry.totalMs) * 1000) / 10 : 0
@@ -292,7 +288,7 @@ export function parseCProfileText(output: string): ProfileEntry[] {
   return entries.slice(0, 10)
 }
 
-/** Split a command-line string into [exe, ...args] honoring simple quotes. */
+/** 把命令行字符串拆为 [exe, ...args]，尊重简单引号。 */
 export function splitCommand(line: string): string[] {
   const parts: string[] = []
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g
@@ -302,7 +298,7 @@ export function splitCommand(line: string): string[] {
   return parts
 }
 
-/** Persist a result artifact under the review directory. */
+/** 把结果产物持久化到审查目录下。 */
 export function saveArtifact(projectDir: string, artifactsDir: string, name: string, value: unknown): string {
   const dir = join(projectDir, artifactsDir)
   mkdirSync(dir, { recursive: true })

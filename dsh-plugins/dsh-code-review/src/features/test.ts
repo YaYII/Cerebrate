@@ -1,9 +1,8 @@
 /**
- * Test-suite execution with summary normalization.
+ * 测试套件执行与摘要归一化。
  *
- * Runs the toolchain's test command and extracts pass/fail/coverage numbers
- * from the runner's text output. Parsers are wired for vitest and pytest;
- * anything else falls back to exit-code granularity with an explicit note.
+ * 运行工具链的测试命令，并从运行器文本输出中提取通过/失败/覆盖率数字。
+ * 已接入 vitest 与 pytest 解析器；其余工具回退为退出码粒度并附明确备注。
  * @module @deepseek-ai/dsh-code-review
  */
 
@@ -11,22 +10,22 @@ import { runCommand } from './runner'
 import { resolveBin, type Toolchain } from './languages'
 import type { TestResult } from './types'
 
-/** Options for {@link runTests}. */
+/** {@link runTests} 的选项。 */
 export interface TestOptions {
   cwd?: string
   timeoutMs?: number
-  /** Extra CLI args appended to the test command, e.g. `--coverage`. */
+  /** 追加到测试命令后的附加 CLI 参数，如 `--coverage`。 */
   extraArgs?: string[]
   /** 输出捕获上限（字节）。覆盖率表格可能很大，默认 64KB 会截断中间的摘要行——需调大。 */
   maxOutputBytes?: number
 }
 
 /**
- * Run the toolchain's test suite.
- * @param projectDir - project root.
- * @param toolchain - the matched toolchain.
- * @param options - run options.
- * @returns normalized test result.
+ * 运行工具链的测试套件。
+ * @param projectDir - 项目根目录。
+ * @param toolchain - 匹配到的工具链。
+ * @param options - 运行选项。
+ * @returns 归一化的测试结果。
  */
 export async function runTests(projectDir: string, toolchain: Toolchain, options: TestOptions = {}): Promise<TestResult> {
   const spec = toolchain.test
@@ -53,7 +52,7 @@ export async function runTests(projectDir: string, toolchain: Toolchain, options
       ...(result.timedOut ? { error: `timed out after ${options.timeoutMs ?? 300_000}ms` } : {}),
     }
   }
-  // Fallback: exit-code granularity only.
+  // 回退：仅退出码粒度。
   const ok = result.exitCode === 0
   return {
     tool: spec.bin,
@@ -76,7 +75,7 @@ interface TestSummary {
   note?: string
 }
 
-/** Parse runner-specific summary lines into numbers. */
+/** 把运行器专属的摘要行解析为数字。 */
 export function parseTestSummary(toolchain: Toolchain, combined: string): TestSummary | undefined {
   // 运行环境无 NO_COLOR 时（如 DSH 插件进程），vitest 会给摘要 token 逐段上色，
   // 色码（\x1b[32m 等）插在 "Tests" 与数字之间会破坏 "Tests N passed" 正则——
@@ -123,7 +122,7 @@ export function parseTestSummary(toolchain: Toolchain, combined: string): TestSu
     }
   }
   if (toolchain.language === 'python') {
-    // pytest: "1 passed, 2 failed, 3 skipped in 1.23s" (any subset of parts).
+    // pytest: "1 passed, 2 failed, 3 skipped in 1.23s"（各组成部分可选）。
     const pytest = /(\d+)\s+passed(?:,\s*(\d+)\s+failed)?(?:,\s*(\d+)\s+skipped)?/.exec(combined)
     if (pytest && /pytest|passed/.test(combined)) {
       const passed = Number(pytest[1])
@@ -140,7 +139,7 @@ export function parseTestSummary(toolchain: Toolchain, combined: string): TestSu
     }
   }
   if (toolchain.language === 'php') {
-    // PHPUnit: "OK (5 tests, 10 assertions)" / "FAILURES! Tests: 5, Assertions: 10, Failures: 2."
+    // PHPUnit 成功格式："OK (5 tests, 10 assertions)"；失败格式："FAILURES! Tests: 5, Assertions: 10, Failures: 2."。
     const phpunitOk = /OK\s*\((\d+)\s+tests?/.exec(combined)
     if (phpunitOk) {
       return { total: Number(phpunitOk[1]), passed: Number(phpunitOk[1]), failed: 0, skipped: 0 }
@@ -155,7 +154,7 @@ export function parseTestSummary(toolchain: Toolchain, combined: string): TestSu
   return undefined
 }
 
-/** Extract a coverage percentage from common reporter outputs. */
+/** 从常见运行器输出中提取覆盖率百分比。 */
 export function extractCoveragePct(combined: string): number | undefined {
   // vitest coverage-v8 表格: "All files          |   68.73 |   58.92 |   71.84 |   69.89"
   const table = /All files\s*\|\s*([\d.]+)%?/.exec(combined)
@@ -165,7 +164,7 @@ export function extractCoveragePct(combined: string): number | undefined {
   if (allFiles) return Number(allFiles[1])
   const coverage = /% Coverage[:\s]+([\d.]+)%?/.exec(combined)
   if (coverage) return Number(coverage[1])
-  // pytest-cov: "TOTAL   82.35%".
+  // pytest-cov 汇总行："TOTAL   82.35%"（表尾 TOTAL 行的百分比）。
   const total = /^TOTAL\s+[\d-]+\s+[\d-]+\s+([\d.]+)%/m.exec(combined)
   if (total) return Number(total[1])
   return undefined

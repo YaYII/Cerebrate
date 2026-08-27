@@ -121,6 +121,10 @@ export function checkCommentLanguage(absPath: string, relPath: string): ArchFind
       .replace(/^\*/, '').replace(/^\* /, '').trim()
     // JSDoc 标签行（@param/@returns/@module 等）是声明性文档，跳过英文词检测
     if (text.length === 0 || text.startsWith('@')) continue
+    // 含中文字符即视为中文注释：允许夹带英文技术词（dirty-file、spawn、ENOENT、
+    // path、error 等），避免把「中文说明 + 英文术语」误判为英文注释。
+    // 纯英文注释不含中文字符，仍会落入下方 EN_WORDS 检测。
+    if (/[\u4e00-\u9fff]/.test(text)) continue
     const withoutAllowed = text.replace(allowedRe, '')
     if (EN_WORDS.some(w => new RegExp(`\\b${w}\\b`).test(withoutAllowed))) {
       findings.push({

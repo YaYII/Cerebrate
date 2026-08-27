@@ -1,61 +1,54 @@
 /**
- * AI code-review assistant for DeepSeek Harness.
+ * DeepSeek Harness 的 AI 代码审查助手。
  *
- * Six deterministic `code_review_*` tools drive the review pipeline:
- *   1. `code_review_lint`    — static lint (eslint + tsc for JS/TS; toolchain
- *                              registry for Java/Python/PHP) → normalized findings.
- *   2. `code_review_format`  — formatter check (or fix) → dirty-file list.
- *   3. `code_review_bench`   — program-level benchmark: N runs, p50/p90/mean,
- *                              peak RSS — "how much does this program cost to run".
- *   4. `code_review_profile` — function-level CPU profile (v8 --cpu-prof for
- *                              JS/TS, cProfile for Python) → top hot functions,
- *                              the direct evidence for performance bugs.
- *   5. `code_review_test`    — test suite run + coverage extraction.
- *   6. `code_review_report`  — aggregate artifacts, compare against the
- *                              previous baseline, evaluate the quality gate and
- *                              render `report-<round>.md` + `report-latest.md`.
+ * 六个确定性的 `code_review_*` 工具驱动审查管线：
+ *   1. `code_review_lint`    — 静态 lint（JS/TS 用 eslint + tsc；Java/Python/PHP
+ *                             走工具链注册表）→ 归一化问题清单。
+ *   2. `code_review_format`  — 格式化检查（或修复）→ 脏文件清单。
+ *   3. `code_review_bench`   — 程序级基准：N 次运行、p50/p90/均值、内存峰值
+ *                             RSS——「这个程序运行消耗多少性能」。
+ *   4. `code_review_profile` — 函数级 CPU 剖析（JS/TS 用 v8 --cpu-prof，
+ *                             Python 用 cProfile）→ 热点函数 Top10，
+ *                             性能 bug 的直接证据。
+ *   5. `code_review_test`    — 测试套件运行 + 覆盖率提取。
+ *   6. `code_review_report`  — 聚合产物、与上一轮基线对比、评估质量门禁并
+ *                             渲染 `report-<round>.md` + `report-latest.md`。
  *
- * Everything lands under `<project>/.code-review/` (artifacts, baseline, round
- * state), so the fix → re-review loop is resumable and every round is
- * comparable. A plugin-sourced guidance message tells the model how to run the
- * loop until the gate passes.
+ * 一切产物落在 `<项目>/.code-review/`（产物、基线、轮次状态），因此修复
+ * → 再审查循环可续跑，每一轮都可对比。插件来源的引导消息告诉模型如何
+ * 运行循环直到门禁通过。
+ *
+ * 架构分层：本文件是装配层（工具注册 + 引导注入），行为在 business/
+ * （tools.ts 顶层 execute 编排）与 features/（纯能力砖块）。
  *
  * @module @deepseek-ai/dsh-code-review
  */
 
-import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { detectToolchains, probeToolchain, resolveBin } from './languages'
-import { runLint, runFormat } from './lint'
-import { runBench, runProfile, saveArtifact } from './bench'
-import { runTests } from './test'
-import { generateReport, readArtifact } from './report'
-import { runCommand } from './runner'
-import type { Finding } from './types'
+import { executeLint, executeFormat, executeBench, executeProfile, executeTest, executeReport } from './business/tools'
+import type { ReviewToolConfig } from './business/tools'
 
-/** Plugin identifier, used as the cordis entry name and injection source tag. */
+/** 插件标识，同时作为 Cordis 入口名与注入来源标签。 */
 export const name = 'dsh-code-review'
 export const inject = ['tools']
 
-/** Plugin configuration. */
+/** 插件配置。 */
 export interface Config {
-  /** Artifacts directory name inside the reviewed project. */
+  /** 被审查项目内的产物目录名。 */
   artifactsDir: string
-  /** Whether the review-loop guidance message is injected on the first step. */
+  /** 是否在首个 step 注入审查闭环引导。 */
   injectGuidance: boolean
-  /** Default benchmark iterations. */
+  /** 默认基准迭代次数。 */
   benchIterations: number
-  /** Default test timeout, ms. */
+  /** 默认测试超时，ms。 */
   testTimeoutMs: number
 }
 
-/** Schemastery configuration schema. */
+/** Schemastery 配置模式。 */
 export const Config: z<Config> = z.object({
   artifactsDir: z.string().default('.code-review'),
   injectGuidance: z.boolean().default(true),
@@ -63,7 +56,7 @@ export const Config: z<Config> = z.object({
   testTimeoutMs: z.number().default(300_000),
 })
 
-/** Review-loop guidance folded into the first agent step. */
+/** 折叠进首个 agent step 的审查闭环引导。 */
 const REVIEW_GUIDANCE = [
   '【代码审查】本会话具备 dsh-code-review 全套审查工具（code_review_lint/format/bench/profile/test/report），用于对 AI 写完的代码做自动审查、性能诊断与修复闭环。',
   '审查流程（按序执行）：先 code_review_lint（静态规范）→ code_review_format（格式化）→ code_review_test（测试）→ code_review_bench + code_review_profile（性能）→ 最后 code_review_report 生成诊断报告并给出 Quality Gate 结论。',
@@ -72,13 +65,13 @@ const REVIEW_GUIDANCE = [
   '报告产物：<项目>/.code-review/report-latest.md（最新）、report-<N>.md（每轮历史）、baseline.json（性能基线）。',
 ].join('\n')
 
-/** Message-source plugin tag this package's injections carry. */
+/** 本包注入消息的来源插件标签。 */
 const PLUGIN_TAG = 'dsh-code-review'
 
 /**
- * Whether the guidance message already lives in the session's visible surface.
- * @param agent - the agent whose session surface to inspect.
- * @returns true when the guidance is already present.
+ * 引导消息是否已存在于会话可见面。
+ * @param agent - 待检查会话面的 agent。
+ * @returns 已存在时为 true。
  */
 function guidanceAlreadyInjected(agent: Agent): boolean {
   return agent.session.surface.nodes.some((seq) => {
@@ -89,39 +82,28 @@ function guidanceAlreadyInjected(agent: Agent): boolean {
   })
 }
 
-/** Render one tool value to the model as pretty-printed JSON text. */
+/** 把工具返回值以美化 JSON 文本呈现给模型。 */
 function renderJson(_args: unknown, value: unknown) {
   return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
 }
 
-/** Common UI card for the review tools. */
+/** code_review 工具的通用 UI 卡片。 */
 function presentCall(title: string, args: unknown) {
   return { card: 'generic' as const, title, kind: 'other' as const, rawInput: args }
 }
 
-/** JSON-safe view of findings (bounded, model-friendly). */
-function summarizeFindings(findings: Finding[], limit = 30): JsonValue {
-  return findings.slice(0, limit).map(f => ({
-    severity: f.severity,
-    file: f.file,
-    ...(f.line !== undefined ? { line: f.line } : {}),
-    ...(f.rule !== undefined ? { rule: f.rule } : {}),
-    message: f.message.slice(0, 200),
-  }))
-}
-
-/** Resolve the project argument into an absolute path. */
-function resolveProject(project: string | undefined, cwd: string): string {
-  return resolve(project ?? cwd)
-}
-
 /**
- * Register the `code_review_*` tool set and, when enabled, the review-loop
- * guidance injection on the first agent step.
- * @param ctx - registrant context carrying the tool registry.
- * @param config - plugin configuration.
+ * 注册 `code_review_*` 工具集，并按配置在首个 agent step 注入审查闭环引导。
+ * 每个工具的 execute 委托给 business 层顶层函数（可独立测试）。
+ * @param ctx - 携带工具注册表的注册上下文。
+ * @param config - 插件配置。
  */
 export function apply(ctx: Context, config: Config): void {
+  const toolConfig: ReviewToolConfig = {
+    artifactsDir: config.artifactsDir,
+    benchIterations: config.benchIterations,
+    testTimeoutMs: config.testTimeoutMs,
+  }
   const tools = {
     lint: defineTool({
       name: 'code_review_lint',
@@ -130,41 +112,7 @@ export function apply(ctx: Context, config: Config): void {
         project: { type: 'string', description: '被审查项目目录（绝对路径或相对当前工作区；缺省为当前目录）' },
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-      async execute(args: { project?: string }) {
-        const projectDir = resolveProject(args.project, process.cwd())
-        const chains = detectToolchains(projectDir)
-        if (chains.length === 0) {
-          return { status: 'error', message: `未在 ${projectDir} 识别到支持的语言（找 package.json / pom.xml / requirements.txt / composer.json）` }
-        }
-        const findings: Finding[] = []
-        const notes: string[] = []
-        for (const chain of chains) {
-          const probe = probeToolchain(projectDir, chain)
-          if (!probe.lint) {
-            notes.push(`${chain.language}: eslint 未安装（缺 node_modules/.bin/eslint），跳过`)
-            continue
-          }
-          const lint = await runLint(projectDir, chain)
-          findings.push(...lint.findings)
-          if (lint.error) notes.push(`${chain.language}: ${lint.error}`)
-          if (chain.language === 'js-ts' && existsSync(join(projectDir, 'tsconfig.json'))) {
-            const tsc = await runLint(projectDir, chain, 'tsc')
-            findings.push(...tsc.findings)
-          }
-        }
-        saveArtifact(projectDir, config.artifactsDir, 'last-lint.json', findings)
-        const blockers = findings.filter(f => f.severity === 'P0' || f.severity === 'P1').length
-        return {
-          status: 'ok',
-          data: {
-            total: findings.length,
-            blockers,
-            findings: summarizeFindings(findings),
-            ...(notes.length > 0 ? { notes } : {}),
-            artifact: join(projectDir, config.artifactsDir, 'last-lint.json'),
-          },
-        }
-      },
+      execute: (args: { project?: string }) => executeLint(toolConfig, args),
       presentCall: args => presentCall('Run static lint', args),
     }),
     format: defineTool({
@@ -175,36 +123,7 @@ export function apply(ctx: Context, config: Config): void {
         fix: { type: 'boolean', description: '是否直接修复格式（默认 false，只检查）' },
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-      async execute(args: { project?: string; fix?: boolean }) {
-        const projectDir = resolveProject(args.project, process.cwd())
-        const chains = detectToolchains(projectDir)
-        if (chains.length === 0) {
-          return { status: 'error', message: `未在 ${projectDir} 识别到支持的语言` }
-        }
-        const results: Array<{ language: string; clean: boolean; dirtyFiles: string[]; error?: string }> = []
-        const notes: string[] = []
-        for (const chain of chains) {
-          const probe = probeToolchain(projectDir, chain)
-          if (!probe.format) {
-            const message = `${chain.language}: ${chain.format?.bin ?? 'formatter'} 未安装（缺 node_modules/.bin/），跳过格式检查`
-            notes.push(message)
-            results.push({ language: chain.language, clean: true, dirtyFiles: [], error: message })
-            continue
-          }
-          if (args.fix && chain.language === 'js-ts') {
-            await runFormatFix(projectDir)
-          }
-          const format = await runFormat(projectDir, chain)
-          results.push({
-            language: chain.language,
-            clean: format.clean,
-            dirtyFiles: format.dirtyFiles,
-            ...(format.error !== undefined ? { error: format.error } : {}),
-          })
-        }
-        saveArtifact(projectDir, config.artifactsDir, 'last-format.json', results[0] ?? { clean: true, dirtyFiles: [] })
-        return { status: 'ok', data: { results, ...(notes.length > 0 ? { notes } : {}), artifact: join(projectDir, config.artifactsDir, 'last-format.json') } }
-      },
+      execute: (args: { project?: string; fix?: boolean }) => executeFormat(toolConfig, args),
       presentCall: args => presentCall('Check formatting', args),
     }),
     bench: defineTool({
@@ -217,33 +136,7 @@ export function apply(ctx: Context, config: Config): void {
         timeoutMs: { type: 'integer', description: '单次超时（默认 120000ms）' },
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-      async execute(args: { project?: string; command: string; iterations?: number; timeoutMs?: number }) {
-        const projectDir = resolveProject(args.project, process.cwd())
-        const bench = await runBench({
-          command: args.command,
-          cwd: projectDir,
-          iterations: args.iterations ?? config.benchIterations,
-          ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
-        })
-        saveArtifact(projectDir, config.artifactsDir, 'last-bench.json', bench)
-        const baseline = readArtifact<Record<string, number>>(projectDir, config.artifactsDir, 'baseline.json')
-        const prevP50 = baseline?.[args.command]
-        return {
-          status: 'ok',
-          data: {
-            command: bench.command,
-            p50Ms: bench.p50Ms,
-            p90Ms: bench.p90Ms,
-            meanMs: bench.meanMs,
-            minMs: bench.minMs,
-            maxMs: bench.maxMs,
-            ...(bench.peakRssMb !== undefined ? { peakRssMb: bench.peakRssMb } : {}),
-            ...(prevP50 !== undefined ? { prevRoundP50Ms: prevP50, deltaPct: Math.round(((bench.p50Ms - prevP50) / prevP50) * 1000) / 10 } : { note: '首轮，基线将在报告轮建立' }),
-            ...(bench.error !== undefined ? { error: bench.error } : {}),
-            artifact: join(projectDir, config.artifactsDir, 'last-bench.json'),
-          },
-        }
-      },
+      execute: (args: { project?: string; command: string; iterations?: number; timeoutMs?: number }) => executeBench(toolConfig, args),
       presentCall: args => presentCall('Benchmark program', args),
     }),
     profile: defineTool({
@@ -255,26 +148,7 @@ export function apply(ctx: Context, config: Config): void {
         timeoutMs: { type: 'integer', description: '剖析超时（默认 120000ms）' },
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-      async execute(args: { project?: string; command: string; timeoutMs?: number }) {
-        const projectDir = resolveProject(args.project, process.cwd())
-        const chains = detectToolchains(projectDir)
-        if (chains.length === 0) {
-          return { status: 'error', message: `未在 ${projectDir} 识别到支持的语言` }
-        }
-        const chain = chains[0]!
-        const profile = await runProfile({ command: args.command, cwd: projectDir, toolchain: chain, ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}) })
-        saveArtifact(projectDir, config.artifactsDir, 'last-profile.json', profile)
-        return {
-          status: 'ok',
-          data: {
-            engine: profile.engine,
-            totalMs: Math.round(profile.totalMs),
-            entries: profile.entries.map(e => ({ functionName: e.functionName, location: `${e.url}:${e.line}`, selfMs: Math.round(e.selfMs), selfPct: e.selfPct })),
-            ...(profile.note !== undefined ? { note: profile.note } : {}),
-            artifact: join(projectDir, config.artifactsDir, 'last-profile.json'),
-          },
-        }
-      },
+      execute: (args: { project?: string; command: string; timeoutMs?: number }) => executeProfile(toolConfig, args),
       presentCall: args => presentCall('Profile hot functions', args),
     }),
     test: defineTool({
@@ -286,41 +160,7 @@ export function apply(ctx: Context, config: Config): void {
         extraArgs: { type: 'array', items: { type: 'string' }, description: '附加 CLI 参数' },
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-      async execute(args: { project?: string; coverage?: boolean; extraArgs?: string[] }) {
-        const projectDir = resolveProject(args.project, process.cwd())
-        const chains = detectToolchains(projectDir)
-        if (chains.length === 0) {
-          return { status: 'error', message: `未在 ${projectDir} 识别到支持的语言` }
-        }
-        const chain = chains[0]!
-        const probe = probeToolchain(projectDir, chain)
-        if (!probe.test) {
-          const message = `${chain.language}: ${chain.test?.bin ?? 'test runner'} 未安装（缺 node_modules/.bin/），跳过测试`
-          const skipped = { tool: chain.test?.bin ?? 'unknown', total: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0, error: message }
-          saveArtifact(projectDir, config.artifactsDir, 'last-test.json', skipped)
-          return { status: 'ok', data: { ...skipped, artifact: join(projectDir, config.artifactsDir, 'last-test.json') } }
-        }
-        const extra = [...(args.extraArgs ?? [])]
-        if (args.coverage) {
-          extra.push(chain.language === 'python' ? '--cov' : '--coverage')
-        }
-        const test = await runTests(projectDir, chain, { cwd: projectDir, timeoutMs: config.testTimeoutMs, extraArgs: extra })
-        saveArtifact(projectDir, config.artifactsDir, 'last-test.json', test)
-        return {
-          status: 'ok',
-          data: {
-            tool: test.tool,
-            total: test.total,
-            passed: test.passed,
-            failed: test.failed,
-            skipped: test.skipped,
-            durationMs: test.durationMs,
-            ...(test.coveragePct !== undefined ? { coveragePct: test.coveragePct } : {}),
-            ...(test.error !== undefined ? { error: test.error } : {}),
-            artifact: join(projectDir, config.artifactsDir, 'last-test.json'),
-          },
-        }
-      },
+      execute: (args: { project?: string; coverage?: boolean; extraArgs?: string[] }) => executeTest(toolConfig, args),
       presentCall: args => presentCall('Run test suite', args),
     }),
     report: defineTool({
@@ -336,43 +176,7 @@ export function apply(ctx: Context, config: Config): void {
         eleganceThreshold: { type: 'number', description: '优雅性分阈值（默认 0=不强制）' },
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
-      async execute(args: { project?: string; summary?: string; eleganceScore?: number; testPassRate?: number; coverageThreshold?: number; perfRegressThresholdPct?: number; eleganceThreshold?: number }) {
-        const projectDir = resolveProject(args.project, process.cwd())
-        const result = generateReport({
-          project: projectDir,
-          artifactsDir: config.artifactsDir,
-          ...(args.summary !== undefined ? { summary: args.summary } : {}),
-          ...(args.eleganceScore !== undefined ? { eleganceScore: args.eleganceScore } : {}),
-          thresholds: {
-            ...(args.testPassRate !== undefined ? { testPassRate: args.testPassRate } : {}),
-            ...(args.coverageThreshold !== undefined ? { coverageThreshold: args.coverageThreshold } : {}),
-            ...(args.perfRegressThresholdPct !== undefined ? { perfRegressThresholdPct: args.perfRegressThresholdPct } : {}),
-            ...(args.eleganceThreshold !== undefined ? { eleganceThreshold: args.eleganceThreshold } : {}),
-          },
-        })
-        return {
-          status: 'ok',
-          data: {
-            round: result.round,
-            pass: result.pass,
-            findingsCount: result.findingsCount,
-            gate: {
-              pass: result.gate.pass,
-              checks: result.gate.checks.map(check => ({ name: check.name, pass: check.pass, detail: check.detail })),
-            },
-            perfDeltas: result.perfDeltas.map(delta => ({
-              command: delta.command,
-              ...(delta.prevP50Ms !== undefined ? { prevP50Ms: delta.prevP50Ms } : {}),
-              ...(delta.nowP50Ms !== undefined ? { nowP50Ms: delta.nowP50Ms } : {}),
-              ...(delta.deltaPct !== undefined ? { deltaPct: delta.deltaPct } : {}),
-            })),
-            reportPath: result.reportPath,
-            nextStep: result.pass
-              ? '审查通过 ✅'
-              : `未通过：按报告修复（P0/P1、格式、测试、性能热点），然后重新运行 code_review_lint/format/test/bench/profile 并再次 code_review_report（第 ${result.round + 1} 轮）`,
-          },
-        }
-      },
+      execute: (args: { project?: string; summary?: string; eleganceScore?: number; testPassRate?: number; coverageThreshold?: number; perfRegressThresholdPct?: number; eleganceThreshold?: number }) => executeReport(toolConfig, args),
       presentCall: args => presentCall('Generate diagnostic report', args),
     }),
   }
@@ -394,18 +198,5 @@ export function apply(ctx: Context, config: Config): void {
       const lastClaimedIndex = decision.messages.findLastIndex(message => messages.includes(message))
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
     })
-  }
-}
-
-/** Apply prettier --write + eslint --fix in a JS/TS project. */
-async function runFormatFix(projectDir: string): Promise<void> {
-  for (const [bin, args] of [
-    ['prettier', ['--write', '.']],
-    ['eslint', ['--fix', '.', '--no-warn-ignored']],
-  ] as const) {
-    const resolved = resolveBin(projectDir, bin)
-    if (resolved !== bin) {
-      await runCommand(resolved, [...args], { cwd: projectDir, timeoutMs: 120_000 })
-    }
   }
 }

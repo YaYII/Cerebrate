@@ -1,32 +1,32 @@
 /**
- * Subprocess runner shared by every code-review tool.
+ * 所有 code-review 工具共享的子进程运行器。
  *
- * All spawned commands get a hard timeout, bounded stdout/stderr capture
- * (head+tail, so a runaway log cannot blow up the agent context) and — on
- * Linux — a peak-RSS measurement via /proc polling.
+ * 每个被 spawn 的命令都有硬超时、有界的 stdout/stderr 捕获（保留头尾、
+ * 丢弃中间，防止失控日志撑爆 agent 上下文），并在 Linux 上通过 /proc
+ * 轮询测量内存峰值 RSS。
  * @module @deepseek-ai/dsh-code-review
  */
 
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
-/** Options for {@link runCommand}. */
+/** {@link runCommand} 的选项。 */
 export interface RunOptions {
   cwd?: string
-  /** Hard kill after this many ms. Default 60 000. */
+  /** 超过此时长强杀进程。默认 60 000ms。 */
   timeoutMs?: number
-  /** Maximum captured bytes per stream; the middle is elided. Default 64 KiB. */
+  /** 每个流的最大捕获字节数；中间部分省略。默认 64 KiB。 */
   maxOutputBytes?: number
   env?: Record<string, string>
 }
 
-/** Result of one subprocess run. */
+/** 一次子进程运行的结果。 */
 export interface RunResult {
   exitCode: number | null
   stdout: string
   stderr: string
   durationMs: number
-  /** Peak resident set size in MB (Linux); undefined elsewhere or when the process died too fast. */
+  /** 内存峰值 RSS（MB，Linux）；其他平台或进程过早死亡时无。 */
   peakRssMb?: number
   timedOut: boolean
 }
@@ -34,7 +34,7 @@ export interface RunResult {
 const DEFAULT_TIMEOUT_MS = 60_000
 const DEFAULT_MAX_OUTPUT = 64 * 1024
 
-/** Capture a stream with head+tail elision. A null stream (failed spawn) is an empty capture. */
+/** 捕获一个流（头尾省略式）。null 流（spawn 失败）为空捕获。 */
 function capture(
   stream: NodeJS.ReadableStream | null,
   maxBytes: number,
@@ -52,7 +52,7 @@ function capture(
         head.push(chunk)
         headLen += len
       } else {
-        // Keep the tail for the error frame; drop the middle.
+        // 溢出：保留尾部用于错误帧，丢弃中间。
         sawOverflow = true
         const remaining = maxBytes - tailLen
         if (remaining > 0) {
@@ -76,13 +76,12 @@ function capture(
 }
 
 /**
- * Run one command to completion with timeout, output bounding and RSS
- * measurement. Never throws for a non-zero exit: the caller inspects
- * `exitCode` / `stderr`.
- * @param command - executable (may be an absolute path).
- * @param args - arguments.
- * @param options - run options.
- * @returns the captured result.
+ * 运行一条命令直到结束，带超时、输出有界与 RSS 测量。非零退出不抛错：
+ * 调用方检查 `exitCode` / `stderr`。
+ * @param command - 可执行文件（可以是绝对路径）。
+ * @param args - 参数。
+ * @param options - 运行选项。
+ * @returns 捕获的结果。
  */
 export async function runCommand(
   command: string,
@@ -111,12 +110,11 @@ export async function runCommand(
         if (peakRssMb === undefined || mb > peakRssMb) peakRssMb = mb
       }
     } catch {
-      // Process already gone or non-Linux: measurement unavailable.
+      // 进程已退出或非 Linux：测量不可用。
     }
   }, 100)
 
-  // Exit-code settlement state, declared before the timer so the timeout
-  // safety net can reach it; listeners attach immediately after.
+  // 退出码结算状态：先声明，让超时安全网可以够到；监听器立即挂接。
   let spawnError: string | undefined
   let settled = false
   let settleExit: (code: number | null) => void = () => {}
@@ -125,18 +123,16 @@ export async function runCommand(
     timedOut = true
     killed = true
     child.kill('SIGKILL')
-    // Safety net: never leave the exit promise pending, even if the kill
-    // races the stream events.
+    // 安全网：即使 kill 与流事件竞争，也绝不让退出 promise 悬挂。
     if (!settled) {
       settled = true
       settleExit(null)
     }
   }, timeoutMs)
 
-  // Register the exit-code listeners BEFORE awaiting captures: a failed spawn
-  // (ENOENT) emits 'error' early, and with no listener attached that error
-  // becomes an uncaught exception. 'close' always follows 'error' (code -2),
-  // but both are guarded by `settled`.
+  // 在等待捕获之前注册退出码监听：失败的 spawn（ENOENT）会提前触发 'error'，
+  // 此时若无监听器就会变成未捕获异常。'close' 总是跟随 'error'（code -2），
+  // 但两者都被 `settled` 保护。
   const exitCodeP = new Promise<number | null>(resolve => {
     settleExit = resolve
     child.on('error', (error: NodeJS.ErrnoException) => {
@@ -174,8 +170,8 @@ export async function runCommand(
 }
 
 /**
- * Compute the p-quantile of a sorted numeric array (linear interpolation,
- * R type 7 — the common default, e.g. NumPy `quantile`).
+ * 计算有序数组的 p 分位数（线性插值，R 类型 7——常见默认，
+ * 如 NumPy `quantile`）。
  */
 export function quantile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0

@@ -1,35 +1,34 @@
 /**
- * Language detection and per-language toolchain registry.
+ * 语言检测与按语言区分的工具链注册表。
  *
- * Modeled after MegaLinter / Super-Linter's aggregator idea: every supported
- * language registers lint/format/test/profile command templates, and one
- * language-agnostic pipeline drives them. Adding a language = adding one
- * registry entry (or a user-supplied override in plugin config).
+ * 借鉴 MegaLinter / Super-Linter 的聚合器思路：每种受支持的语言注册
+ * lint/format/test/profile 命令模板，一条与语言无关的管线驱动它们。
+ * 新增语言 = 新增一条注册表条目（或插件配置中的用户覆盖）。
  * @module @deepseek-ai/dsh-code-review
  */
 
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** A command template: executable + arguments. */
+/** 命令模板：可执行文件 + 参数。 */
 export interface ToolCommand {
   bin: string
   args: string[]
 }
 
-/** Profiler spec per language. */
+/** 每种语言的剖析器规格。 */
 export interface ProfileSpec {
   engine: 'v8-cpuprofile' | 'cprofile' | 'jfr' | 'xdebug' | 'pending'
-  /** Wrapper command that produces a profile artifact, when applicable. */
+  /** 产出剖析产物的包装命令（如适用）。 */
   command?: ToolCommand
 }
 
-/** Full toolchain for one language. */
+/** 一种语言的完整工具链。 */
 export interface Toolchain {
   language: string
-  /** File extensions that mark source files of this language. */
+  /** 标记该语言源文件的扩展名。 */
   extensions: string[]
-  /** Marker files whose presence in the project root signals this language. */
+  /** 项目根出现即代表该语言的标记文件。 */
   markers: string[]
   lint?: ToolCommand
   format?: ToolCommand
@@ -37,7 +36,7 @@ export interface Toolchain {
   profile: ProfileSpec
 }
 
-/** Built-in registry. Binaries resolve through `resolveBin` (project-local first). */
+/** 内置注册表。二进制通过 `resolveBin` 解析（项目本地优先）。 */
 export const TOOLCHAINS: Toolchain[] = [
   {
     language: 'js-ts',
@@ -89,10 +88,10 @@ export const TOOLCHAINS: Toolchain[] = [
   },
 ]
 
-/** A toolchain with its own source (built-in vs user override). */
+/** 一条工具链及其自身来源（内置 vs 用户覆盖）。 */
 export interface ResolvedToolchain {
   toolchain: Toolchain
-  /** Which tools actually resolve to a runnable binary in this project. */
+  /** 哪些工具在本项目实际解析为可运行的二进制。 */
   available: {
     lint: boolean
     format: boolean
@@ -102,11 +101,10 @@ export interface ResolvedToolchain {
 }
 
 /**
- * Detect which language(s) a project speaks, based on marker files in its
- * root. Returns built-in toolchains for every matched language (a project can
- * be polyglot).
- * @param projectDir - project root directory.
- * @returns matched toolchains.
+ * 探测项目说的是哪种语言，基于其根目录的标记文件。为每个匹配的语言
+ * 返回内置工具链（一个项目可以是多语言的）。
+ * @param projectDir - 项目根目录。
+ * @returns 匹配到的工具链。
  */
 export function detectToolchains(projectDir: string): Toolchain[] {
   const markers = safeReaddir(projectDir)
@@ -118,12 +116,11 @@ export function detectToolchains(projectDir: string): Toolchain[] {
 }
 
 /**
- * Resolve an executable: project-local `node_modules/.bin/<bin>` first, then
- * any `bin` on PATH. Used so the pipeline prefers the project's own linter
- * versions.
- * @param projectDir - project root.
- * @param bin - bare binary name.
- * @returns absolute path when found in the project, otherwise the bare name.
+ * 解析可执行文件：优先项目本地 `node_modules/.bin/<bin>`，其次 PATH 上的
+ * 任何 `bin`。用于让管线优先使用项目自己的 lint 工具版本。
+ * @param projectDir - 项目根目录。
+ * @param bin - 裸二进制名。
+ * @returns 项目内找到时返回绝对路径，否则返回裸名。
  */
 export function resolveBin(projectDir: string, bin: string): string {
   // .bin/vitest 是 #!/bin/sh shell 脚本：runCommand 直接 spawn 会把它当 JS 执行报错，
@@ -138,12 +135,12 @@ export function resolveBin(projectDir: string, bin: string): string {
 }
 
 /**
- * Check which tools of a toolchain are actually runnable: project-local
- * `node_modules/.bin` first, then any directory on PATH (system tools like
- * `mvn`, `pytest` or `phpcs` never live in node_modules).
- * @param projectDir - project root.
- * @param toolchain - the toolchain to probe.
- * @returns availability flags.
+ * 检查工具链的哪些工具实际可运行：项目本地 `node_modules/.bin` 优先，
+ * 其次 PATH 上的目录（系统工具如 `mvn`、`pytest` 或 `phpcs` 从不在
+ * node_modules 里）。
+ * @param projectDir - 项目根目录。
+ * @param toolchain - 待探测的工具链。
+ * @returns 可用性标志。
  */
 export function probeToolchain(projectDir: string, toolchain: Toolchain): ResolvedToolchain['available'] {
   const onPath = (bin: string | undefined): boolean => {

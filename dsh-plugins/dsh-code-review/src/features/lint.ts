@@ -1,9 +1,8 @@
 /**
- * Static lint / format execution and output normalization.
+ * 静态 lint / format 执行与输出归一化。
  *
- * Linter outputs (ESLint JSON, tsc text, and future checkstyle/ruff/phpcs)
- * are normalized into the language-agnostic `Finding[]` shape. Format check
- * reports which files differ.
+ * lint 输出（ESLint JSON、tsc 文本，以及未来的 checkstyle/ruff/phpcs）被
+ * 归一化为与语言无关的 `Finding[]` 形状。格式检查报告哪些文件有差异。
  * @module @deepseek-ai/dsh-code-review
  */
 
@@ -12,26 +11,26 @@ import { runCommand } from './runner'
 import { resolveBin, type Toolchain } from './languages'
 import type { Finding, Severity } from './types'
 
-/** Normalized static-check outcome. */
+/** 归一化的静态检查结果。 */
 export interface LintOutcome {
   findings: Finding[]
-  /** True when the linter ran to completion; false when the binary was missing. */
+  /** linter 是否完整运行；二进制缺失时为 false。 */
   ran: boolean
-  /** Raw exit code. */
+  /** 原始退出码。 */
   exitCode: number | null
-  /** Raw tool output tail, for the report appendix. */
+  /** 原始工具输出尾部，供报告附录使用。 */
   rawTail: string
-  /** Reason when the tool could not run. */
+  /** 工具无法运行的原因。 */
   error?: string
 }
 
-/** Normalized format-check outcome. */
+/** 归一化的格式检查结果。 */
 export interface FormatOutcome {
-  /** True when all files are formatted (or the formatter passed). */
+  /** 所有文件都已格式化（或格式化器通过）时为 true。 */
   clean: boolean
   ran: boolean
   exitCode: number | null
-  /** Files reported as needing formatting. */
+  /** 被报告为需要格式化的文件。 */
   dirtyFiles: string[]
   rawTail: string
   error?: string
@@ -40,13 +39,12 @@ export interface FormatOutcome {
 const ESLINT_SEVERITY_TO_LEVEL: Record<number, Severity> = { 2: 'P1', 1: 'P2', 0: 'P3' }
 
 /**
- * Run the toolchain's linter in `projectDir` and normalize its output.
- * ESLint (JSON) and tsc (text) parsers are wired; unknown tools fall back to
- * raw output with an explicit note so the report stays honest.
- * @param projectDir - project root.
- * @param toolchain - the matched toolchain.
- * @param tool - which linter variant to run (`lint` or `tsc`).
- * @returns normalized findings.
+ * 在 `projectDir` 运行工具链的 linter 并归一化其输出。已接入 ESLint（JSON）
+ * 与 tsc（文本）解析器；未知工具回退为带明确备注的原始输出，保证报告诚实。
+ * @param projectDir - 项目根目录。
+ * @param toolchain - 匹配到的工具链。
+ * @param tool - 运行哪个 lint 变体（`lint` 或 `tsc`）。
+ * @returns 归一化的发现列表。
  */
 export async function runLint(
   projectDir: string,
@@ -81,7 +79,7 @@ export async function runLint(
   }
 }
 
-/** Run the formatter in check mode. */
+/** 以检查模式运行格式化器。 */
 export async function runFormat(projectDir: string, toolchain: Toolchain): Promise<FormatOutcome> {
   const spec = toolchain.format
   if (!spec) {
@@ -99,7 +97,7 @@ export async function runFormat(projectDir: string, toolchain: Toolchain): Promi
   }
 }
 
-/** Parse ESLint `--format json` output. */
+/** 解析 ESLint `--format json` 输出。 */
 export function parseEslintJson(output: string, projectDir: string): Finding[] {
   try {
     const data = JSON.parse(output) as Array<{
@@ -127,7 +125,7 @@ export function parseEslintJson(output: string, projectDir: string): Finding[] {
   }
 }
 
-/** Parse `tsc --noEmit` text output: `path(line,col): error TS1234: msg`. */
+/** 解析 `tsc --noEmit` 文本输出：`path(line,col): error TS1234: msg`。 */
 export function parseTscOutput(output: string): Finding[] {
   const findings: Finding[] = []
   const pattern = /^(.+?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)$/gm
@@ -146,7 +144,7 @@ export function parseTscOutput(output: string): Finding[] {
   return findings
 }
 
-/** Parse `ruff check` text output: `path:line:col: code msg`. */
+/** 解析 `ruff check` 文本输出：`path:line:col: code msg`。 */
 export function parseRuffText(output: string, projectDir: string): Finding[] {
   const findings: Finding[] = []
   const pattern = /^(.+?):(\d+):(\d+):\s+(\w+)\s+(.+)$/gm
@@ -167,12 +165,12 @@ export function parseRuffText(output: string, projectDir: string): Finding[] {
   return findings
 }
 
-/** Heuristically extract files that need formatting from formatter output. */
+/** 启发式地从格式化器输出中提取需要格式化的文件。 */
 export function extractDirtyFiles(stdout: string, stderr: string): string[] {
   const combined = `${stdout}\n${stderr}`
   const files: string[] = []
-  // prettier --check: "path/file.ts" on its own line (non-formatted files are
-  // listed; the rest is a summary line).
+  // prettier --check："path/file.ts" 单独成行（未格式化的文件被列出；
+  // 其余是汇总行）。
   const pattern = /^([^\s]+\.(?:ts|tsx|js|jsx|mjs|cjs|vue|json|css|scss|less|md|py|java|php))$/gm
   for (const match of combined.matchAll(pattern)) {
     const candidate = match[1] ?? ''

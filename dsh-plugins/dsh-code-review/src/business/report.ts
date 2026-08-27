@@ -1,33 +1,32 @@
 /**
- * Report engine and quality gate.
+ * 报告引擎与质量门禁。
  *
- * Aggregates the per-tool artifacts (`last-*.json` under `.code-review/`),
- * compares performance against the previous round's baseline, evaluates the
- * quality gate and renders `report-<round>.md` + `report-latest.md`. The
- * structured verdict (`pass`) is what the review-loop preset acts on — the
- * loop keeps fixing until `pass` or the round cap.
+ * 聚合各工具的产物（`.code-review/` 下的 `last-*.json`），与上一轮基线
+ * 对比性能，评估质量门禁，并渲染 `report-<round>.md` + `report-latest.md`。
+ * 结构化裁决（`pass`）是审查闭环预设的行动依据——循环持续修复直到
+ * `pass` 或达到轮次上限。
  * @module @deepseek-ai/dsh-code-review
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { BenchResult, Finding, GateCheck, GateResult, GateThresholds, PerfDelta, ProfileResult, TestResult } from './types'
+import type { BenchResult, Finding, GateCheck, GateResult, GateThresholds, PerfDelta, ProfileResult, TestResult } from '../features/types'
 
-/** Options for {@link generateReport}. */
+/** {@link generateReport} 的选项。 */
 export interface ReportOptions {
-  /** Project root being reviewed (absolute or relative; resolved). */
+  /** 被审查的项目根目录（绝对或相对；会解析）。 */
   project: string
-  /** Artifacts directory name inside the project. Default `.code-review`. */
+  /** 项目内的产物目录名。默认 `.code-review`。 */
   artifactsDir?: string
-  /** Human summary attached by the AI (elegance notes, plan, ...). */
+  /** AI 附加的人类摘要（优雅性备注、计划等）。 */
   summary?: string
-  /** AI-assigned elegance score 0-100. */
+  /** AI 评定的优雅性分数 0-100。 */
   eleganceScore?: number
-  /** Quality-gate threshold overrides. */
+  /** 质量门禁阈值覆盖。 */
   thresholds?: Partial<GateThresholds>
 }
 
-/** Outcome of a report run. */
+/** 一次报告运行的结果。 */
 export interface ReportResult {
   round: number
   pass: boolean
@@ -46,7 +45,7 @@ const DEFAULT_THRESHOLDS: GateThresholds = {
   eleganceThreshold: 0,
 }
 
-/** Read a last-* artifact; returns undefined when missing. */
+/** 读取 last-* 产物；缺失时返回 undefined。 */
 export function readArtifact<T>(projectDir: string, artifactsDir: string, name: string): T | undefined {
   const path = join(projectDir, artifactsDir, name)
   if (!existsSync(path)) return undefined
@@ -58,10 +57,9 @@ export function readArtifact<T>(projectDir: string, artifactsDir: string, name: 
 }
 
 /**
- * Generate the round report: aggregate artifacts, compare with the baseline,
- * evaluate the gate, write artifacts + Markdown.
- * @param options - report options.
- * @returns the structured verdict.
+ * 生成本轮报告：聚合产物、与基线对比、评估门禁、写产物 + Markdown。
+ * @param options - 报告选项。
+ * @returns 结构化裁决。
  */
 export function generateReport(options: ReportOptions): ReportResult {
   const projectDir = resolve(options.project)
@@ -81,7 +79,7 @@ export function generateReport(options: ReportOptions): ReportResult {
   const round = (state?.round ?? 0) + 1
 
   const checks: GateCheck[] = []
-  // 1. Static findings: no P0/P1 leftovers.
+  // 1. 静态发现：无 P0/P1 遗留。
   const blockers = findings.filter(finding => finding.severity === 'P0' || finding.severity === 'P1')
   checks.push({
     name: '静态检查',
@@ -90,7 +88,7 @@ export function generateReport(options: ReportOptions): ReportResult {
       ? `无 P0/P1 问题（共 ${findings.length} 条，P2/P3 为建议级）`
       : `存在 ${blockers.length} 条阻塞问题（P0/P1）：${blockers.slice(0, 3).map(f => `${f.file}:${f.line ?? '?'} ${f.rule ?? f.message.slice(0, 40)}`).join('；')}`,
   })
-  // 2. Format.
+  // 2. 格式化。
   if (format) {
     checks.push({
       name: '格式化',
@@ -100,7 +98,7 @@ export function generateReport(options: ReportOptions): ReportResult {
   } else {
     checks.push({ name: '格式化', pass: true, detail: '未运行或未安装 formatter，跳过' })
   }
-  // 3. Tests.
+  // 3. 测试。
   if (test) {
     const rateOk = test.total > 0 && test.failed === 0 && test.passed / test.total >= thresholds.testPassRate
     checks.push({
@@ -121,7 +119,7 @@ export function generateReport(options: ReportOptions): ReportResult {
   } else {
     checks.push({ name: '测试', pass: false, detail: '未运行测试' })
   }
-  // 4. Performance vs baseline.
+  // 4. 相对基线的性能。
   const perfDeltas: PerfDelta[] = []
   if (bench) {
     const prevP50 = baseline?.[bench.command]
@@ -137,7 +135,7 @@ export function generateReport(options: ReportOptions): ReportResult {
       checks.push({ name: '性能基线', pass: true, detail: `${bench.command}: 首轮建立基线 p50=${bench.p50Ms}ms（无历史对比）` })
     }
   }
-  // 5. Elegance (advisory).
+  // 5. 优雅性（建议级）。
   if (options.eleganceScore !== undefined && thresholds.eleganceThreshold > 0) {
     checks.push({
       name: '优雅性',
@@ -148,7 +146,7 @@ export function generateReport(options: ReportOptions): ReportResult {
 
   const gate: GateResult = { pass: checks.every(check => check.pass), checks }
 
-  // Persist round state: baseline merge, state, reports.
+  // 持久化轮次状态：基线合并、state、报告。
   const mergedBaseline = { ...baseline }
   if (bench) mergedBaseline[bench.command] = bench.p50Ms
   writeFileSync(join(dir, 'baseline.json'), JSON.stringify(mergedBaseline, null, 2))
@@ -196,7 +194,7 @@ interface RenderInput {
   eleganceScore?: number
 }
 
-/** Render the Markdown diagnostic report. */
+/** 渲染 Markdown 诊断报告。 */
 export function renderMarkdown(input: RenderInput): string {
   const lines: string[] = []
   lines.push(`# 代码审查诊断报告 · 第 ${input.round} 轮`)

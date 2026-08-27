@@ -40,6 +40,22 @@ describe('架构自检规则', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
+  it('中文注释夹带英文技术词不误报（回归：dirty-file/path/error 等触发 \bfile\b 命中）', () => {
+    const dir = makeProject()
+    try {
+      writeFileSync(join(dir, 'src', 'utils', 'ok.ts'), [
+        '/**',
+        ' * 解析 tsc --noEmit 文本输出：path(line,col): error TS1234: msg。',
+        ' * 在等待捕获之前注册退出码监听：失败的 spawn（ENOENT）会提前触发 error。',
+        ' * 落盘 dirty-file 清单。',
+        ' */',
+        'export const y = 2',
+      ].join('\n'))
+      const findings = checkCommentLanguage(join(dir, 'src', 'utils', 'ok.ts'), 'src/utils/ok.ts')
+      expect(findings.some(f => f.rule === 'C1')).toBe(false)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('checkNaming 检出小驼峰违规', () => {
     const dir = makeProject()
     try {
