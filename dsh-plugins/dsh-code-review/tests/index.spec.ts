@@ -125,6 +125,7 @@ describe('test summary parsers', () => {
 
   it('extracts coverage percentages', () => {
     expect(extractCoveragePct('All files  82.35%')).toBe(82.35)
+    expect(extractCoveragePct('All files          |   68.73 |   58.92 |   71.84 |   69.89')).toBe(68.73)
     expect(extractCoveragePct('% Coverage: 91.2')).toBe(91.2)
     expect(extractCoveragePct('TOTAL   150      40     73.33%')).toBe(73.33)
   })

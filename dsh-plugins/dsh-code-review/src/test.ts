@@ -135,7 +135,10 @@ export function parseTestSummary(toolchain: Toolchain, combined: string): TestSu
 
 /** Extract a coverage percentage from common reporter outputs. */
 export function extractCoveragePct(combined: string): number | undefined {
-  // vitest coverage-v8: "All files  82.35%" / "% Coverage: 82.35".
+  // vitest coverage-v8 表格: "All files          |   68.73 |   58.92 |   71.84 |   69.89"
+  const table = /All files\s*\|\s*([\d.]+)%?/.exec(combined)
+  if (table) return Number(table[1])
+  // vitest coverage-v8 旧格式: "All files  82.35%" / "% Coverage: 82.35".
   const allFiles = /All files\s+([\d.]+)%/.exec(combined)
   if (allFiles) return Number(allFiles[1])
   const coverage = /% Coverage[:\s]+([\d.]+)%?/.exec(combined)
