@@ -1,0 +1,6 @@
+node_modules/
+lib/
+.code-cognition/
+.code-arch/
+.code-review/
+coverage/

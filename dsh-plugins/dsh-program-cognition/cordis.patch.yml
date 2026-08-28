@@ -1,0 +1,12 @@
+# dsh-program-cognition profile patch layer — insert one loader entry for the
+# plugin package. Apply by appending this insert block to
+# ~/.dsh/profiles/<profile>/cordis.patch.yml, then restart the dsh service.
+- insert:
+    - id: program-cognition
+      name: '/home/as-workstation01/Documents/project/Cerebrate/dsh-plugins/dsh-program-cognition/lib/index.js'
+      config:
+        artifactsDir: '.code-cognition'
+        injectGuidance: true
+        captureToolArgs: true
+        bufferLimit: 2000
+        sampleRate: 1

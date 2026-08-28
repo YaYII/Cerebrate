@@ -1,0 +1,15 @@
+{
+  "name": "@deepseek-ai/dsh-program-cognition",
+  "description": "认知可观测性插件：程序认知（砖块分类/日志埋点/行为时序链/认知图谱）+ Agent 行为分析（会话级 Tracing）",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "test": "vitest run",
+    "check": "node scripts/check-all.mjs"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
