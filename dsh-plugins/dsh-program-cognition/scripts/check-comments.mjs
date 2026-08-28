@@ -20,7 +20,7 @@ const ALLOWED = new Set([
   'config', 'context', 'signal', 'commit', 'content', 'handle', 'diff', 'scan',
   'AOP', 'debug', 'ESLint', 'npm', 'pnpm', 'yarn', 'tsc', 'vitest', 'tsdown',
   'function', 'interface', 'type', 'return', 'param', 'value', 'const', 'export', 'if', 'for', 'while', 'switch', 'case', 'catch', 'error', 'interrupted',
-  'async', 'await', 'import', 'default', 'true', 'false', 'undefined', 'returns', 'optional', 'callback', 'template', 'redact', 'entry', 'exit', 'phase', 'level', 'toolName', 'durationMs', 'summary', 'failed', 'kind', 'detail', 'result', 'file', 'line', 'dir', 'name', 'count', 'text', 'index', 'list', 'data', 'out', 'err', 'max', 'min', 'depth', 'node', 'edge', 'key', 'time', 'ms', 'pair', 'match', 'flush', 'buffer', 'scope', 'id', 'ts', 'args', 'msg',
+  'async', 'await', 'import', 'default', 'true', 'false', 'undefined', 'returns', 'optional', 'callback', 'template', 'redact', 'entry', 'exit', 'phase', 'level', 'toolName', 'durationMs', 'summary', 'failed', 'kind', 'detail', 'result', 'file', 'line', 'dir', 'name', 'count', 'text', 'index', 'list', 'data', 'out', 'err', 'max', 'min', 'depth', 'node', 'edge', 'key', 'time', 'ms', 'pair', 'match', 'flush', 'buffer', 'scope', 'id', 'ts', 'args', 'msg', 'content', 'block', 'string',
   'cog_scan', 'cog_instrument', 'cog_trace', 'cog_graph', 'cog_agent', 'cog_guide',
   'Brick', 'brick', 'Service', 'service', 'Util', 'util', 'Trace', 'trace',
   'Span', 'span', 'TraceID', 'traceId', 'spanId', 'callId', 'TraceEngine', 'CogEngine',

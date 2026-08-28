@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { AgentTraceBuffer, recordFromSessionEvent, DEFAULT_AGENT_TRACE_CONFIG, registerTraceBuffer, unregisterTraceBuffer, peekTraceBuffer } from '../src/features/agentTrace'
+import { AgentTraceBuffer, recordFromSessionEvent, DEFAULT_AGENT_TRACE_CONFIG, registerTraceBuffer, unregisterTraceBuffer, peekTraceBuffer, agentReportText } from '../src/features/agentTrace'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** 构造最小 session 事件。 */
@@ -106,6 +106,43 @@ describe('agentTrace 引擎 B', () => {
     expect(lines.length).toBe(1)
     expect(JSON.parse(lines[0]!).sessionId).toBe('s1')
     rmSync(file, { force: true })
+  })
+
+  it('报告幽灵路径只含被否决的步骤提议与 inbox 丢弃', () => {
+    const buffer = new AgentTraceBuffer()
+    // 正常步骤提议（failed=false，不是幽灵路径）
+    buffer.push({ key: 's1:1:1', sessionId: 's1', turn: 1, step: 1, kind: 'step-proposal', ts: 1, summary: '步骤 1 提议', failed: false })
+    // 被否决的步骤提议（failed=true）
+    buffer.push({ key: 's1:1:2', sessionId: 's1', turn: 1, step: 2, kind: 'step-proposal', ts: 2, summary: '步骤 2 被否决', failed: true })
+    // inbox 丢弃
+    buffer.push({ key: 's1:1:3', sessionId: 's1', turn: 1, step: 3, kind: 'inbox', ts: 3, summary: '消息被丢弃', failed: true })
+    const report = agentReportText(buffer.all(), 's1')
+    // 幽灵路径板块（行为流板块会显示全部记录，此处只校验幽灵路径小节）
+    const ghostSection = report.split('## 幽灵路径')[1]?.split('## 解读指引')[0] ?? ''
+    expect(ghostSection).toContain('步骤 2 被否决')
+    expect(ghostSection).toContain('消息被丢弃')
+    expect(ghostSection).not.toContain('步骤 1 提议')
+  })
+
+  it('input 提取 content block 文本而非序列化数组', () => {
+    const buffer = new AgentTraceBuffer()
+    recordFromSessionEvent(buffer, 's1', ev('user/message', {
+      turn: 1, step: 1,
+      content: [{ type: 'text', text: '修复登录问题' }],
+    }), true)
+    const rec = buffer.all()[0]!
+    expect(rec.summary).toContain('修复登录问题')
+    expect(rec.summary).not.toContain('type')
+  })
+
+  it('tool/call 的 JSON 参数解析为结构摘要', () => {
+    const buffer = new AgentTraceBuffer()
+    recordFromSessionEvent(buffer, 's1', ev('tool/call', {
+      turn: 1, step: 1, callId: 'c10', name: 'bash', arguments: '{"cmd":"ls -la"}',
+    }), true)
+    const rec = buffer.all()[0]!
+    expect(rec.summary).toContain('cmd')
+    expect(rec.summary).not.toContain('\\"')
   })
 
   it('缓冲超限时截断最旧记录', () => {

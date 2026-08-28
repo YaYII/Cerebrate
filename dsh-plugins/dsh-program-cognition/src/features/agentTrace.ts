@@ -162,6 +162,36 @@ interface ToolCallInfo { callId: string; name: string; arguments: string }
 interface ToolResultInfo { callId: string; ok: boolean; errorText?: string; message: string }
 
 /**
+ * 从消息内容块中提取文本（兼容 string / content block 数组）。
+ * @param content - 消息内容（DSH 的 content block 或纯字符串）。
+ * @returns 拼接后的文本。
+ */
+function extractText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    const parts: string[] = []
+    for (const block of content) {
+      if (block && typeof block === 'object') {
+        const b = block as Record<string, unknown>
+        if (typeof b.text === 'string') parts.push(b.text)
+        else if (typeof b.content === 'string') parts.push(b.content)
+      }
+    }
+    return parts.join('\n')
+  }
+  return ''
+}
+
+/**
+ * 解析工具参数 JSON 字符串（失败回退原文）。
+ * @param raw - 原始 arguments 字符串。
+ * @returns 解析后的值或原文。
+ */
+function parseArgs(raw: string): unknown {
+  try { return JSON.parse(raw) } catch { return raw }
+}
+
+/**
  * 从 session 事件生成行为记录（事件转发入口，由装配层调用）。
  * @param buffer - 行为缓冲。
  * @param sessionId - 会话 id。
@@ -185,17 +215,16 @@ export function recordFromSessionEvent(
       const data = event.data as { content?: unknown }
       buffer.push({
         ...base, kind: 'input', failed: false,
-        summary: summarize(data.content, ['password', 'token', 'secret']),
+        summary: summarize(extractText(data.content), ['password', 'token', 'secret']),
       })
       return true
     }
     case 'assistant/message': {
-      const data = event.data as { message?: { content?: unknown; reasoning?: unknown }; usage?: { input?: number; output?: number }; interrupted?: true }
-      const text = typeof data.message?.content === 'string' ? data.message.content : ''
+      const data = event.data as { message?: { content?: unknown }; usage?: { input?: number; output?: number }; interrupted?: true }
       const interrupted = data.interrupted === true
       buffer.push({
         ...base, kind: 'output', failed: interrupted,
-        summary: summarize(text.slice(0, 200)),
+        summary: summarize(extractText(data.message?.content).slice(0, 200)),
         ...(data.usage !== undefined
           ? { detail: { input: data.usage.input ?? 0, output: data.usage.output ?? 0 } }
           : {}),
@@ -208,7 +237,7 @@ export function recordFromSessionEvent(
       buffer.trackToolCall(data.callId, data.name, event.time)
       buffer.push({
         ...base, kind: 'tool-call', failed: false, callId: data.callId, toolName: data.name,
-        summary: captureArgs ? summarize(data.arguments) : `调用 ${data.name}`,
+        summary: captureArgs ? summarize(parseArgs(data.arguments)) : `调用 ${data.name}`,
       })
       return true
     }
@@ -259,7 +288,8 @@ export function agentReportText(records: AgentBehaviorRecord[], sessionId: strin
   }
   const toolCalls = records.filter(r => r.kind === 'tool-call')
   const failures = records.filter(r => r.failed)
-  const ghost = records.filter(r => r.kind === 'inbox' || r.kind === 'step-proposal')
+  // 幽灵路径三源：inbox 丢弃 / 被否决的步骤提议（step-proposal 且 failed）
+  const ghost = records.filter(r => r.kind === 'inbox' || (r.kind === 'step-proposal' && r.failed))
   const turns = new Set(records.map(r => r.turn)).size
   lines.push(`共 ${records.length} 条行为记录：${turns} 个 turn、${toolCalls.length} 次工具调用、${failures.length} 次异常。`)
   lines.push('')
