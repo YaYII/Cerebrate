@@ -32,7 +32,7 @@ import {
   executeCogScan, executeCogInstrument, executeCogTrace, executeCogGraph,
   executeCogAgent, executeCogGuide, type CogToolConfig,
 } from './business/tools'
-import { AgentTraceBuffer, recordFromSessionEvent, type AgentBehaviorKind } from './features/agentTrace'
+import { AgentTraceBuffer, recordFromSessionEvent, registerTraceBuffer, unregisterTraceBuffer, type AgentBehaviorKind } from './features/agentTrace'
 import { createTranslator } from './features/translate'
 
 /** 插件标识与依赖注入。 */
@@ -181,6 +181,15 @@ export function apply(ctx: Context, config: Config): void {
   })
   const traceDir = resolve(process.cwd(), config.artifactsDir)
   const traceFile = join(traceDir, 'agent-behaviors.ndjson')
+  // 注册活跃缓冲：查询侧（cog_agent）可合并未落盘的内存记录；
+  // 插件卸载时 flush 残留并注销
+  ctx.effect(() => {
+    registerTraceBuffer(traceFile, traceBuffer)
+    return () => {
+      traceBuffer.flush(traceFile)
+      unregisterTraceBuffer(traceFile)
+    }
+  })
 
   const recordAgent = (agent: Agent, rec: {
     turn: number

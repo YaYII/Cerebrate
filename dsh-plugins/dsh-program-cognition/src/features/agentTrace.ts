@@ -64,6 +64,35 @@ export const DEFAULT_AGENT_TRACE_CONFIG: AgentTraceConfig = {
   sampleRate: 1,
 }
 
+/** 活跃行为缓冲注册表（键 = 落盘文件绝对路径），供查询侧合并内存记录。 */
+const traceBuffers = new Map<string, AgentTraceBuffer>()
+
+/**
+ * 注册活跃缓冲（装配层在 apply 时调用）。
+ * @param filePath - 该缓冲对应的落盘文件绝对路径。
+ * @param buffer - 行为缓冲实例。
+ */
+export function registerTraceBuffer(filePath: string, buffer: AgentTraceBuffer): void {
+  traceBuffers.set(resolve(filePath), buffer)
+}
+
+/**
+ * 注销缓冲（装配层在插件卸载时调用）。
+ * @param filePath - 落盘文件绝对路径。
+ */
+export function unregisterTraceBuffer(filePath: string): void {
+  traceBuffers.delete(resolve(filePath))
+}
+
+/**
+ * 读取活跃缓冲中的未落盘记录（查询侧合并用）。
+ * @param filePath - 落盘文件绝对路径。
+ * @returns 缓冲内全部记录（未落盘部分）。
+ */
+export function peekTraceBuffer(filePath: string): AgentBehaviorRecord[] {
+  return traceBuffers.get(resolve(filePath))?.all() ?? []
+}
+
 /** 行为缓冲（按会话管理）。 */
 export class AgentTraceBuffer {
   private records: AgentBehaviorRecord[] = []

@@ -17,7 +17,8 @@ import { instrumentProject, revertProject } from '../features/instrument'
 import { runCogTrace, traceReportText, findEntry, type TraceRecord } from '../features/collector'
 import { buildGraph, sliceGraph, graphReportText, type CogGraph } from '../features/graph'
 import {
-  recordFromSessionEvent, agentReportText, type AgentBehaviorRecord, type AgentTraceBuffer,
+  recordFromSessionEvent, agentReportText, peekTraceBuffer,
+  type AgentBehaviorRecord, type AgentTraceBuffer,
 } from '../features/agentTrace'
 import {
   traceTranslatePrompt, agentTranslatePrompt, templateTranslate, type TranslateFn,
@@ -227,6 +228,12 @@ export async function executeCogAgent(
 ): Promise<Record<string, JsonValue>> {
   const projectDir = resolveProject(args.project, process.cwd())
   let records = readAgentRecords(projectDir, config.artifactsDir)
+  // 合并活跃缓冲中的未落盘记录（引擎 B 活跃会话的记录尚在内存）
+  const memPath = resolve(projectDir, config.artifactsDir, 'agent-behaviors.ndjson')
+  const mem = peekTraceBuffer(memPath)
+  if (mem.length > 0) {
+    records = [...records, ...mem].sort((a, b) => a.ts - b.ts)
+  }
   if (args.sessionId) records = records.filter(r => r.sessionId === args.sessionId)
   if (args.turn !== undefined) records = records.filter(r => r.turn === args.turn)
   if (args.tool) records = records.filter(r => r.toolName === args.tool)

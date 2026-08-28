@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { AgentTraceBuffer, recordFromSessionEvent, DEFAULT_AGENT_TRACE_CONFIG } from '../src/features/agentTrace'
+import { AgentTraceBuffer, recordFromSessionEvent, DEFAULT_AGENT_TRACE_CONFIG, registerTraceBuffer, unregisterTraceBuffer, peekTraceBuffer } from '../src/features/agentTrace'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** 构造最小 session 事件。 */
@@ -115,5 +115,25 @@ describe('agentTrace 引擎 B', () => {
     }
     expect(buffer.length).toBe(3)
     expect(buffer.all()[0]!.step).toBe(3)
+  })
+
+  it('注册表：查询侧可读到活跃缓冲的未落盘记录', () => {
+    const file = join(tmpdir(), `cog-reg-${Date.now()}.ndjson`)
+    const buffer = new AgentTraceBuffer()
+    registerTraceBuffer(file, buffer)
+    try {
+      recordFromSessionEvent(buffer, 's1', ev('tool/call', {
+        turn: 1, step: 1, callId: 'c9', name: 'bash', arguments: '{}',
+      }), true)
+      // 未 flush 也能查到（合并内存记录）
+      const mem = peekTraceBuffer(file)
+      expect(mem.length).toBe(1)
+      expect(mem[0]!.toolName).toBe('bash')
+      // 未注册路径返回空
+      expect(peekTraceBuffer(file + '.none')).toEqual([])
+    } finally {
+      unregisterTraceBuffer(file)
+      rmSync(file, { force: true })
+    }
   })
 })
