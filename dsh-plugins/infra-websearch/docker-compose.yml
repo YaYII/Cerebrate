@@ -1,0 +1,16 @@
+# 本地 AI 搜索 + 网页解析服务编排
+# ======================================
+# 1. searxng  : 自托管元搜索引擎（聚合 Google/Bing/DDG 等），提供 JSON API
+# 2. crawl4ai : LLM 友好网页爬虫/解析器（HTML → Markdown/结构化数据）
+# ======================================
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: dsh-searxng
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8080/
+    restart: unless-stopped

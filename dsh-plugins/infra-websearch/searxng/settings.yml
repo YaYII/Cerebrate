@@ -1,0 +1,36 @@
+# SearXNG 配置（AI 消费版）
+# 仅绑定本机回环，开启 JSON 输出供 dsh-web-search 插件消费。
+use_default_settings: true
+
+server:
+  secret_key: "dsh-local-search-secret-2026"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh-CN"
+
+# 常用引擎（元搜索聚合）
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
