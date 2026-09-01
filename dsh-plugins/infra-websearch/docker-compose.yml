@@ -8,9 +8,9 @@ services:
     image: searxng/searxng:latest
     container_name: dsh-searxng
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:18080:8080"
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      SEARXNG_BASE_URL: http://127.0.0.1:8080/
+      SEARXNG_BASE_URL: http://127.0.0.1:18080/
     restart: unless-stopped

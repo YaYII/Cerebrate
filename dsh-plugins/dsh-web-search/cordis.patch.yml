@@ -4,7 +4,7 @@
     - id: dsh-web-search
       name: '@deepseek-ai/dsh-web-search'
       config:
-        searxngUrl: 'http://127.0.0.1:8080'
+        searxngUrl: 'http://127.0.0.1:18080'
         crawl4aiUrl: 'http://127.0.0.1:11235'
         crawl4aiToken: 'dsh-local-crawl-token-2026'
         jinaReaderUrl: 'https://r.jina.ai'

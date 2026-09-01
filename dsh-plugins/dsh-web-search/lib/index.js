@@ -2921,211 +2921,163 @@ function scopeTarget(base, key) {
 	return carrier;
 }
 //#endregion
-//#region ../../../deepseek-harness/packages/util/timeout/lib/index.js
-/** Largest delay Node schedules without clamping it to one millisecond. */
-const MAX_TIMER_DELAY_MS = 2147483647;
-//#endregion
-//#region ../../../deepseek-harness/packages/llm/llm/lib/index.js
+//#region ../../../deepseek-harness/packages/typert/protocol/lib/index.js
+/** The one Remote failure class shared by owners, the Gateway, and consumers. */
 /**
-* dsh-llm's owned branded ids: tool-call correlation and provider request
-* diagnostics.
-*
-* The `Branded<B>` primitive itself lives in `@deepseek-ai/dsh-brand` (a
-* zero-dependency type-only package) so every owner of a cross-boundary id can
-* brand it without depending on dsh-llm; see that package's README for the
-* nominal-typing policy.
-*
-* @module @deepseek-ai/dsh-llm/brand
+* One Remote call failure: a real Error carrying its stable code and typed
+* details. Owners throw it at the failure point; the Host Gateway encodes it
+* onto the wire unchanged; the Client face rebuilds an instance for the
+* `RemoteResult` error branch, so `throw result.error` keeps throw semantics.
+* Discrimination is always by `code`, never by instanceof.
 */
-/**
-* Brand a message identifier.
-* @param id - the opaque message identifier.
-* @returns the same string, branded; no validation is performed.
-*/
-function MessageId(id) {
-	return id;
-}
-/**
-* Brand a string as a {@link CallId}.
-* @param id - the provider-issued (or synthesized) call id.
-* @returns the same string, branded; no validation is performed.
-*/
-function CallId(id) {
-	return id;
-}
-/**
-* Deep-freeze a value in place with an iterative traversal, guarding cycles,
-* so later mutation throws without imposing a JavaScript call-stack depth cap.
-* {@link AbortSignal} objects are deliberately skipped because they are the
-* request's live cancellation channel and freezing them breaks abort.
-* @param value - the value to freeze in place.
-* @returns the same value, frozen.
-*/
-function deepFreeze(value) {
-	const seen = /* @__PURE__ */ new WeakSet();
-	const pending = [{
-		kind: "visit",
-		node: value
-	}];
-	while (pending.length > 0) {
-		const task = pending.pop();
-		/* v8 ignore next -- the loop condition guarantees one pending task. */
-		if (task === void 0) continue;
-		if (task.kind === "property") {
-			pending.push({
-				kind: "visit",
-				node: task.source[task.key]
-			});
-			continue;
-		}
-		const node = task.node;
-		if (node === null || typeof node !== "object") continue;
-		if (node instanceof AbortSignal) continue;
-		if (seen.has(node)) continue;
-		seen.add(node);
-		Object.freeze(node);
-		const keys = Object.keys(node);
-		for (let index = keys.length - 1; index >= 0; index--) {
-			const key = keys[index];
-			/* v8 ignore next -- the loop is bounded by the captured key count. */
-			if (key === void 0) continue;
-			pending.push({
-				kind: "property",
-				source: node,
-				key
-			});
-		}
-	}
-	return value;
-}
-/**
-* Detach and deep-freeze a message whose identity already exists.
-* @param message - complete message, including its stable identity.
-* @returns an immutable snapshot that preserves the identity.
-*/
-function freezeMessage(message) {
-	return deepFreeze(structuredClone(message));
-}
-/**
-* Create one identified message and freeze it before publication.
-* @param input - complete role, content, and source for a new message.
-* @returns an immutable message with a fresh stable identity.
-*/
-function createMessage(input) {
-	return freezeMessage({
-		...input,
-		id: MessageId(crypto.randomUUID())
-	});
-}
-/**
-* Create one identified user-role message and freeze it before publication.
-* @param input - complete content and source for a new user message.
-* @returns an immutable user message with a fresh stable identity.
-*/
-function createUserMessage(input) {
-	return createMessage({
-		...input,
-		role: "user"
-	});
-}
-/**
-* Harness error base with a stable machine-routable code and chained cause.
-* Package errors extend it so tool results and replay can retain failure class.
-* @module @deepseek-ai/dsh-llm/error
-*/
-/**
-* Base class for all harness errors. Carries a `code` (stable, programmatic —
-* e.g. `NO_ADAPTER`, `INVALID_ARGS`, `INVARIANT`) distinct from the
-* human-readable `message`, and supports `cause` chaining via the standard
-* `ErrorOptions`. `name` defaults to the subclass constructor name.
-*/
-var HarnessError = class extends Error {
-	/** Stable machine-routable failure class (e.g. `RATE_LIMIT`); route on this, never by parsing `message`. */
+var RemoteError = class extends Error {
 	code;
-	constructor(message, code, options) {
+	details;
+	/** Structural marker: cross-realm/bundle identification never uses instanceof. */
+	isDSHRemoteError = true;
+	/**
+	* @param code - stable failure code declared in {@link RemoteErrorDetailsMap}.
+	* @param message - human diagnostic carried across the wire.
+	* @param details - structured payload typed by the code.
+	* @param options - standard Error options (`cause` survives in-process only).
+	*/
+	constructor(code, message, details, options) {
 		super(message, options);
 		this.code = code;
-		this.name = new.target.name;
+		this.details = details;
+		this.name = "RemoteError";
 	}
 };
 /**
-* Canonical provider-neutral code for a response that completed normally but
-* carried no content blocks at all. Providers occasionally emit a degenerate
-* completion (a terminal stop with zero output); adapters classify it as this
-* failure instead of yielding an empty assistant message, because an empty
-* message silently ends the turn with nothing for the user or the loop to act
-* on. The attempt produced nothing durable, so retry policy treats it as safe
-* to repeat.
+* Remote decorators and explicit Gateway bindings backed by versioned
+* descriptors carried on decorated class prototypes. Strict reflection
+* remains a Typert compiler responsibility.
+* @module @deepseek-ai/dsh-typert-protocol
 */
-const EMPTY_RESPONSE_CODE = "EMPTY_RESPONSE";
-new RegExp(String.raw`(?:^|[^a-z0-9])context[\s_-](?:length|window)[\s_-]` + String.raw`(?:exceed(?:ed|s)?|overflow(?:ed)?|limit[\s_-]exceeded)(?:$|[^a-z0-9])`, "i");
-new RegExp(String.raw`\b(?:request|prompt|input|messages?)\s+(?:is\s+|are\s+)?` + String.raw`too\s+(?:large|long)\s+for\s+(?:(?:this|the)\s+)?` + String.raw`(?:model(?:'s)?\s+)?context(?:\s+window)?\b`, "i");
-new RegExp(String.raw`\b(?:input|prompt|request|messages?)\b.{0,40}` + String.raw`\b(?:exceed(?:s|ed)?|overflows?|is\s+larger\s+than)\b.{0,40}` + String.raw`\b(?:the\s+)?(?:model(?:'s)?\s+)?context(?:\s+(?:length|window))?\b`, "i");
+const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/;
 /**
-* Provider-owned request-retry policy configuration and resolution.
-*
-* Adapters expose one resolved policy per registered provider route; the
-* optional dsh-llm-retry plugin executes it on the agent's failed-step extension point.
-*
-* @module @deepseek-ai/dsh-llm/retry-policy
+* Test one generated Remote name against the Connection endpoint grammar.
+* @param value - namespace, method, lookup, or Context segment.
+* @returns whether the value can cross the shared RPC carrier unchanged.
 */
-const DEFAULT_MAX_RETRIES = 5;
-const DEFAULT_INITIAL_DELAY_MS = 500;
-const DEFAULT_MAX_DELAY_MS = 1e4;
-const DEFAULT_JITTER_RATIO = .1;
-const DEFAULT_RETRYABLE_CODES = Object.freeze([
-	EMPTY_RESPONSE_CODE,
-	"RATE_LIMIT",
-	"SERVER",
-	"TIMEOUT",
-	"TRANSPORT"
-]);
-const backoffSchema = Schema.object({
-	initialDelayMs: Schema.number().max(MAX_TIMER_DELAY_MS).default(DEFAULT_INITIAL_DELAY_MS),
-	maxDelayMs: Schema.number().max(MAX_TIMER_DELAY_MS).default(DEFAULT_MAX_DELAY_MS),
-	jitterRatio: Schema.number().min(0).max(1).default(DEFAULT_JITTER_RATIO)
-});
-const normalPolicySchema = Schema.object({
-	mode: Schema.const("normal").required(),
-	maxRetries: Schema.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_RETRIES),
-	retryableCodes: Schema.array(Schema.string()).default([...DEFAULT_RETRYABLE_CODES]),
-	backoff: backoffSchema
-});
-const alwaysPolicySchema = Schema.object({
-	mode: Schema.const("always").required(),
-	backoff: backoffSchema
-});
-Schema.union([normalPolicySchema, alwaysPolicySchema]);
+function isTypertRemoteSegment(value) {
+	return value !== "." && value !== ".." && TYPERT_REMOTE_SEGMENT_PATTERN.test(value);
+}
+const REMOTE_METHOD_DESCRIPTOR = "@deepseek-ai/dsh-typert-protocol/remote-methods";
 /**
-* Centralize the non-secret product identity every provider request sends as `User-Agent`, keeping
-* adapters from drifting. See
-* `.agents/notes/implemented/architecture/2026-06-21-mandatory-app-attribution-headers.md`.
-*
-* App-attribution vocabulary for provider requests.
-* @module @deepseek-ai/dsh-llm/attribution
+* Bind one visible Service field to a Cordis key and Remote namespace.
+* @param service - owning Service instance, normally `this`.
+* @param serviceKey - exact Cordis service key.
+* @param options - optional distinct wire namespace.
+* @returns a frozen, inspectable binding with no compiler-injected metadata.
 */
-const { version } = createRequire(import.meta.url)("../package.json");
+function bindTypertRemote(service, serviceKey, options = {}) {
+	validateName("service key", serviceKey);
+	const namespace = options.namespace ?? serviceKey;
+	validateName("namespace", namespace);
+	return Object.freeze({
+		service,
+		serviceKey,
+		namespace
+	});
+}
+/** Cordis Service base that exposes its registered name through Typert Gateway. */
+var TypertRemoteService = class extends Service {
+	/** Visible binding consumed by the Gateway's source-mode discovery. */
+	typertRemote;
+	/**
+	* Register the Service and bind the same key to Typert Gateway.
+	* @param ctx - owning Cordis Context.
+	* @param serviceKey - exact Cordis service key and default wire namespace.
+	* @param options - optional distinct wire namespace.
+	*/
+	constructor(ctx, serviceKey, options = {}) {
+		super(ctx, serviceKey);
+		this.typertRemote = bindTypertRemote(this, this.name, options);
+	}
+};
+function Remote(methodExportOrOptions, context) {
+	if (typeof methodExportOrOptions === "string") {
+		validateName("Remote export name", methodExportOrOptions);
+		return remoteDecorator({ kind: "direct" }, void 0, methodExportOrOptions);
+	}
+	if (typeof methodExportOrOptions === "object") {
+		if (remoteOptionMode(methodExportOrOptions) !== "stream" || Reflect.ownKeys(methodExportOrOptions).length !== 1) throw new TypeError("typert-protocol: Remote options must contain exactly mode: \"stream\"");
+		return remoteDecorator({ kind: "direct" }, "stream");
+	}
+	if (context === void 0) throw new TypeError("typert-protocol: Remote decorator context is missing");
+	addMarkerInitializer(context, { kind: "direct" });
+}
+function remoteOptionMode(options) {
+	return Reflect.get(options, "mode");
+}
+function remoteDecorator(invocation, mode, exportName) {
+	return function(_method, context) {
+		addMarkerInitializer(context, invocation, mode, exportName);
+	};
+}
+function readRemoteMethodDescriptor(prototype) {
+	const property = Object.getOwnPropertyDescriptor(prototype, REMOTE_METHOD_DESCRIPTOR);
+	if (property === void 0) return void 0;
+	const descriptor = property.value;
+	if (descriptor === null || typeof descriptor !== "object") throw new TypeError("typert-protocol: Remote method descriptor must be an object");
+	const version = Reflect.get(descriptor, "version");
+	if (version !== 1) throw new TypeError(`typert-protocol: unsupported Remote method descriptor version ${String(version)}`);
+	const methods = Reflect.get(descriptor, "methods");
+	if (!Array.isArray(methods)) throw new TypeError("typert-protocol: Remote method descriptor methods must be an array");
+	return descriptor;
+}
+function addMarkerInitializer(context, invocation, mode, exportName) {
+	if (context.private || context.static || typeof context.name !== "string") throw new TypeError("typert-protocol: Remote decorators require a public instance method with a string name");
+	const method = context.name;
+	context.addInitializer(function() {
+		const prototype = Object.getPrototypeOf(this);
+		if (prototype === null) throw new TypeError(`typert-protocol: cannot mark Remote method "${method}" on an object without a prototype`);
+		mark(prototype, method, invocation, mode, exportName);
+	});
+}
+function mark(prototype, method, invocation, mode, exportName) {
+	const descriptor = readRemoteMethodDescriptor(prototype);
+	const marker = Object.freeze({
+		method,
+		...exportName === void 0 || exportName === method ? {} : { exportName },
+		...mode === void 0 ? {} : { mode },
+		invocation: Object.freeze(invocation)
+	});
+	const current = descriptor?.methods.find((candidate) => candidate.method === method);
+	if (current !== void 0) {
+		if (current.exportName === marker.exportName && current.mode === marker.mode && sameInvocation(current.invocation, invocation)) return;
+		throw new Error(`typert-protocol: Remote method "${method}" has conflicting invocation markers`);
+	}
+	Object.defineProperty(prototype, REMOTE_METHOD_DESCRIPTOR, {
+		configurable: true,
+		value: Object.freeze({
+			version: 1,
+			methods: Object.freeze([...descriptor?.methods ?? [], marker])
+		})
+	});
+}
+function sameInvocation(left, right) {
+	if (left.kind === "direct") return right.kind === "direct";
+	if (right.kind === "direct") return false;
+	return left.context === right.context;
+}
+function validateName(subject, value) {
+	if (!isTypertRemoteSegment(value)) throw new TypeError(`typert-protocol: ${subject} must contain only RPC endpoint segment characters`);
+}
+//#endregion
+//#region ../../../deepseek-harness/packages/util/values/lib/index.js
+/** Duplicate-install-safe JSON and immutable-value helpers. @module @deepseek-ai/dsh-util-values */
 /**
-* Exhaustiveness helper for closed core unions. Use {@link assertNever} at the default branch so a
-* new variant fails compilation at every required handler. Do not use it for declaration-merged
-* unions such as session events or content blocks: handle known variants and explicitly fall
-* through because plugins may add valid unknown cases.
-* @module @deepseek-ai/dsh-llm/never
-*/
-/**
-* Mark an unreachable closed-union branch. A newly unhandled typed variant fails at the call site;
-* a value that escaped its type throws with diagnostics at runtime.
-* @param value - the impossible value; typed `never` so an unhandled variant fails compilation at the call site.
-* @param context - optional label (e.g. the switch site) prefixed into the throw message.
-* @returns never — it always throws, with the offending value JSON-rendered in the message.
+* Mark an unreachable closed-union branch.
+* @param value - impossible value; an unhandled typed variant fails at the call site.
+* @param context - optional switch-site label included in the failure message.
+* @returns never; a runtime value that escaped its type always throws.
 */
 function assertNever(value, context) {
 	const rendered = JSON.stringify(value) ?? String(value);
 	throw new Error(`unreachable variant${context ? ` in ${context}` : ""}: ${rendered}`);
 }
-//#endregion
-//#region ../../../deepseek-harness/packages/core/session/lib/index.js
-/** Lossless-JSON validation and detached snapshots for durable session data. @module @deepseek-ai/dsh-session/json */
 /** Whether a realm-owned intrinsic prototype is backed by its native constructor. */
 function hasIntrinsicConstructor$1(prototype, name) {
 	const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value;
@@ -3268,34 +3220,1121 @@ function walkJsonValue(value, detach) {
 	return detach ? root : true;
 }
 /**
-* Validate and detach lossless JSON in one read per property, so a stateful
-* getter cannot change between validation and copying. Traversal is iterative,
-* so valid nesting is bounded by available memory rather than the JavaScript
-* call stack. Accepts ordinary arrays, plain or null-prototype objects, and JSON
-* scalars; rejects sparse, cyclic, exotic, negative-zero, and non-finite values.
-* Getter throws propagate.
-*
-* @param value - the candidate value to validate and detach.
-* @returns the detached snapshot, or `undefined` when the value is not
-*   losslessly JSON-serializable.
+* Validate and detach lossless JSON in one read per property.
+* @param value - candidate value to validate and detach.
+* @returns the detached snapshot, or `undefined` when the value is not losslessly JSON-serializable.
 */
 function snapshotJsonValue(value) {
 	return walkJsonValue(value, true);
 }
 /**
-* Test the same lossless JSON boundary as {@link snapshotJsonValue} without
-* detaching it. Only own enumerable string properties participate; `toJSON`
-* is ignored and getters run, so persistence boundaries use the snapshotter.
-* @param value - the candidate event data to test.
-* @returns whether `value` survives JSON round-trip losslessly.
+* Test the same lossless JSON rules as {@link snapshotJsonValue} without detaching the value.
+* @param value - candidate value to test.
+* @returns whether the value survives a JSON round trip without loss.
 */
 function isJsonValue(value) {
 	return walkJsonValue(value, false) === true;
 }
+/**
+* Deep-freeze an object graph in place while leaving live AbortSignal objects mutable.
+* @param value - value to freeze.
+* @returns the same value after every reachable enumerable child is frozen.
+*/
+function deepFreeze(value) {
+	const seen = /* @__PURE__ */ new WeakSet();
+	const pending = [{
+		kind: "visit",
+		node: value
+	}];
+	while (pending.length > 0) {
+		const task = pending.pop();
+		/* v8 ignore next -- the loop condition guarantees one pending task. */
+		if (task === void 0) continue;
+		if (task.kind === "property") {
+			pending.push({
+				kind: "visit",
+				node: task.source[task.key]
+			});
+			continue;
+		}
+		const node = task.node;
+		if (node === null || typeof node !== "object") continue;
+		if (node instanceof AbortSignal) continue;
+		if (seen.has(node)) continue;
+		seen.add(node);
+		Object.freeze(node);
+		const keys = Object.keys(node);
+		for (let index = keys.length - 1; index >= 0; index--) {
+			const key = keys[index];
+			/* v8 ignore next -- the loop is bounded by the captured key count. */
+			if (key === void 0) continue;
+			pending.push({
+				kind: "property",
+				source: node,
+				key
+			});
+		}
+	}
+	return value;
+}
+//#endregion
+//#region ../../../deepseek-harness/packages/util/crypto/lib/index.js
+/**
+* Random v4 UUID, minted from `crypto.getRandomValues`.
+* @returns the UUID string.
+*/
+function randomUUID() {
+	const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+	const hex = Array.from(bytes, (byte, index) => {
+		return (index === 6 ? byte & 15 | 64 : index === 8 ? byte & 63 | 128 : byte).toString(16).padStart(2, "0");
+	}).join("");
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+//#endregion
+//#region ../../../deepseek-harness/packages/util/brand/lib/index.js
+/**
+* Duplicate-install-safe nominal string helpers.
+*
+* A brand makes structurally-identical strings non-interchangeable at the type
+* level: a `SessionId` cannot be passed where a `ToolCallId` is expected, even
+* though both are plain strings at runtime. Comparison, logging, and
+* serialization all behave as ordinary strings.
+*
+* This package owns no concrete id and keeps no runtime identity or mutable
+* state, so independently installed copies produce interchangeable values.
+*
+* @module @deepseek-ai/dsh-brand
+*/
+/**
+* Apply a compile-time string brand without changing the value.
+* @param value - string admitted by the domain that owns the target brand.
+* @returns the same string with the requested compile-time brand.
+*/
+function brandString(value) {
+	return value;
+}
+//#endregion
+//#region ../../../deepseek-harness/packages/util/timeout/lib/index.js
+/** Largest delay Node schedules without clamping it to one millisecond. */
+const MAX_TIMER_DELAY_MS = 2147483647;
+//#endregion
+//#region ../../../deepseek-harness/packages/llm/llm/lib/index.js
+/**
+* Detach and deep-freeze a message whose identity already exists.
+* @param message - complete message, including its stable identity.
+* @returns an immutable snapshot that preserves the identity.
+*/
+function freezeMessage(message) {
+	return deepFreeze(structuredClone(message));
+}
+/**
+* Create one identified message and freeze it before publication.
+* @param input - complete role, content, and source for a new message.
+* @returns an immutable message with a fresh stable identity.
+*/
+function createMessage(input) {
+	return freezeMessage({
+		...input,
+		id: brandString(randomUUID())
+	});
+}
+/**
+* Create one identified user-role message and freeze it before publication.
+* @param input - complete content and source for a new user message.
+* @returns an immutable user message with a fresh stable identity.
+*/
+function createUserMessage(input) {
+	return createMessage({
+		...input,
+		role: "user"
+	});
+}
+/**
+* Harness error base with a stable machine-routable code and chained cause.
+* Package errors extend it so tool results and replay can retain failure class.
+* @module @deepseek-ai/dsh-llm/error
+*/
+/**
+* Base class for all harness errors. Carries a `code` (stable, programmatic —
+* e.g. `NO_ADAPTER`, `INVALID_ARGS`, `INVARIANT`) distinct from the
+* human-readable `message`, and supports `cause` chaining via the standard
+* `ErrorOptions`. `name` defaults to the subclass constructor name.
+*/
+var HarnessError = class extends Error {
+	/** Stable machine-routable failure class (e.g. `RATE_LIMIT`); route on this, never by parsing `message`. */
+	code;
+	constructor(message, code, options) {
+		super(message, options);
+		this.code = code;
+		this.name = new.target.name;
+	}
+};
+/**
+* Canonical provider-neutral code for a response that completed normally but
+* carried no content blocks at all. Providers occasionally emit a degenerate
+* completion (a terminal stop with zero output); adapters classify it as this
+* failure instead of yielding an empty assistant message, because an empty
+* message silently ends the turn with nothing for the user or the loop to act
+* on. The attempt produced nothing durable, so retry policy treats it as safe
+* to repeat.
+*/
+const EMPTY_RESPONSE_CODE = "EMPTY_RESPONSE";
+new RegExp(String.raw`(?:^|[^a-z0-9])context[\s_-](?:length|window)[\s_-]` + String.raw`(?:exceed(?:ed|s)?|overflow(?:ed)?|limit[\s_-]exceeded)(?:$|[^a-z0-9])`, "i");
+new RegExp(String.raw`\b(?:request|prompt|input|messages?)\s+(?:is\s+|are\s+)?` + String.raw`too\s+(?:large|long)\s+for\s+(?:(?:this|the)\s+)?` + String.raw`(?:model(?:'s)?\s+)?context(?:\s+window)?\b`, "i");
+new RegExp(String.raw`\b(?:input|prompt|request|messages?)\b.{0,40}` + String.raw`\b(?:exceed(?:s|ed)?|overflows?|is\s+larger\s+than)\b.{0,40}` + String.raw`\b(?:the\s+)?(?:model(?:'s)?\s+)?context(?:\s+(?:length|window))?\b`, "i");
+/**
+* Provider-owned request-retry policy configuration and resolution.
+*
+* Adapters expose one resolved policy per registered provider route; the
+* optional dsh-llm-retry plugin executes it on the agent's failed-step extension point.
+*
+* @module @deepseek-ai/dsh-llm/retry-policy
+*/
+const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_INITIAL_DELAY_MS = 500;
+const DEFAULT_MAX_DELAY_MS = 1e4;
+const DEFAULT_JITTER_RATIO = .1;
+const DEFAULT_RETRYABLE_CODES = Object.freeze([
+	EMPTY_RESPONSE_CODE,
+	"RATE_LIMIT",
+	"SERVER",
+	"TIMEOUT",
+	"TRANSPORT"
+]);
+const backoffSchema = Schema.object({
+	initialDelayMs: Schema.number().max(MAX_TIMER_DELAY_MS).default(DEFAULT_INITIAL_DELAY_MS),
+	maxDelayMs: Schema.number().max(MAX_TIMER_DELAY_MS).default(DEFAULT_MAX_DELAY_MS),
+	jitterRatio: Schema.number().min(0).max(1).default(DEFAULT_JITTER_RATIO)
+});
+const normalPolicySchema = Schema.object({
+	mode: Schema.const("normal").required(),
+	maxRetries: Schema.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_RETRIES),
+	retryableCodes: Schema.array(Schema.string()).default([...DEFAULT_RETRYABLE_CODES]),
+	backoff: backoffSchema
+});
+const alwaysPolicySchema = Schema.object({
+	mode: Schema.const("always").required(),
+	backoff: backoffSchema
+});
+Schema.union([normalPolicySchema, alwaysPolicySchema]);
+const NORMAL_POLICY_KEYS = new Set([
+	"mode",
+	"maxRetries",
+	"retryableCodes",
+	"backoff"
+]);
+const ALWAYS_POLICY_KEYS = new Set([
+	"mode",
+	"maxRetries",
+	"retryableCodes",
+	"backoff"
+]);
+const BACKOFF_KEYS = new Set([
+	"initialDelayMs",
+	"maxDelayMs",
+	"jitterRatio"
+]);
+function validateKeys(value, allowed, path) {
+	for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`${path}: unknown key "${key}"`);
+}
+function resolveBackoff(config, path) {
+	if (config !== void 0) validateKeys(config, BACKOFF_KEYS, path);
+	const initialDelayMs = config?.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS;
+	const maxDelayMs = config?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
+	const jitterRatio = config?.jitterRatio ?? DEFAULT_JITTER_RATIO;
+	if (!Number.isFinite(initialDelayMs) || initialDelayMs <= 0 || initialDelayMs > 2147483647) throw new Error(`${path}.initialDelayMs must be a positive finite number no greater than ${MAX_TIMER_DELAY_MS}`);
+	if (!Number.isFinite(maxDelayMs) || maxDelayMs <= 0 || maxDelayMs > 2147483647) throw new Error(`${path}.maxDelayMs must be a positive finite number no greater than ${MAX_TIMER_DELAY_MS}`);
+	if (initialDelayMs > maxDelayMs) throw new Error(`${path}.initialDelayMs must be less than or equal to maxDelayMs`);
+	if (!Number.isFinite(jitterRatio) || jitterRatio < 0 || jitterRatio > 1) throw new Error(`${path}.jitterRatio must be between 0 and 1`);
+	return Object.freeze({
+		initialDelayMs,
+		maxDelayMs,
+		jitterRatio
+	});
+}
+/**
+* Validate, default, and detach one provider-owned retry policy.
+* @param config - optional provider configuration; omission selects normal defaults.
+* @param path - diagnostic path naming the provider config that owns the value.
+* @returns an immutable policy safe to capture in provider registration state.
+*/
+function resolveRetryPolicy(config, path) {
+	if (config === void 0) return Object.freeze({
+		mode: "normal",
+		maxRetries: DEFAULT_MAX_RETRIES,
+		retryableCodes: DEFAULT_RETRYABLE_CODES,
+		...resolveBackoff(void 0, `${path}.backoff`)
+	});
+	switch (config.mode) {
+		case "normal": {
+			validateKeys(config, NORMAL_POLICY_KEYS, path);
+			const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+			const retryableCodes = config.retryableCodes ?? [...DEFAULT_RETRYABLE_CODES];
+			if (!Number.isSafeInteger(maxRetries) || maxRetries < 0) throw new Error(`${path}.maxRetries must be a non-negative safe integer`);
+			if (retryableCodes.length === 0) throw new Error(`${path}.retryableCodes must not be empty`);
+			if (retryableCodes.some((code) => typeof code !== "string" || code.length === 0)) throw new Error(`${path}.retryableCodes must contain only non-empty strings`);
+			if (new Set(retryableCodes).size !== retryableCodes.length) throw new Error(`${path}.retryableCodes must not contain duplicates`);
+			return Object.freeze({
+				mode: "normal",
+				maxRetries,
+				retryableCodes: Object.freeze([...retryableCodes]),
+				...resolveBackoff(config.backoff, `${path}.backoff`)
+			});
+		}
+		case "always":
+			validateKeys(config, ALWAYS_POLICY_KEYS, path);
+			return Object.freeze({
+				mode: "always",
+				...resolveBackoff(config.backoff, `${path}.backoff`)
+			});
+		default: throw new Error(`${path}.mode must be "normal" or "always"`);
+	}
+}
+/**
+* Field-wise equality over {@link LlmCallConfig} — the comparison a caller
+* runs to decide whether a proposed configuration is a real change (worth a
+* logged header snapshot) or the held one restated.
+* @param a - one configuration.
+* @param b - the other.
+* @returns whether every field (including the `stop` list, element-wise) matches.
+*/
+function callConfigEquals(a, b) {
+	if (a.provider !== b.provider || a.model !== b.model || a.reasoningEffort !== b.reasoningEffort || a.temperature !== b.temperature || a.maxTokens !== b.maxTokens) return false;
+	if (a.stop === void 0 || b.stop === void 0) return a.stop === b.stop;
+	return a.stop.length === b.stop.length && a.stop.every((s, i) => s === b.stop?.[i]);
+}
+/**
+* Normalization for values thrown by a final LLM adapter boundary.
+*
+* @module @deepseek-ai/dsh-llm/adapter-failure
+*/
+/**
+* Detach serializable provider facts from a value thrown by an adapter.
+* @param value - arbitrary value thrown during adapter dispatch or iteration.
+* @returns immutable provider-neutral facts suitable for a terminal finish chunk.
+* @internal
+*/
+function normalizeLlmFailure(value) {
+	const error = value instanceof Error ? value : new HarnessError(thrownMessage(value), "UNKNOWN", { cause: value });
+	const carried = ownFailureSnapshot(error);
+	if (carried !== void 0 && carried.code === ownErrorCode(error)) return carried;
+	return Object.freeze({
+		message: errorMessage$1(error),
+		code: harnessErrorCode(error)
+	});
+}
+/** Render a non-Error throw without letting hostile coercion escape normalization. */
+function thrownMessage(value) {
+	try {
+		const message = String(value);
+		return message.length > 0 ? message : "LLM adapter failed";
+	} catch (_hostileThrownValue) {
+		return "LLM adapter failed";
+	}
+}
+/** Read a foreign error's own data-backed `code` without invoking accessors. */
+function ownErrorCode(error) {
+	try {
+		const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+		return descriptor !== void 0 && "value" in descriptor ? descriptor.value : void 0;
+	} catch (_sdkPropertyTrap) {
+		return;
+	}
+}
+/** Snapshot an own data property without invoking an SDK-defined accessor. */
+function ownFailureSnapshot(error) {
+	try {
+		const descriptor = Object.getOwnPropertyDescriptor(error, "failure");
+		return descriptor !== void 0 && "value" in descriptor ? failureSnapshot(descriptor.value) : void 0;
+	} catch (_sdkPropertyTrap) {
+		return;
+	}
+}
+/** Validate and detach an arbitrary serializable failure payload. */
+function failureSnapshot(value) {
+	if (typeof value !== "object" || value === null) return void 0;
+	try {
+		const candidate = value;
+		const message = candidate.message;
+		const code = candidate.code;
+		const status = candidate.status;
+		const providerRetryAfterMs = candidate.providerRetryAfterMs;
+		const requestId = candidate.requestId;
+		if (typeof message !== "string" || message.length === 0 || typeof code !== "string" || code.length === 0 || status !== void 0 && (!Number.isInteger(status) || status < 100 || status > 599) || providerRetryAfterMs !== void 0 && (!Number.isFinite(providerRetryAfterMs) || providerRetryAfterMs <= 0) || requestId !== void 0 && (typeof requestId !== "string" || requestId.length === 0)) return void 0;
+		return Object.freeze({
+			message,
+			code,
+			...status === void 0 ? {} : { status },
+			...providerRetryAfterMs === void 0 ? {} : { providerRetryAfterMs },
+			...requestId === void 0 ? {} : { requestId }
+		});
+	} catch (_sdkFailureGetter) {
+		return;
+	}
+}
+/** Read an SDK error message without letting an accessor replace the primary failure. */
+function errorMessage$1(error) {
+	try {
+		const message = error.message;
+		if (typeof message === "string" && message.length > 0) return message;
+	} catch (_sdkMessageGetter) {}
+	return "LLM adapter failed";
+}
+/** Trust only Harness-owned codes; third-party SDK codes are not our taxonomy. */
+function harnessErrorCode(error) {
+	return error instanceof HarnessError ? error.code : "UNKNOWN";
+}
+/**
+* Stable text shown to a model that cannot accept one durable image reference.
+* @param ref - durable normalized attachment omitted from the request.
+* @returns deterministic text-only placeholder.
+*/
+function textOnlyImageText(ref) {
+	return `[image omitted because this model accepts text only; attachment sha256:${String(ref.attachmentId).slice(7, 15)}]`;
+}
+/**
+* True when typed model content contains an image block, walking nested
+* tool-result content. This is the one recursive image walk shared by every
+* image policy (capability gating, text-only serialization, compaction
+* survey), so a consumer cannot silently diverge on nesting depth.
+* @param content - typed model content blocks.
+* @returns whether any nested block is an image.
+*/
+function contentHasImage(content) {
+	return content.some((block) => block.type === "image" || block.type === "tool-result" && contentHasImage(block.content));
+}
+/** Replace every image occurrence, including nested tool results, for a text-only model. */
+function replaceImagesForTextModel(blocks) {
+	let next;
+	for (const [index, block] of blocks.entries()) {
+		if (block.type === "image") {
+			next ??= blocks.slice(0, index);
+			next.push({
+				type: "text",
+				text: textOnlyImageText(block.attachment)
+			});
+			continue;
+		}
+		if (block.type === "tool-result") {
+			const content = replaceImagesForTextModel(block.content);
+			if (content !== block.content) {
+				next ??= blocks.slice(0, index);
+				next.push({
+					...block,
+					content
+				});
+				continue;
+			}
+		}
+		next?.push(block);
+	}
+	return next ?? blocks;
+}
+/**
+* Project durable image history into deterministic text for an exact text-only model.
+* @param messages - complete request history.
+* @returns the original list without images, otherwise shallow message copies with stable placeholders.
+*/
+function projectImagesForTextModel(messages) {
+	if (!messages.some((message) => contentHasImage(message.content))) return messages;
+	return messages.map((message) => {
+		const content = replaceImagesForTextModel(message.content);
+		return content === message.content ? message : {
+			...message,
+			content
+		};
+	});
+}
+/**
+* Centralize the non-secret product identity every provider request sends as `User-Agent`, keeping
+* adapters from drifting. See
+* `.agents/notes/implemented/architecture/2026-06-21-mandatory-app-attribution-headers.md`.
+*
+* App-attribution vocabulary for provider requests.
+* @module @deepseek-ai/dsh-llm/attribution
+*/
+const { version } = createRequire(import.meta.url)("../package.json");
+/**
+* LLM service: adapter registry with a waterfall-interceptable streaming call
+* API. Exports the `LlmRuntime` default, the abstract `LlmAdapter` for
+* provider backends, and `BlockAssembler` for chunk assembly.
+*
+* @module @deepseek-ai/dsh-llm
+*/
+var __runInitializers = function(thisArg, initializers, value) {
+	var useValue = arguments.length > 2;
+	for (var i = 0; i < initializers.length; i++) value = useValue ? initializers[i].call(thisArg, value) : initializers[i].call(thisArg);
+	return useValue ? value : void 0;
+};
+var __esDecorate = function(ctor, descriptorIn, decorators, contextIn, initializers, extraInitializers) {
+	function accept(f) {
+		if (f !== void 0 && typeof f !== "function") throw new TypeError("Function expected");
+		return f;
+	}
+	var kind = contextIn.kind, key = kind === "getter" ? "get" : kind === "setter" ? "set" : "value";
+	var target = !descriptorIn && ctor ? contextIn["static"] ? ctor : ctor.prototype : null;
+	var descriptor = descriptorIn || (target ? Object.getOwnPropertyDescriptor(target, contextIn.name) : {});
+	var _, done = false;
+	for (var i = decorators.length - 1; i >= 0; i--) {
+		var context = {};
+		for (var p in contextIn) context[p] = p === "access" ? {} : contextIn[p];
+		for (var p in contextIn.access) context.access[p] = contextIn.access[p];
+		context.addInitializer = function(f) {
+			if (done) throw new TypeError("Cannot add initializers after decoration has completed");
+			extraInitializers.push(accept(f || null));
+		};
+		var result = (0, decorators[i])(kind === "accessor" ? {
+			get: descriptor.get,
+			set: descriptor.set
+		} : descriptor[key], context);
+		if (kind === "accessor") {
+			if (result === void 0) continue;
+			if (result === null || typeof result !== "object") throw new TypeError("Object expected");
+			if (_ = accept(result.get)) descriptor.get = _;
+			if (_ = accept(result.set)) descriptor.set = _;
+			if (_ = accept(result.init)) initializers.unshift(_);
+		} else if (_ = accept(result)) if (kind === "field") initializers.unshift(_);
+		else descriptor[key] = _;
+	}
+	if (target) Object.defineProperty(target, contextIn.name, descriptor);
+	done = true;
+};
+/**
+* Typed error for LLM-related failures. Extends {@link HarnessError}, so the
+* `code` string (e.g. `AUTH`, `RATE_LIMIT`, `NO_ADAPTER`) is shared taxonomy.
+*/
+var LlmError = class extends HarnessError {
+	/** Serializable facts retained beside this live Error. */
+	failure;
+	/**
+	* @param message - non-empty human-readable failure summary.
+	* @param code - non-empty stable provider-neutral machine code.
+	* @param options - optional cause and validated serializable provider facts.
+	*/
+	constructor(message, code, options) {
+		if (typeof message !== "string" || message.length === 0) throw new Error("LlmError message must be a non-empty string");
+		if (typeof code !== "string" || code.length === 0) throw new Error("LlmError code must be a non-empty string");
+		if (options?.status !== void 0 && (!Number.isInteger(options.status) || options.status < 100 || options.status > 599)) throw new Error("LlmError status must be an integer from 100 through 599");
+		if (options?.providerRetryAfterMs !== void 0 && (!Number.isFinite(options.providerRetryAfterMs) || options.providerRetryAfterMs <= 0)) throw new Error("LlmError providerRetryAfterMs must be a positive finite number");
+		if (options?.requestId !== void 0 && (typeof options.requestId !== "string" || options.requestId.length === 0)) throw new Error("LlmError requestId must be a non-empty string");
+		super(message, code, options);
+		this.name = "LlmError";
+		this.failure = Object.freeze({
+			message,
+			code,
+			...options?.status === void 0 ? {} : { status: options.status },
+			...options?.providerRetryAfterMs === void 0 ? {} : { providerRetryAfterMs: options.providerRetryAfterMs },
+			...options?.requestId === void 0 ? {} : { requestId: options.requestId }
+		});
+	}
+};
+(() => {
+	let _classSuper = TypertRemoteService;
+	let _instanceExtraInitializers = [];
+	let _listProviders_decorators;
+	let _listConfigurableProviders_decorators;
+	let _remoteDiscoverModels_decorators;
+	return class LlmRuntime extends _classSuper {
+		static {
+			const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
+			_listProviders_decorators = [Remote];
+			_listConfigurableProviders_decorators = [Remote];
+			_remoteDiscoverModels_decorators = [Remote("discoverModels")];
+			__esDecorate(this, null, _listProviders_decorators, {
+				kind: "method",
+				name: "listProviders",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "listProviders" in obj,
+					get: (obj) => obj.listProviders
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _listConfigurableProviders_decorators, {
+				kind: "method",
+				name: "listConfigurableProviders",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "listConfigurableProviders" in obj,
+					get: (obj) => obj.listConfigurableProviders
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _remoteDiscoverModels_decorators, {
+				kind: "method",
+				name: "remoteDiscoverModels",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "remoteDiscoverModels" in obj,
+					get: (obj) => obj.remoteDiscoverModels
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			if (_metadata) Object.defineProperty(this, Symbol.metadata, {
+				enumerable: true,
+				configurable: true,
+				writable: true,
+				value: _metadata
+			});
+		}
+		adapters = (__runInitializers(this, _instanceExtraInitializers), /* @__PURE__ */ new Map());
+		directory = /* @__PURE__ */ new Map();
+		discoveries = /* @__PURE__ */ new Map();
+		constructor(ctx) {
+			super(ctx, "llm");
+		}
+		/** Notify topology observers without letting one broken listener veto the commit. */
+		emitAdaptersUpdated() {
+			let invariantFailure;
+			for (const listener of this.ctx.events.dispatch("emit", ["llm/adapters-updated"])) try {
+				const returned = listener();
+				if (returned != null && typeof returned.then === "function") Promise.resolve(returned).then(void 0, (error) => {
+					this.warnAdaptersListenerFailure(error);
+				});
+			} catch (error) {
+				if (error?.code === "INVARIANT") {
+					invariantFailure ??= error;
+					continue;
+				}
+				this.warnAdaptersListenerFailure(error);
+			}
+			if (invariantFailure !== void 0) throw invariantFailure;
+		}
+		/** Contained-listener diagnostic shared by the sync and async failure paths. */
+		warnAdaptersListenerFailure(error) {
+			this.ctx.logger.warn("llm: an llm/adapters-updated listener failed");
+			this.ctx.logger.warn(error);
+		}
+		/**
+		* Register an adapter for the given provider routes. Throws `LlmError` with code
+		* `DUPLICATE_ADAPTER` if any provider already has an adapter (all-or-nothing).
+		* Disposed with the fiber.
+		* @param providers - every provider route this adapter should serve.
+		* @param adapter - the adapter that streams calls for those providers.
+		* @returns the disposer, carrying {@link AdapterRegistrationHandle.replace}.
+		*/
+		registerAdapter(providers, adapter) {
+			const owned = /* @__PURE__ */ new Set();
+			let released = false;
+			const dispose = this.ctx.effect(function* () {
+				if (providers.length === 0) throw new LlmError("an adapter must register at least one provider", "INVALID_ADAPTER");
+				this.commitRoutes(owned, this.prepareRoutes(providers, adapter, owned));
+				yield () => {
+					released = true;
+					for (const provider of owned) this.adapters.delete(provider);
+					owned.clear();
+					this.emitAdaptersUpdated();
+				};
+			}.bind(this), "llm.registerAdapter()");
+			const handle = (() => void dispose());
+			handle.replace = (next) => {
+				if (released) throw new LlmError("a disposed adapter registration cannot replace its routes", "REGISTRATION_DISPOSED");
+				this.commitRoutes(owned, this.prepareRoutes(next, adapter, owned));
+			};
+			return handle;
+		}
+		/**
+		* Validate one candidate route set for `adapter`, treating routes this
+		* registration already holds as available. Nothing is mutated: a rejected
+		* candidate leaves the registry exactly as it was.
+		*/
+		prepareRoutes(providers, adapter, owned) {
+			const unique = /* @__PURE__ */ new Set();
+			const registrations = [];
+			for (const provider of providers) {
+				if (provider.length === 0) throw new LlmError("adapter provider names must be non-empty", "INVALID_ADAPTER");
+				if (unique.has(provider) || this.adapters.has(provider) && !owned.has(provider)) throw new LlmError(`an adapter for provider "${provider}" is already registered`, "DUPLICATE_ADAPTER");
+				const info = adapter.providerInfo(provider);
+				if (typeof info.id !== "string" || info.id !== provider || typeof info.name !== "string" || info.name.length === 0) throw new LlmError(`adapter metadata for provider "${provider}" must preserve its id and have a non-empty name`, "INVALID_ADAPTER");
+				unique.add(provider);
+				const retryPolicy = adapter.providerRetryPolicy(provider) ?? resolveRetryPolicy(void 0, `llm: provider "${provider}" retryPolicy`);
+				registrations.push({
+					adapter,
+					provider: {
+						id: info.id,
+						name: info.name
+					},
+					retryPolicy
+				});
+			}
+			return registrations;
+		}
+		/**
+		* Swap this registration's routes for the prepared ones in one synchronous
+		* section, so no observer can see the registry between the release and the
+		* re-registration. The route set's one mutation point is also where
+		* `llm/adapters-updated` is published, so a `replace` announces itself
+		* exactly like a first registration.
+		*/
+		commitRoutes(owned, registrations) {
+			for (const provider of owned) this.adapters.delete(provider);
+			owned.clear();
+			for (const registration of registrations) {
+				this.adapters.set(registration.provider.id, registration);
+				owned.add(registration.provider.id);
+			}
+			this.emitAdaptersUpdated();
+		}
+		/**
+		* Describe provider routes with a registered adapter.
+		* @returns detached provider metadata in registration order.
+		*/
+		listProviders() {
+			return [...this.adapters.values()].map(({ provider }) => ({ ...provider }));
+		}
+		/**
+		* Declare provider routes an adapter plugin can activate through
+		* configuration. Registration is all-or-nothing: an empty list, invalid
+		* entry, or a provider already declared by any registration throws
+		* `LlmError` without registering the rest. Disposed with the fiber.
+		* @param entries - every configurable provider this plugin owns.
+		* @returns a handle that withdraws all of them, and can atomically replace them.
+		*/
+		registerConfigurableProviders(entries) {
+			let held = [];
+			let disposed = false;
+			/**
+			* Validate a candidate set in full against everything this registration
+			* does not already hold, then publish it. Nothing is written until the
+			* whole set passes, so a refused candidate leaves the current entries in
+			* place — the property that makes `replace` a swap rather than a
+			* delete-then-add that can strand the directory empty.
+			*/
+			const commit = (candidates) => {
+				const detached = [];
+				const own = new Set(held.map((entry) => entry.provider));
+				for (const entry of candidates) {
+					if (entry.provider.length === 0 || entry.displayName.length === 0 || entry.settingsNs.length === 0) throw new LlmError("configurable providers need a non-empty provider, displayName, and settingsNs", "INVALID_DIRECTORY");
+					if (entry.settingsPath.some((segment) => segment.length === 0)) throw new LlmError(`configurable provider "${entry.provider}" has an empty settingsPath segment`, "INVALID_DIRECTORY");
+					if (this.directory.has(entry.provider) && !own.has(entry.provider) || detached.some((seen) => seen.provider === entry.provider)) throw new LlmError(`configurable provider "${entry.provider}" is already declared`, "DUPLICATE_DIRECTORY");
+					detached.push({
+						...entry,
+						settingsPath: [...entry.settingsPath]
+					});
+				}
+				for (const entry of held) this.directory.delete(entry.provider);
+				for (const entry of detached) this.directory.set(entry.provider, entry);
+				held = detached;
+				this.emitAdaptersUpdated();
+			};
+			const dispose = this.ctx.effect(function* () {
+				if (entries.length === 0) throw new LlmError("a configurable-provider registration must declare at least one provider", "INVALID_DIRECTORY");
+				commit(entries);
+				yield () => {
+					disposed = true;
+					for (const entry of held) this.directory.delete(entry.provider);
+					held = [];
+					this.emitAdaptersUpdated();
+				};
+			}.bind(this), "llm.registerConfigurableProviders()");
+			const handle = (() => void dispose());
+			handle.replace = (next) => {
+				if (disposed) throw new LlmError("this configurable-provider registration was disposed", "REGISTRATION_DISPOSED");
+				commit(next);
+			};
+			return handle;
+		}
+		/**
+		* List every declared configurable provider, registered or dormant.
+		* @returns detached directory entries in declaration order.
+		*/
+		listConfigurableProviders() {
+			return [...this.directory.values()].map((entry) => ({
+				...entry,
+				settingsPath: [...entry.settingsPath]
+			}));
+		}
+		/**
+		* Offer to interrogate provider endpoints on behalf of the settings
+		* namespace this plugin owns. The namespace is the key because that is what
+		* a configuration surface already holds from the configurable-provider
+		* directory, and because a provider being *added* has no route to name yet.
+		* Disposed with the fiber.
+		* @param settingsNs - the namespace whose profiles this discovery serves.
+		* @param discover - interrogates one endpoint and must honor the supplied signal.
+		* @returns the disposer that withdraws the offer.
+		*/
+		registerModelDiscovery(settingsNs, discover) {
+			const dispose = this.ctx.effect(function* () {
+				if (settingsNs.length === 0) throw new LlmError("model discovery needs a non-empty settings namespace", "INVALID_DISCOVERY");
+				if (this.discoveries.has(settingsNs)) throw new LlmError(`model discovery for "${settingsNs}" is already registered`, "DUPLICATE_DISCOVERY");
+				this.discoveries.set(settingsNs, discover);
+				yield () => {
+					this.discoveries.delete(settingsNs);
+				};
+			}.bind(this), "llm.registerModelDiscovery()");
+			return () => void dispose();
+		}
+		/**
+		* Interrogate one provider endpoint for the models it advertises. The
+		* request describes a draft, not a stored route, so nothing here reads or
+		* writes settings or credentials — the caller owns both, and the reply is
+		* candidate metadata a surface may offer for adoption.
+		* @param settingsNs - namespace whose registered discovery serves this draft.
+		* @param request - the endpoint, protocol, and one-shot credential to use.
+		* @param signal - caller cancellation.
+		* @returns the advertised models, deduplicated in endpoint order.
+		*/
+		async discoverModels(settingsNs, request, signal) {
+			const discover = this.discoveries.get(settingsNs);
+			if (discover === void 0) throw new LlmError(`no model discovery is registered for "${settingsNs}"`, "NO_DISCOVERY");
+			if ((request.provider ?? "").length === 0 && (request.baseURL ?? "").length === 0) throw new LlmError("model discovery needs a provider route or a baseURL", "INVALID_DISCOVERY");
+			const discovered = signal === void 0 ? await discover(request) : await discover(request, signal);
+			const seen = /* @__PURE__ */ new Set();
+			const models = [];
+			for (const model of discovered) {
+				if (typeof model.id !== "string" || model.id.length === 0 || seen.has(model.id)) continue;
+				seen.add(model.id);
+				models.push({
+					id: model.id,
+					...model.name === void 0 ? {} : { name: model.name },
+					...model.contextWindow === void 0 ? {} : { contextWindow: model.contextWindow },
+					...model.maxTokens === void 0 ? {} : { maxTokens: model.maxTokens }
+				});
+			}
+			return models;
+		}
+		/**
+		* Remote adapter for one draft provider interrogation.
+		* @param settingsNs - namespace whose registered discovery serves this draft.
+		* @param request - endpoint, protocol, and one-shot credential to use.
+		* @param signal - caller cancellation supplied by the Remote carrier.
+		* @returns advertised models in endpoint order.
+		* @throws RemoteError with `llm/model-discovery-rejected` when discovery refuses or fails.
+		*/
+		async remoteDiscoverModels(settingsNs, request, signal) {
+			try {
+				return await this.discoverModels(settingsNs, request, signal);
+			} catch (error) {
+				throw new RemoteError("llm/model-discovery-rejected", error instanceof Error ? error.message : String(error), {
+					settingsNs,
+					...request.baseURL === void 0 ? {} : { baseURL: request.baseURL }
+				}, { cause: error });
+			}
+		}
+		/**
+		* Resolve the retry policy captured when one provider route was registered.
+		* @param provider - registered provider route to inspect.
+		* @returns the provider-owned policy, with normal defaults already resolved.
+		*/
+		providerRetryPolicy(provider) {
+			return this.registration(provider).retryPolicy;
+		}
+		/**
+		* Resolve provider-side request-image pricing for one exact route, or
+		* `undefined` when the provider is unregistered or declares none. Unknown
+		* providers degrade to `undefined` rather than throwing because callers
+		* price durable history whose route may no longer be mounted.
+		* @param provider - provider route named by a request header.
+		* @param model - exact model id named by the same header.
+		* @returns the owning adapter's image pricing for the route, when declared.
+		*/
+		imageRequestPricing(provider, model) {
+			return this.adapters.get(provider)?.adapter.imageRequestPricing(provider, model);
+		}
+		/** Detach typed adapter-owned modality metadata. */
+		detachedModalities(modalities) {
+			return modalities === void 0 ? void 0 : [...modalities];
+		}
+		/**
+		* Discover models advertised by one registered provider. Catalog membership
+		* is advisory and never changes routing or request validation.
+		* @param provider - registered provider route to inspect.
+		* @returns detached model metadata in adapter-preferred order.
+		*/
+		async listModels(provider) {
+			const models = await this.registration(provider).adapter.listModels(provider);
+			const seen = /* @__PURE__ */ new Set();
+			return models.map((model) => {
+				if (typeof model.provider !== "string" || model.provider !== provider || typeof model.id !== "string" || model.id.length === 0 || typeof model.name !== "string" || model.name.length === 0 || model.description !== void 0 && typeof model.description !== "string" || seen.has(model.id)) throw new LlmError(`adapter returned invalid or duplicate model metadata for provider "${provider}"`, "INVALID_CATALOG");
+				seen.add(model.id);
+				const inputModalities = this.detachedModalities(model.inputModalities);
+				return {
+					provider: model.provider,
+					id: model.id,
+					name: model.name,
+					...model.description === void 0 ? {} : { description: model.description },
+					...inputModalities === void 0 ? {} : { inputModalities }
+				};
+			});
+		}
+		/**
+		* Resolve and validate all metadata from the adapter that owns one exact
+		* route. The result is detached from adapter-owned objects; catalog
+		* membership remains advisory and does not control request routing.
+		* @param provider - registered provider route to inspect.
+		* @param model - exact model id passed to the adapter.
+		* @param signal - optional cancellation for adapter-owned asynchronous lookup.
+		* @returns exact model identity plus available context and reasoning metadata.
+		*/
+		async resolveModelInfo(provider, model, signal) {
+			return this.resolveModelInfoFor(this.registration(provider), model, signal);
+		}
+		async resolveModelInfoFor(registration, model, signal) {
+			const resolved = await registration.adapter.resolveModel(registration.provider.id, model, signal);
+			return this.normalizeModelInfo(registration, model, resolved);
+		}
+		/** Validate and detach one adapter-returned exact model result. */
+		normalizeModelInfo(registration, model, resolved) {
+			const provider = registration.provider.id;
+			if (typeof resolved.provider !== "string" || resolved.provider !== provider || typeof resolved.id !== "string" || resolved.id !== model || typeof resolved.name !== "string" || resolved.name.length === 0 || resolved.description !== void 0 && typeof resolved.description !== "string") throw new LlmError(`adapter returned invalid exact model metadata for provider "${provider}" model "${model}"`, "INVALID_MODEL_INFO");
+			const context = resolved.context;
+			if (context !== void 0 && (!Number.isInteger(context.contextWindow) || context.contextWindow <= 0)) throw new LlmError(`adapter returned invalid context metadata for provider "${provider}" model "${model}"`, "INVALID_MODEL_CONTEXT");
+			const inputModalities = this.detachedModalities(resolved.inputModalities);
+			const defaultMaxTokens = resolved.defaultMaxTokens;
+			if (defaultMaxTokens !== void 0 && (!Number.isSafeInteger(defaultMaxTokens) || defaultMaxTokens <= 0)) throw new LlmError(`adapter returned invalid default maxTokens for provider "${provider}" model "${model}"`, "INVALID_MODEL_MAX_TOKENS");
+			const info = {
+				provider,
+				id: model,
+				name: resolved.name,
+				...resolved.description === void 0 ? {} : { description: resolved.description },
+				...inputModalities === void 0 ? {} : { inputModalities },
+				...context === void 0 ? {} : { context: { contextWindow: context.contextWindow } },
+				...defaultMaxTokens === void 0 ? {} : { defaultMaxTokens }
+			};
+			const reasoning = resolved.reasoning;
+			if (reasoning === void 0) return info;
+			if (reasoning.efforts.length === 0) throw new LlmError(`adapter returned invalid reasoning metadata for provider "${provider}" model "${model}"`, "INVALID_MODEL_REASONING");
+			const seen = /* @__PURE__ */ new Set();
+			const efforts = reasoning.efforts.map((effort) => {
+				if (typeof effort.id !== "string" || effort.id.length === 0 || typeof effort.name !== "string" || effort.name.length === 0 || effort.description !== void 0 && typeof effort.description !== "string" || seen.has(effort.id)) throw new LlmError(`adapter returned invalid or duplicate reasoning effort metadata for provider "${provider}" model "${model}"`, "INVALID_MODEL_REASONING");
+				seen.add(effort.id);
+				return {
+					id: effort.id,
+					name: effort.name,
+					...effort.description === void 0 ? {} : { description: effort.description }
+				};
+			});
+			if (reasoning.defaultEffort !== void 0 && !seen.has(reasoning.defaultEffort)) throw new LlmError(`adapter returned an unknown default reasoning effort for provider "${provider}" model "${model}"`, "INVALID_MODEL_REASONING");
+			return {
+				...info,
+				reasoning: {
+					efforts,
+					...reasoning.defaultEffort === void 0 ? {} : { defaultEffort: reasoning.defaultEffort }
+				}
+			};
+		}
+		/**
+		* Validate a conversation call config against its exact model capability and
+		* materialize adapter-configured defaults. Unsupported explicit efforts
+		* reject before provider I/O; no clamping or aliasing is performed. This
+		* standalone query does not bind a later dispatch; use {@link prepareCall}
+		* when logging and streaming must share one adapter registration.
+		* @param config - provider/model route and optional request controls.
+		* @param signal - optional cancellation for adapter-owned capability lookup.
+		* @returns a detached config only when a default must be materialized.
+		*/
+		async resolveCallConfig(config, signal) {
+			return (await this.resolveCallFor(this.registration(config.provider), config, signal)).config;
+		}
+		async resolveCallFor(registration, config, signal) {
+			const info = await this.resolveModelInfoFor(registration, config.model, signal);
+			return this.resolveCallWithInfo(config, info);
+		}
+		/** Validate request controls against one already-bound exact model result. */
+		resolveCallWithInfo(config, info) {
+			const defaulted = config.maxTokens === void 0 && info.defaultMaxTokens !== void 0 ? {
+				...config,
+				maxTokens: info.defaultMaxTokens
+			} : config;
+			const reasoning = info.reasoning;
+			const requested = defaulted.reasoningEffort;
+			let resolvedConfig = defaulted;
+			if (reasoning === void 0) {
+				if (requested !== void 0) throw new LlmError(`provider "${config.provider}" model "${config.model}" does not support reasoning effort "${requested}"`, "UNSUPPORTED_REASONING_EFFORT");
+			} else {
+				const effective = requested ?? reasoning.defaultEffort;
+				if (effective !== void 0) {
+					if (!reasoning.efforts.some((effort) => effort.id === effective)) throw new LlmError(`provider "${config.provider}" model "${config.model}" does not support reasoning effort "${effective}"`, "UNSUPPORTED_REASONING_EFFORT");
+					if (requested !== effective) resolvedConfig = {
+						...defaulted,
+						reasoningEffort: effective
+					};
+				}
+			}
+			return {
+				config: resolvedConfig,
+				...info.context === void 0 ? {} : { context: info.context },
+				modelInfo: info
+			};
+		}
+		/**
+		* Resolve one call under its current adapter registration. The returned
+		* one-shot handle keeps that registration across header logging and dispatch,
+		* so HMR cannot combine one adapter's capability result with another adapter.
+		* @param config - provider/model route and optional request controls.
+		* @param signal - optional cancellation for adapter-owned capability lookup.
+		* @returns a prepared config and its registration-bound stream entry point.
+		*/
+		async prepareCall(config, signal) {
+			const registration = this.registration(config.provider);
+			const adapterCall = await registration.adapter.prepareCall(config.provider, config.model, signal);
+			const modelInfo = this.normalizeModelInfo(registration, config.model, adapterCall.model);
+			const resolved = this.resolveCallWithInfo(config, modelInfo);
+			const resolvedConfig = deepFreeze(structuredClone(resolved.config));
+			const context = resolved.context === void 0 ? void 0 : deepFreeze(structuredClone(resolved.context));
+			const adapterDefaults = deepFreeze({
+				...config.reasoningEffort === void 0 && resolvedConfig.reasoningEffort !== void 0 ? { reasoningEffort: true } : {},
+				...config.maxTokens === void 0 && resolvedConfig.maxTokens !== void 0 ? { maxTokens: true } : {}
+			});
+			let dispatched = false;
+			return Object.freeze({
+				config: resolvedConfig,
+				retryPolicy: registration.retryPolicy,
+				adapterDefaults,
+				...context === void 0 ? {} : { context },
+				...modelInfo.inputModalities === void 0 ? {} : { inputModalities: Object.freeze([...modelInfo.inputModalities]) },
+				stream: (options) => {
+					if (dispatched) throw new LlmError("a prepared LLM call can only be dispatched once", "INVALID_PREPARED_CALL");
+					if (!callConfigEquals(options, resolvedConfig)) throw new LlmError("prepared LLM call config changed before adapter dispatch", "INVALID_PREPARED_CALL");
+					dispatched = true;
+					return this.streamWithRegistration(options, {
+						registration,
+						config: resolvedConfig,
+						modelInfo,
+						dispatch: (options) => adapterCall.stream(options)
+					});
+				}
+			});
+		}
+		registration(provider) {
+			const registration = this.adapters.get(provider);
+			if (!registration) throw new LlmError(`no adapter registered for provider "${provider}"`, "NO_ADAPTER");
+			return registration;
+		}
+		/** Remove replay state whose historical route is owned by another adapter. */
+		forAdapter(options, adapter) {
+			const messages = options.messages.map((message) => {
+				const source = message.source;
+				if (message.role !== "assistant" || source.kind !== "model" || source.replayState === void 0) return message;
+				if (this.adapters.get(source.provider)?.adapter === adapter) return message;
+				return freezeMessage({
+					...message,
+					source: {
+						kind: "model",
+						provider: source.provider,
+						model: source.model
+					}
+				});
+			});
+			if (messages.every((message, index) => message === options.messages[index])) return options;
+			const filtered = {
+				...options,
+				messages
+			};
+			return Object.isFrozen(options) ? deepFreeze(filtered) : filtered;
+		}
+		/**
+		* Final adapter boundary. Adapter selection, dispatch, iterator construction,
+		* and iteration failures become one terminal failure chunk. Middleware and
+		* downstream consumer failures remain thrown plugin or consumer errors.
+		*/
+		async *adapterStream(options, prepared) {
+			let iterator;
+			try {
+				const registration = prepared?.registration ?? this.registration(options.provider);
+				const adapter = registration.adapter;
+				let modelInfo;
+				let resolvedConfig;
+				let dispatch;
+				if (prepared === void 0) {
+					const adapterCall = await adapter.prepareCall(options.provider, options.model, options.signal);
+					modelInfo = this.normalizeModelInfo(registration, options.model, adapterCall.model);
+					resolvedConfig = this.resolveCallWithInfo(options, modelInfo).config;
+					dispatch = (options) => adapterCall.stream(options);
+				} else {
+					modelInfo = prepared.modelInfo;
+					resolvedConfig = prepared.config;
+					dispatch = prepared.dispatch;
+				}
+				if (prepared !== void 0 && !callConfigEquals(options, resolvedConfig)) throw new LlmError("prepared LLM call config changed before adapter dispatch", "INVALID_PREPARED_CALL");
+				const resolvedOptions = callConfigEquals(options, resolvedConfig) ? options : Object.isFrozen(options) ? deepFreeze({
+					...options,
+					...resolvedConfig
+				}) : {
+					...options,
+					...resolvedConfig
+				};
+				const projectedOptions = modelInfo.inputModalities !== void 0 && !modelInfo.inputModalities.includes("image") && resolvedOptions.messages.some((message) => contentHasImage(message.content)) ? Object.isFrozen(resolvedOptions) ? deepFreeze({
+					...resolvedOptions,
+					messages: projectImagesForTextModel(resolvedOptions.messages)
+				}) : {
+					...resolvedOptions,
+					messages: projectImagesForTextModel(resolvedOptions.messages)
+				} : resolvedOptions;
+				iterator = dispatch(this.forAdapter(projectedOptions, adapter))[Symbol.asyncIterator]();
+			} catch (error) {
+				yield adapterFailureChunk(error, options.signal);
+				return;
+			}
+			let completed = false;
+			try {
+				while (true) {
+					let item;
+					try {
+						const next = await iterator.next();
+						item = next.done ? { done: true } : {
+							done: false,
+							value: next.value
+						};
+					} catch (error) {
+						completed = true;
+						yield adapterFailureChunk(error, options.signal);
+						return;
+					}
+					if (item.done) {
+						completed = true;
+						return;
+					}
+					yield item.value;
+				}
+			} finally {
+				if (!completed) {
+					const close = iterator.return?.bind(iterator);
+					if (close) await close();
+				}
+			}
+		}
+		/**
+		* Stream one model call as raw chunks (token-level deltas). Replay state is
+		* retained only when the same adapter instance owns its historical provider
+		* and the target provider. Final adapter selection remains fixed through
+		* asynchronous exact-model resolution and dispatch. Adapter selection,
+		* dispatch, and iteration failures become terminal `error` or `aborted`
+		* finish chunks; middleware, nested-call, cleanup, and consumer failures
+		* remain thrown.
+		* @param options - the full request; `options.provider` selects the adapter.
+		* @returns the chunk stream, possibly wrapped by `llm/stream` listeners.
+		*/
+		stream(options) {
+			return this.streamWithRegistration(options);
+		}
+		streamWithRegistration(options, prepared) {
+			return this.ctx.waterfall(this, "llm/stream", options, () => this.adapterStream(options, prepared));
+		}
+	};
+})();
+/** Convert one adapter throw into the stream protocol's terminal outcome. */
+function adapterFailureChunk(error, signal) {
+	const failure = normalizeLlmFailure(error);
+	return {
+		type: "finish",
+		reason: signal?.aborted || failure.code === "ABORTED" ? {
+			kind: "aborted",
+			failure
+		} : {
+			kind: "error",
+			failure
+		}
+	};
+}
 //#endregion
 //#region ../../../deepseek-harness/packages/core/tools/lib/index.js
 /**
-* Enforced JSON Schema subset shared by tool outputs, generated Code Mode
+* Enforced JSON Schema subset shared by tool outputs, generated PTC mode
 * types, subagents, and workflows. The subset accepts any JSON root, an
 * annotation-only schema for unconstrained JSON, one scalar `type`, object
 * `properties`/`required`/boolean `additionalProperties`, array `items`,
@@ -4148,13 +5187,13 @@ function defineTool(options) {
 	return tool;
 }
 /**
-* Code Mode `run_code` transport. Programs call the registry's agent-visible
+* PTC mode `run_code` transport. Programs call the registry's agent-visible
 * tools through nested executions scheduled under the native concurrency
 * contract; each sub-dispatch is logged for reconstruction, while only the
 * outer curated result enters model history.
-* @module @deepseek-ai/dsh-tools/src/code-mode
+* @module @deepseek-ai/dsh-tools/src/ptc
 */
-/** The model-facing name of the Code Mode tool. */
+/** The model-facing name of the PTC mode tool. */
 const RUN_CODE_NAME = "run_code";
 /**
 * The TypeScript flavor: the fallback for a schema read with no runtime
@@ -4472,7 +5511,7 @@ function createRunCodeTool(registry, options) {
 				if (runOver()) throw new Error(`run_code run is over (${String(runController.signal.reason)}); ${name} not dispatched`);
 				const normalized = jsonNormalizeArgs(rawArgs);
 				const n = ++dispatches;
-				const subCallId = CallId(`${String(exec.callId)}:code:${n}`);
+				const subCallId = brandString(`${String(exec.callId)}:code:${n}`);
 				const input = {
 					callId: subCallId,
 					rootCallId: exec.rootCallId,
@@ -4644,7 +5683,7 @@ function createRunCodeTool(registry, options) {
 	return definition;
 }
 /**
-* Code Mode codegen: the pure projection from registered tool schemas to the TypeScript SDK
+* PTC mode codegen: the pure projection from registered tool schemas to the TypeScript SDK
 * text the model programs against (the `tools:sdk` prompt section). Sibling of
 * `json-schema.ts` — `schemas()` (native function calling) and this module (the generated
 * `declare const tools` API) are two projections of the same store.
@@ -4851,17 +5890,35 @@ function jsonSchemaToTs(schema, indent = 0) {
 		return "unknown";
 	}
 }
-/** The fixed model-facing usage contract rendered above the declarations (see the Code Mode Agent Note's "What the model sees"). */
+/** The fixed model-facing usage contract rendered above the declarations (see the PTC mode Agent Note's "What the model sees"). */
 const SDK_INSTRUCTIONS$1 = `## Writing code for run_code
 
-\`run_code\` takes two required arguments: \`code\` — the body of an async TypeScript function (erasable syntax only — no \`enum\` or namespaces; type annotations are advisory, the code runs type-stripped) — and \`description\`, a short summary of what the program does. Inside the program:
+\`run_code\` takes two required arguments: \`code\` — the body of an async TypeScript function (erasable syntax only — no \`enum\` or namespaces; type annotations are advisory, the code runs type-stripped) — and \`description\`, a short summary of what the program does. The declarations below are SDK bindings for this program. A declaration does not make its name a directly callable tool; only names supplied as separate tool schemas may be called directly.`;
+const SDK_PROGRAM_INSTRUCTIONS = `Inside the program:
 
 - Call tools as \`await tools.name(args)\` — quoted access for exotic names: \`tools["my-tool"](args)\`. Every call resolves to the tool's typed canonical JSON value. Tool arguments must be lossless JSON.
 - A FAILED tool call rejects with \`ToolCallError\`, whose \`toolName\` identifies the failed tool and whose \`message\` is human-readable — \`try/catch\` it to handle and continue.
 - Independent read-only calls MAY overlap under \`Promise.all\` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with \`await\`.
 - Emit results with \`return\` and/or \`console.log(...)\`. Only what you print or return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.
 
-The available tools:`;
+Program-only SDK bindings:`;
+/** Whether one string schema accepts the literal used by the bash example. */
+function acceptsExampleString(schema, value) {
+	return schema?.type === "string" && (schema.const === void 0 || schema.const === value) && (schema.enum === void 0 || schema.enum.includes(value));
+}
+/** Render the bash example only when its literal arguments satisfy the current parameter schema. */
+function renderBashExample(schemas) {
+	const bash = schemas.find((schema) => schema.name === "bash");
+	if (bash === void 0) return "";
+	const parameters = bash.parameters;
+	if (parameters.type !== "object") return "";
+	const required = parameters.required ?? [];
+	if (required.some((name) => name !== "command" && name !== "description")) return "";
+	if (!acceptsExampleString(parameters.properties?.command, "pwd")) return "";
+	const needsDescription = required.includes("description");
+	if (needsDescription && !acceptsExampleString(parameters.properties?.description, "Show current directory")) return "";
+	return ` When no separate \`bash\` schema is supplied, invoke a declared \`bash\` binding inside \`run_code\`:\n\n\`run_code({ code: "return await tools.bash({ command: 'pwd'${needsDescription ? ", description: 'Show current directory'" : ""} })", description: "Show current directory" })\``;
+}
 /**
 * Render the full `tools:sdk` prompt section: the fixed usage instructions
 * plus one `declare const tools` interface covering every given tool.
@@ -4883,7 +5940,7 @@ function renderToolsSdk(schemas) {
 		argsMembers.push(`${pad$1(1)}${renderKey(schema.name)}: ${jsonSchemaToTs(schema.parameters, 1)};`);
 		outputMembers.push(`${pad$1(1)}${renderKey(schema.name)}: ${jsonSchemaToTs(schema.output, 1)};`);
 	}
-	return `${SDK_INSTRUCTIONS$1}\n\n\`\`\`ts\ntype JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }\n\n${[
+	const declaration = [
 		`interface ToolArgsMap {${argsMembers.length > 0 ? `\n${argsMembers.join("\n")}\n` : ""}}`,
 		`interface ToolOutputMap {${outputMembers.length > 0 ? `\n${outputMembers.join("\n")}\n` : ""}}`,
 		"type ToolName = keyof ToolOutputMap",
@@ -4898,16 +5955,17 @@ function renderToolsSdk(schemas) {
 			"  [K in ToolName]: (args: ToolArgsMap[K]) => Promise<ToolOutputMap[K]>;",
 			"}"
 		].join("\n")
-	].join("\n\n")}\n\`\`\``;
+	].join("\n\n");
+	return `${SDK_INSTRUCTIONS$1}${renderBashExample(sorted)}\n\n${SDK_PROGRAM_INSTRUCTIONS}\n\n\`\`\`ts\ntype JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }\n\n${declaration}\n\`\`\``;
 }
 /**
-* Code Mode codegen — Python flavor. The pure projection from registered tool schemas to the
+* PTC mode codegen — Python flavor. The pure projection from registered tool schemas to the
 * Python SDK text the model programs against under `runtime.language === 'python'`. Sibling of
 * {@link ./ts-types.ts | ts-types.ts}; the two files are two projections of the same registry
 * store, keyed by the loaded {@link @deepseek-ai/dsh-code-runtime#CodeRuntime.language | code
 * runtime's language}.
 *
-* Under `mode: 'code'` the native tool schemas are omitted from the request, so this generated
+* Under `mode: 'ptc'` the native tool schemas are omitted from the request, so this generated
 * SDK is the model's ONLY source for each tool's argument names, required fields, types,
 * descriptions, and canonical output shapes; under `mode: 'both'` the native schemas ship
 * alongside it and it is one of two. Object-shaped arguments and outputs therefore render as one
@@ -4928,7 +5986,7 @@ const IDENTIFIER = /^[\p{XID_Start}_]\p{XID_Continue}*$/u;
 * Python identifiers are not ASCII: `路径` is as legal a field name as `path`,
 * and rejecting it would degrade the whole enclosing object, dropping every
 * field's name, requiredness, and type — information whose only source under
-* `mode: 'code'` is this generated text.
+* `mode: 'ptc'` is this generated text.
 *
 * NFKC stability is a second and separate condition, because CPython
 * normalizes identifiers at compile time while JSON keys are compared as
@@ -5075,7 +6133,7 @@ function pad(indent) {
 * (`SyntaxError: source code string cannot contain null bytes`), whether it
 * sits in a docstring or in a comment, so one such byte anywhere in a schema
 * description would make the whole generated SDK unparseable — under
-* `mode: 'code'`, the model's only declaration of the tools. The rest are
+* `mode: 'ptc'`, the model's only declaration of the tools. The rest are
 * legal but invisible; escaping them with the same rule keeps the emitted text
 * readable and the treatment uniform.
 *
@@ -5141,7 +6199,7 @@ function describe(schema) {
 * Backslashes are doubled first, every quote is escaped, and a trailing
 * backslash cannot survive: a description ending in `"` or an odd backslash
 * would otherwise merge with (or escape) the closing triple quote and make
-* the generated block — Code Mode's only SDK — syntactically invalid Python.
+* the generated block — PTC mode's only SDK — syntactically invalid Python.
 */
 function docLines(description, indent) {
 	const collapsed = describe({ description });
@@ -5595,7 +6653,7 @@ function renderToolsSdkPy(schemas) {
 * section under a non-native mode; a runtime whose language is not a key
 * fails the assembly loudly (same idiom as `toolOrder` violations). Adding a
 * new backend language is three parallel edits — a {@link CodeSdkLanguage}
-* member, an entry here, and a `RUN_CODE_FLAVORS` entry in `code-mode.ts` for
+* member, an entry here, and a `RUN_CODE_FLAVORS` entry in `ptc.ts` for
 * its `run_code` schema strings — plus the renderer function this table points
 * at. The `satisfies` clause pins this table's key set to that union, which
 * the flavor table is checked against too, so any of the three left out is a
@@ -5606,17 +6664,11 @@ function renderToolsSdkPy(schemas) {
 * {@link Config.mode} JSDoc.
 */
 /**
-* Prompt order of the `code` collapse statement: after the persona and before
-* the 100-199 per-tool guidance band, so the model reads which tools it may
-* call before it reads what each one is for.
-*/
-const COLLAPSE_SECTION_ORDER = 99;
-/**
-* The model-facing statement of the `code` collapse. Names the consequence
+* The model-facing statement of the `ptc` collapse. Names the consequence
 * (the call fails) and the route (inside the program), because a rule the
 * model can only discover by being denied is one it corrects too late.
 */
-const CODE_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only tool you can call directly — a tool call naming any other tool fails. Reach every tool the SDK declares below from inside the program.`;
+const PTC_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only tool you can call directly — a tool call naming any other tool fails. Reach every tool the SDK declares below from inside the program.`;
 const SDK_RENDERERS = {
 	typescript: renderToolsSdk,
 	python: renderToolsSdkPy
@@ -5763,7 +6815,7 @@ function resolveMaxParallelSubCalls(value) {
 	static Config = Schema.object({
 		mode: Schema.union([
 			"native",
-			"code",
+			"ptc",
 			"both"
 		]).default("native"),
 		maxParallelSubCalls: Schema.natural().min(1).default(10)
@@ -5792,10 +6844,10 @@ function resolveMaxParallelSubCalls(value) {
 	/**
 	* Reserved presentation transport, kept outside the filterable registration
 	* layers. Built on first need rather than at construction: which agents run
-	* a code mode is no longer known when the service is constructed, and the
+	* a PTC mode is no longer known when the service is constructed, and the
 	* transport is stateless beyond its closures over `this`.
 	*/
-	codeTransport;
+	ptcTransport;
 	constructor(ctx, config = {}) {
 		super(ctx, "tools");
 		this.defaultMode = config.mode ?? "native";
@@ -5807,34 +6859,33 @@ function resolveMaxParallelSubCalls(value) {
 		}
 	}
 	/**
-	* The prompt statement of the `code` executor collapse, registered wherever
-	* {@link sdkSection} is and rendering empty outside an effective `code`.
+	* The prompt statement of the `ptc` executor collapse, registered wherever
+	* {@link sdkSection} is and rendering empty outside an effective `ptc`.
 	*
 	* Every tool contributes its own guidance section naming its tool, none of
-	* them qualify how that tool is reached, and they all render before the SDK
-	* (orders 100-199 against {@link SDK_SECTION_ORDER}). Without this the model
-	* reads a catalog of tools it is told to use and no statement that only
-	* `run_code` may be called, so it emits a native call, receives
-	* `UNKNOWN_TOOL` for a tool the prompt just declared, and concludes the
-	* deployment is inconsistent. {@link COLLAPSE_SECTION_ORDER} places the rule
-	* before that guidance rather than after it.
+	* them qualify how that tool is reached, and they all render before the SDK.
+	* Without this the model reads a catalog of tools it is told to use and no
+	* statement that only `run_code` may be called, so it emits a native call,
+	* receives `UNKNOWN_TOOL` for a tool the prompt just declared, and concludes
+	* the deployment is inconsistent. Its order places the rule before that
+	* guidance rather than after it.
 	*
 	* `both` renders empty: native calls do execute there, so the rule is false.
 	* @returns the section registration.
 	*/
 	collapseSection() {
 		return {
-			name: "tools:code-only",
-			order: COLLAPSE_SECTION_ORDER,
-			text: (context) => this.modeFor(context.scope) === "code" ? CODE_ONLY_INSTRUCTION : ""
+			name: "tools:ptc-only",
+			order: this.ctx.systemPrompt.getSectionOrder("PTC_ONLY"),
+			text: (context) => this.modeFor(context.scope) === "ptc" ? PTC_ONLY_INSTRUCTION : ""
 		};
 	}
 	/**
-	* The generated-SDK prompt section, registered globally by a code-mode
+	* The generated-SDK prompt section, registered globally by a PTC mode
 	* deployment and per scope by {@link presentAs}.
 	*
 	* The body regenerates from the CALLING scope, and renders empty for an
-	* agent presenting natively — an agent that opted out under a code-mode
+	* agent presenting natively — an agent that opted out under a PTC mode
 	* deployment still sees the global registration, and an empty section is
 	* dropped from the rendered prompt.
 	* @returns the section registration.
@@ -5842,7 +6893,7 @@ function resolveMaxParallelSubCalls(value) {
 	sdkSection() {
 		return {
 			name: "tools:sdk",
-			order: 150,
+			order: this.ctx.systemPrompt.getSectionOrder("TOOLS_SDK"),
 			text: (context) => {
 				const mode = this.modeFor(context.scope);
 				if (mode === "native") return "";
@@ -5878,13 +6929,13 @@ function resolveMaxParallelSubCalls(value) {
 	* @returns the shared transport definition.
 	*/
 	requireCodeTransport() {
-		this.codeTransport ??= createRunCodeTool(this, {
+		this.ptcTransport ??= createRunCodeTool(this, {
 			requireRuntime: () => this.requireCodeRuntime(this.defaultMode),
 			peekRuntime: () => this.ctx.get("codeRuntime"),
 			maxParallel: this.maxParallelSubCalls,
 			shapeDispatchLog: (dispatch) => this.shapeDispatchLog(dispatch)
 		});
-		return this.codeTransport;
+		return this.ptcTransport;
 	}
 	/**
 	* Present the calling scope's tools in `mode` instead of the deployment
@@ -5892,7 +6943,7 @@ function resolveMaxParallelSubCalls(value) {
 	* declaration covers every agent joined under it.
 	*
 	* Scoped only, and one declaration per scope: this is how an agent preset
-	* composes Code Mode agents beside native ones in the same process, and a
+	* composes PTC mode agents beside native ones in the same process, and a
 	* process-global override would be the `mode` config field instead.
 	* @param mode - the presentation the covered agents' models see.
 	* @returns the exact disposer that restores the deployment default.
@@ -5927,7 +6978,7 @@ function resolveMaxParallelSubCalls(value) {
 		};
 		this.requireCodeRuntime(mode);
 		const schemas = [...view.visible.values()].map((definition) => this.schemaOf(definition, false));
-		if (mode === "code") return {
+		if (mode === "ptc") return {
 			schemas: schemas.filter((schema) => schema.name === RUN_CODE_NAME),
 			knownNames: [RUN_CODE_NAME]
 		};
@@ -5941,8 +6992,7 @@ function resolveMaxParallelSubCalls(value) {
 	* Read at use time (assembly / run_code execution), NOT via static
 	* `inject`: an inject entry would hold `ctx.tools` — and every tool plugin
 	* behind it — hostage to a code runtime existing even under `mode:
-	* 'native'` (the loop's optional-backend idiom, same as
-	* `sessionPersistence`).
+	* 'native'`.
 	*
 	* Assembly and `run_code` execution read separately, so the language is not
 	* bound to a request. Harmless while one published backend exists — both
@@ -5950,7 +7000,7 @@ function resolveMaxParallelSubCalls(value) {
 	* language between them would hand a program written against one SDK to the
 	* other. Binding it is deferred until a second backend ships (the first
 	* point it is testable); rationale in the
-	* [language-dispatch note](../../../../.agents/notes/implemented/feature/2026-07-31-code-mode-language-dispatch.md).
+	* [language-dispatch note](../../../../.agents/notes/implemented/feature/2026-07-31-ptc-language-dispatch.md).
 	*/
 	requireCodeRuntime(mode) {
 		const runtime = this.ctx.get("codeRuntime");
@@ -5974,7 +7024,7 @@ function resolveMaxParallelSubCalls(value) {
 		assertSupportedJsonSchema(output.schema);
 		const timeoutMs = definition.timeoutMs;
 		if (timeoutMs !== void 0 && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`);
-		if (name === "run_code") throw new Error(`tool name "${RUN_CODE_NAME}" is reserved for the Code Mode presentation transport and cannot be registered or shadowed`);
+		if (name === "run_code") throw new Error(`tool name "${RUN_CODE_NAME}" is reserved for the PTC mode presentation transport and cannot be registered or shadowed`);
 		return this.layers.effect(this.ctx, (layer) => layer.tools.insert(name, definition), { label: "tools.register()" });
 	}
 	/**
@@ -5994,7 +7044,7 @@ function resolveMaxParallelSubCalls(value) {
 			...allow !== void 0 ? { allow: new Set(allow) } : {},
 			...deny !== void 0 ? { deny: new Set(deny) } : {}
 		};
-		if ([...allow ?? [], ...deny ?? []].includes("run_code")) throw new Error(`tools.restrict() cannot name reserved Code Mode presentation transport "${RUN_CODE_NAME}"; restrict end-capability tools instead`);
+		if ([...allow ?? [], ...deny ?? []].includes("run_code")) throw new Error(`tools.restrict() cannot name reserved PTC mode presentation transport "${RUN_CODE_NAME}"; restrict end-capability tools instead`);
 		const known = this.view(scope).restrictableNames;
 		const unknown = [...allow ?? [], ...deny ?? []].filter((name) => !known.has(name));
 		if (unknown.length > 0) throw new Error(`tools.restrict() names unknown global tool${unknown.length > 1 ? "s" : ""} ${unknown.map((n) => `"${n}"`).join(", ")}; known global tools: ${[...known].sort().join(", ") || "(none)"}`);
@@ -6090,7 +7140,7 @@ function resolveMaxParallelSubCalls(value) {
 	/**
 	* Resolve the definition that MAY EXECUTE for a call, applying the mode
 	* collapse at the operation boundary that owns it. The registry view
-	* (`get`) is presentation-agnostic; here a MODEL-DIRECT call under `code`
+	* (`get`) is presentation-agnostic; here a MODEL-DIRECT call under `ptc`
 	* may only name the reserved `run_code` transport, while a nested
 	* sub-dispatch (a `parent` token set — the `run_code` SDK calling a tool
 	* it bound) may call any visible tool. Denial surfaces as `UNKNOWN_TOOL`
@@ -6115,7 +7165,7 @@ function resolveMaxParallelSubCalls(value) {
 	schemas(scope) {
 		return [...this.view(scope).visible.values()].map((definition) => this.schemaOf(definition, true));
 	}
-	/** Project visible callable tools onto the generated Code Mode SDK contract. */
+	/** Project visible callable tools onto the generated PTC mode SDK contract. */
 	sdkSchemas(scope) {
 		return [...this.view(scope).visible.values()].filter((definition) => definition.name !== RUN_CODE_NAME).map((definition) => {
 			const output = snapshotJsonValue(definition.output.schema);
@@ -6155,7 +7205,7 @@ function resolveMaxParallelSubCalls(value) {
 		}
 	}
 	/**
-	* Run the `tools/code-dispatch-log` waterfall over one settled sub-dispatch
+	* Run the `tools/ptc-dispatch-log` waterfall over one settled sub-dispatch
 	* and return the content the bridge should log on `tool/code-dispatch`.
 	* Contained: when a listener throws, the method logs the original settled
 	* content; that failure must not fail the dispatch or omit the settle event. Private:
@@ -6165,20 +7215,20 @@ function resolveMaxParallelSubCalls(value) {
 	*/
 	async shapeDispatchLog(dispatch) {
 		try {
-			return await this.ctx.waterfall(scopeTarget(this, dispatch.agent), "tools/code-dispatch-log", dispatch, () => Promise.resolve(dispatch.content));
+			return await this.ctx.waterfall(scopeTarget(this, dispatch.agent), "tools/ptc-dispatch-log", dispatch, () => Promise.resolve(dispatch.content));
 		} catch (error) {
-			this.ctx.logger.warn(`tools: code-dispatch-log listener failed for ${dispatch.name}: ${errorMessage(error)}; logging the original settled content`);
+			this.ctx.logger.warn(`tools: ptc-dispatch-log listener failed for ${dispatch.name}: ${errorMessage(error)}; logging the original settled content`);
 			return dispatch.content;
 		}
 	}
 	/**
-	* Whether the `code` mode collapse denies a model-direct call: only the
+	* Whether the `ptc` mode collapse denies a model-direct call: only the
 	* reserved `run_code` transport may be named. Nested sub-dispatches (a
 	* `parent` token set) bypass the collapse. One home for the
 	* security-relevant predicate, shared by {@link resolveExecution} and
 	* {@link createExecution} so the two can never drift apart.
 	*
-	* Resolved through {@link modeFor}, NOT `defaultMode`: an agent given `code`
+	* Resolved through {@link modeFor}, NOT `defaultMode`: an agent given `ptc`
 	* by an agent preset under a native deployment is the composition
 	* `dsh-agent-tool-presentation` exists for, and reading the deployment default would
 	* leave exactly that agent uncollapsed — announcing one surface while
@@ -6188,7 +7238,7 @@ function resolveMaxParallelSubCalls(value) {
 	* @param nested - whether the call is a transport sub-dispatch, not a model-direct call.
 	*/
 	collapses(name, scope, nested) {
-		return !nested && this.modeFor(scope) === "code" && name !== "run_code";
+		return !nested && this.modeFor(scope) === "ptc" && name !== "run_code";
 	}
 	/**
 	* Execute through pre-policy, guards, around-dispatch, post-policy,
@@ -6845,69 +7895,6 @@ function rawRequest(baseUrl, method, apiPath, headers = {}, bodyText, timeoutMs 
 		req.end();
 	});
 }
-/** 把任意值转成可 JSON 序列化的对象（供工具返回）。 */
-function toJson(value) {
-	return JSON.parse(JSON.stringify(value ?? null));
-}
-//#endregion
-//#region src/features/searxng.ts
-/**
-* SearXNG 元搜索客户端：聚合 Google/Bing/DDG 等，输出 JSON。
-*
-* 只做「向 SearXNG 要搜索结果」这一件事；工具编排在装配层。
-* @module @deepseek-ai/dsh-web-search
-*/
-/** 非 2xx SearXNG 响应的人类可读摘要。 */
-function searxngError(result, op) {
-	if (typeof result.body === "object" && result.body !== null && "message" in result.body) {
-		const m = result.body.message;
-		return op + ": " + String(m);
-	}
-	return op + ": HTTP " + result.status + " " + result.raw.slice(0, 200);
-}
-/**
-* 调用 SearXNG JSON API 搜索。
-* @param config - 连接配置。
-* @param query - 搜索词。
-* @param language - 结果语言（如 zh-CN / en）。
-* @param maxResults - 最多返回条数。
-* @returns 结构化搜索结果；失败时 ok=false 带原因。
-*/
-async function searchWeb(config, query, language, maxResults) {
-	const params = new URLSearchParams({
-		q: query,
-		format: "json",
-		language,
-		locale: language,
-		safesearch: "0"
-	});
-	const result = await rawRequest(config.searxngUrl, "GET", "/search?" + params.toString(), {}, void 0, config.timeoutMs);
-	if (result.status < 200 || result.status >= 300) return {
-		ok: false,
-		query,
-		hits: [],
-		error: searxngError(result, "SearXNG 搜索失败")
-	};
-	const data = result.body;
-	const hits = [];
-	if (data && Array.isArray(data.results)) for (const it of data.results.slice(0, maxResults)) {
-		const r = it;
-		const url = typeof r.url === "string" ? r.url : "";
-		if (url.length === 0) continue;
-		hits.push({
-			title: typeof r.title === "string" ? r.title : "",
-			url,
-			content: typeof r.content === "string" ? r.content : "",
-			engine: typeof r.engine === "string" ? r.engine : "",
-			score: typeof r.score === "number" ? r.score : 0
-		});
-	}
-	return {
-		ok: true,
-		query,
-		hits
-	};
-}
 //#endregion
 //#region src/features/reader.ts
 /**
@@ -7002,24 +7989,246 @@ async function parsePage(config, url) {
 	};
 }
 //#endregion
+//#region ../../../deepseek-harness/packages/web/web/lib/index.js
+/**
+* Vocabulary for the web capability seam (`ctx.web`). Search and fetch deliberately share one
+* seam so provider selection, cancellation, errors, and product configuration have one owner,
+* while retaining separate request and result types.
+* @module @deepseek-ai/dsh-web/types
+*/
+/**
+* Typed web error with a machine-routable, open-string `code` and chained `cause`.
+* Consumers must tolerate provider-specific codes. Shared codes cover unavailable,
+* missing, unusable, ambiguous, or duplicate providers, cancellation, and provider failure;
+* the local fetch provider additionally distinguishes invalid or blocked URLs, redirects,
+* size and timeout limits, and unsupported content types. Tool execution exposes the code in
+* structured error metadata.
+*/
+var WebError = class extends HarnessError {};
+(class extends Service {
+	/**
+	* Provider selection config. Operational env overrides feed the SAME fields:
+	* `$DSH_WEB_SEARCH_PROVIDER` / `$DSH_WEB_FETCH_PROVIDER` are equivalent to
+	* `searchProvider` / `fetchProvider` and are NOT a hidden priority chain.
+	*/
+	static Config = Schema.object({
+		searchProvider: Schema.string(),
+		fetchProvider: Schema.string()
+	});
+	searchProviders = /* @__PURE__ */ new Map();
+	fetchProviders = /* @__PURE__ */ new Map();
+	searchProviderId;
+	fetchProviderId;
+	constructor(ctx, config = {}) {
+		super(ctx, "web");
+		this.searchProviderId = config.searchProvider ?? process.env.DSH_WEB_SEARCH_PROVIDER;
+		this.fetchProviderId = config.fetchProvider ?? process.env.DSH_WEB_FETCH_PROVIDER;
+	}
+	/**
+	* Register a search provider. Throws {@link WebError} `WEB_DUPLICATE_PROVIDER`
+	* if its id is already registered for search. Returns a disposer; disposed
+	* with the calling fiber.
+	* @param provider - the provider; its `id` is the registry key.
+	* @returns the disposer that unregisters the provider.
+	*/
+	registerSearchProvider(provider) {
+		return this.registerProvider(this.searchProviders, provider);
+	}
+	/**
+	* Register a fetch provider. Throws {@link WebError} `WEB_DUPLICATE_PROVIDER`
+	* if its id is already registered for fetch. Returns a disposer; disposed
+	* with the calling fiber.
+	* @param provider - the provider; its `id` is the registry key.
+	* @returns the disposer that unregisters the provider.
+	*/
+	registerFetchProvider(provider) {
+		return this.registerProvider(this.fetchProviders, provider);
+	}
+	registerProvider(store, provider) {
+		if (store.has(provider.id)) throw new WebError(`a web provider with id "${provider.id}" is already registered`, "WEB_DUPLICATE_PROVIDER");
+		const dispose = this.ctx.effect(function* () {
+			store.set(provider.id, provider);
+			yield () => store.delete(provider.id);
+		}, "web.registerProvider()");
+		return () => void dispose();
+	}
+	/**
+	* Run one search through the selected provider. Resolves the provider at call
+	* time with the selection rules above; throws {@link WebError} when the
+	* capability cannot run. The seam enforces `request.maxResults` on the result:
+	* if the provider over-returns, `sources[]` is truncated and `truncated` set.
+	* @param request - the query and optional result limit.
+	* @param signal - optional cancellation signal forwarded to the provider.
+	* @returns the provider's results, capped to `request.maxResults`.
+	*/
+	async search(request, signal) {
+		return capSources(await resolveProvider({
+			providers: this.searchProviders,
+			...this.searchProviderId !== void 0 ? { configuredId: this.searchProviderId } : {}
+		}).search(request, signal), request.maxResults);
+	}
+	/**
+	* Retrieve one URL through the selected provider. Resolves the provider at
+	* call time with the selection rules above; throws {@link WebError} when the
+	* capability cannot run. A non-2xx response is a result, not a throw.
+	* @param request - the URL plus retrieval options.
+	* @param signal - optional cancellation signal forwarded to the provider.
+	* @returns the retrieval outcome; non-2xx responses resolve descriptively.
+	*/
+	async fetch(request, signal) {
+		return resolveProvider({
+			providers: this.fetchProviders,
+			...this.fetchProviderId !== void 0 ? { configuredId: this.fetchProviderId } : {}
+		}).fetch(request, signal);
+	}
+});
+/** Resolve the selected provider or throw the matching {@link WebError}. */
+function resolveProvider(selection) {
+	const { configuredId, providers } = selection;
+	if (configuredId !== void 0) {
+		const provider = providers.get(configuredId);
+		if (!provider) throw new WebError(`configured web provider "${configuredId}" is not registered`, "WEB_PROVIDER_CONFIGURED_MISSING");
+		if (!provider.available()) throw new WebError(`configured web provider "${configuredId}" is registered but unavailable`, "WEB_PROVIDER_CONFIGURED_UNAVAILABLE");
+		return provider;
+	}
+	const usable = [...providers.values()].filter((provider) => provider.available());
+	const [single] = usable;
+	if (single === void 0) throw new WebError("no usable web provider is registered", "WEB_PROVIDER_UNAVAILABLE");
+	if (usable.length > 1) throw new WebError(`multiple usable web providers are registered (${usable.map((provider) => provider.id).join(", ")}); configure one explicitly`, "WEB_PROVIDER_AMBIGUOUS");
+	return single;
+}
+/** Enforce `maxResults` on a search result: truncate `sources[]` and flag it. */
+function capSources(result, maxResults) {
+	if (maxResults === void 0 || result.sources.length <= maxResults) return result;
+	return {
+		...result,
+		sources: result.sources.slice(0, maxResults),
+		truncated: true
+	};
+}
+//#endregion
+//#region src/features/searxng.ts
+/**
+* `SearXNGSearchProvider`: 一个由自托管 SearXNG 元搜索支撑的 WebSearchProvider。
+*
+* 它实现 `@deepseek-ai/dsh-web` 的 `WebSearchProvider` 接缝契约，注册进
+* `ctx.web` 的 provider 注册表——与 Exa/Perplexity/DeepSeek 官方 provider
+* 同级，但完全自托管、无 API key。模型侧的 `web_search` 工具由
+* `@deepseek-ai/dsh-tool-web` 提供，本 provider 只负责「把查询变成结果」。
+*
+* 映射规则：SearXNG 的 `results[]` 逐条映射为 `WebSearchSource`（url 必有，
+* title/snippet 有则带）；SearXNG 不返回生成式回答，故省略 `content`。
+* @module @deepseek-ai/dsh-web-search-searxng/provider
+*/
+/** 本 provider 注册用的稳定 id。 */
+const SEARXNG_PROVIDER_ID = "searxng-local";
+/** 默认 SearXNG 服务地址（本机自托管）。 */
+const SEARXNG_DEFAULT_BASE_URL = "http://127.0.0.1:18080";
+/** 默认搜索语言（与 locale 一致以提升本地化结果质量）。 */
+const SEARXNG_DEFAULT_LANGUAGE = "zh-CN";
+/** 默认单次请求超时（毫秒）。 */
+const SEARXNG_DEFAULT_TIMEOUT_MS = 15e3;
+/** 归属请求头（随包版本递增）。 */
+const USER_AGENT = "deepseek-harness/0.0.1";
+/** 校验 baseURL 可解析且为 http(s)。 */
+function isValidBaseUrl(baseURL) {
+	try {
+		const url = new URL(baseURL);
+		return url.protocol === "http:" || url.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+/** 映射一条 SearXNG 结果到归一化 source；URL 缺失时丢弃。 */
+function mapSearXNGResult(result) {
+	const url = typeof result.url === "string" ? result.url.trim() : "";
+	if (url.length === 0) return void 0;
+	const title = typeof result.title === "string" ? result.title : "";
+	const content = typeof result.content === "string" ? result.content : "";
+	return {
+		url,
+		...title.length > 0 ? { title } : {},
+		...content.length > 0 ? { snippet: content } : {}
+	};
+}
+/**
+* 映射 SearXNG JSON 响应信封到归一化搜索结果。
+* @param response - 解析后的 /search 响应体。
+* @returns 归一化结果；无 URL 的条目被丢弃。
+*/
+function mapSearXNGResponse(response) {
+	return {
+		sources: (response?.results ?? []).filter((item) => typeof item === "object" && item !== null).map(mapSearXNGResult).filter((source) => source !== void 0),
+		truncated: false
+	};
+}
+/** SearXNG 支撑的搜索 provider；HTTP 失败以 WEB_PROVIDER_ERROR 呈现。 */
+var SearXNGSearchProvider = class {
+	options;
+	id = SEARXNG_PROVIDER_ID;
+	constructor(options) {
+		this.options = options;
+	}
+	available() {
+		return isValidBaseUrl(this.options.baseURL) && this.options.timeoutMs > 0 && (this.options.numResults === void 0 || this.options.numResults > 0);
+	}
+	async search(request, signal) {
+		const limit = request.maxResults ?? this.options.numResults;
+		const params = new URLSearchParams({
+			q: request.query,
+			format: "json",
+			language: this.options.language,
+			locale: this.options.language,
+			safesearch: "0"
+		});
+		if (limit !== void 0) params.set("max_results", String(limit));
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);
+		const onAbort = () => controller.abort();
+		signal?.addEventListener("abort", onAbort);
+		try {
+			const response = await fetch(this.options.baseURL.replace(/\/$/, "") + "/search?" + params.toString(), {
+				method: "GET",
+				headers: {
+					"User-Agent": USER_AGENT,
+					Accept: "application/json"
+				},
+				signal: controller.signal
+			});
+			if (!response.ok) throw new WebError("WEB_PROVIDER_ERROR", "SearXNG 搜索失败: HTTP " + response.status);
+			return mapSearXNGResponse(await response.json());
+		} catch (error) {
+			if (signal?.aborted) throw new WebError("WEB_CANCELLED", "搜索已取消");
+			if (controller.signal.aborted) throw new WebError("WEB_TIMEOUT", "SearXNG 搜索超时（" + this.options.timeoutMs + "ms）");
+			if (error instanceof WebError) throw error;
+			throw new WebError("WEB_PROVIDER_ERROR", "SearXNG 搜索失败: " + String(error instanceof Error ? error.message : error));
+		} finally {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+		}
+	}
+};
+//#endregion
 //#region src/index.ts
 /** 插件标识，同时作为 Cordis 入口名与注入来源标签。 */
 const name = "dsh-web-search";
-const inject = ["tools"];
+const inject = ["tools", "web"];
 /** Schemastery 配置模式。 */
 const Config = Schema.object({
-	searxngUrl: Schema.string().default("http://127.0.0.1:8080"),
+	searxngUrl: Schema.string().default(SEARXNG_DEFAULT_BASE_URL),
+	searchLanguage: Schema.string().default(SEARXNG_DEFAULT_LANGUAGE),
+	searxngTimeoutMs: Schema.number().default(SEARXNG_DEFAULT_TIMEOUT_MS),
+	searchMaxResults: Schema.number().default(8),
 	crawl4aiUrl: Schema.string().default("http://127.0.0.1:11235"),
 	crawl4aiToken: Schema.string().default("dsh-local-crawl-token-2026"),
 	jinaReaderUrl: Schema.string().default("https://r.jina.ai"),
-	timeoutMs: Schema.number().default(3e4),
-	maxResults: Schema.number().default(8),
+	readTimeoutMs: Schema.number().default(3e4),
 	injectGuidance: Schema.boolean().default(true)
 });
 /** 折叠进首个 agent step 的搜索优先引导。 */
 const GUIDANCE = [
 	"【自主搜索阅读】本会话具备 dsh-web-search 插件能力：",
-	"1. web_search（搜索）：向自托管 SearXNG 元搜索提问，返回带 URL 的结果列表。",
+	"1. web_search（搜索）：自托管 SearXNG 元搜索（无 API key），返回带 URL 的结果列表。",
 	"2. web_read（阅读）：把任意网页 URL 解析为 LLM 友好的 Markdown，供直接阅读。",
 	"",
 	"用法：需要最新信息 / 查资料 / 调研时，先 web_search 找 URL，再 web_read 精读目标页。",
@@ -7051,102 +8260,66 @@ function presentCall(title, args) {
 	};
 }
 /**
-* 注册 `web_search` 与 `web_read` 工具，并按配置注入搜索优先引导。
-* @param ctx - 携带工具注册表的注册上下文。
+* 注册 `searxng-local` 搜索 provider 与 `web_read` 工具，并按配置注入
+* 搜索优先引导。
+* @param ctx - 携带工具注册表与 web 接缝的注册上下文。
 * @param config - 插件配置。
 */
 function apply(ctx, config) {
-	const tools = {
-		search: defineTool({
-			name: "web_search",
-			description: "搜索网页：向自托管 SearXNG 元搜索提问（聚合 Google/Bing/DDG 等），返回带标题/URL/摘要的结果列表。适合查最新资料、调研、找网页。",
-			parameters: {
-				query: {
-					type: "string",
-					description: "搜索词",
-					required: true
-				},
-				language: {
-					type: "string",
-					description: "结果语言，如 zh-CN / en / ja",
-					default: "zh-CN"
-				},
-				maxResults: {
-					type: "number",
-					description: "返回条数上限",
-					default: 8
-				}
+	ctx.web.registerSearchProvider(new SearXNGSearchProvider({
+		baseURL: config.searxngUrl,
+		language: config.searchLanguage,
+		timeoutMs: config.searxngTimeoutMs,
+		...config.searchMaxResults > 0 ? { numResults: config.searchMaxResults } : {}
+	}));
+	const tools = { read: defineTool({
+		name: "web_read",
+		description: "阅读网页：把任意 URL 解析为 LLM 友好的 Markdown（crawl4ai 优先，Jina Reader 兜底）。适合精读搜索结果、文档、新闻原文。",
+		parameters: { url: {
+			type: "string",
+			description: "要解析的目标 URL",
+			required: true
+		} },
+		output: {
+			schema: {
+				type: "object",
+				additionalProperties: true
 			},
-			output: {
-				schema: {
-					type: "object",
-					additionalProperties: true
-				},
-				render: renderJson
-			},
-			execute: async (args) => {
-				const query = String(args.query ?? "").trim();
-				if (query.length === 0) return {
-					ok: false,
-					error: "搜索词不能为空"
-				};
-				const outcome = await searchWeb(config, query, String(args.language ?? "zh-CN"), Math.min(Number(args.maxResults ?? config.maxResults) || config.maxResults, 20));
-				if (!outcome.ok) return {
-					ok: false,
-					query,
-					...outcome.error !== void 0 ? { error: outcome.error } : {}
-				};
-				return {
-					ok: true,
-					query,
-					count: outcome.hits.length,
-					results: toJson(outcome.hits)
-				};
-			},
-			presentCall: (args) => presentCall("Search the web", args)
-		}),
-		read: defineTool({
-			name: "web_read",
-			description: "阅读网页：把任意 URL 解析为 LLM 友好的 Markdown（crawl4ai 优先，Jina Reader 兜底）。适合精读搜索结果、文档、新闻原文。",
-			parameters: { url: {
-				type: "string",
-				description: "要解析的目标 URL",
-				required: true
-			} },
-			output: {
-				schema: {
-					type: "object",
-					additionalProperties: true
-				},
-				render: renderJson
-			},
-			execute: async (args) => {
-				const url = String(args.url ?? "").trim();
-				if (url.length === 0) return {
-					ok: false,
-					error: "URL 不能为空"
-				};
-				if (!/^https?:\/\//i.test(url)) return {
-					ok: false,
-					error: "URL 需以 http(s):// 开头"
-				};
-				const outcome = await parsePage(config, url);
-				if (!outcome.ok) return {
-					ok: false,
-					url,
-					backend: outcome.backend,
-					...outcome.error !== void 0 ? { error: outcome.error } : {}
-				};
-				return {
-					ok: true,
-					url,
-					backend: outcome.backend,
-					content: outcome.content.slice(0, 2e4)
-				};
-			},
-			presentCall: (args) => presentCall("Read a web page", args)
-		})
-	};
+			render: renderJson
+		},
+		execute: async (args) => {
+			const url = String(args.url ?? "").trim();
+			if (url.length === 0) return {
+				ok: false,
+				error: "URL 不能为空"
+			};
+			if (!/^https?:\/\//i.test(url)) return {
+				ok: false,
+				error: "URL 需以 http(s):// 开头"
+			};
+			const outcome = await parsePage({
+				searxngUrl: config.searxngUrl,
+				crawl4aiUrl: config.crawl4aiUrl,
+				crawl4aiToken: config.crawl4aiToken,
+				jinaReaderUrl: config.jinaReaderUrl,
+				timeoutMs: config.readTimeoutMs,
+				maxResults: config.searchMaxResults
+			}, url);
+			if (!outcome.ok) return {
+				ok: false,
+				url,
+				backend: outcome.backend,
+				...outcome.error !== void 0 ? { error: outcome.error } : {}
+			};
+			return {
+				ok: true,
+				url,
+				backend: outcome.backend,
+				content: outcome.content.slice(0, 2e4)
+			};
+		},
+		presentCall: (args) => presentCall("Read a web page", args)
+	}) };
 	for (const tool of Object.values(tools)) ctx.tools.register(tool);
 	if (config.injectGuidance) ctx.on("agent/pre-step", async ({ agent, messages, step, signal }, next) => {
 		const decision = await next();
@@ -7172,4 +8345,4 @@ function apply(ctx, config) {
 	});
 }
 //#endregion
-export { Config, apply, inject, name };
+export { Config, SEARXNG_PROVIDER_ID, apply, inject, name };
