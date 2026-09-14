@@ -1,0 +1,39 @@
+# dsh-mail-bridge 装配示例：加入 DSH host 的 cordis 配置
+# 复制到 DSH 部署的 cordis.yml 或 patch 文件即可加载插件。
+#
+# 注意：sender / authCode 是真实收发信凭证，仓库内一律写占位符；
+# 真实值请写进部署侧 patch（如 ~/.dsh/profiles/web/cordis.patch.yml）。
+#
+# 收发信使用同一个 QQ 邮箱授权码（IMAP 993 与 SMTP 465 通用）。
+# QQ 邮箱授权码获取：QQ 邮箱 → 设置 → 账号 → 开启 IMAP/SMTP 服务 → 生成授权码。
+- insert:
+    - id: dsh-mail-bridge
+      name: '@deepseek-ai/dsh-mail-bridge'
+      config:
+        imapHost: 'imap.qq.com'
+        imapPort: 993
+        imapSecure: true
+        inboxMailbox: 'INBOX'
+        sentMailbox: 'Sent Messages'
+        reconnectMs: 15000
+        # IDLE 推送实测延迟约 40 秒，周期扫描是保证不漏信的安全网（0=关闭）
+        pollIntervalMs: 30000
+        fetchLimit: 20
+        smtpHost: 'smtp.qq.com'
+        smtpPort: 465
+        smtpSecure: true
+        sender: '<发件QQ邮箱账号>'
+        authCode: '<QQ邮箱授权码>'
+        senderName: 'DSH 数字员工'
+        smtpTimeoutMs: 20000
+        # 主人邮箱：指令来源 + 陌生来信上报去向
+        owner: '<主人邮箱>'
+        # 显式授权数组（留空则只信任主人 + 出站建立信任的对端）
+        allowedSenders: []
+        # 新建分身挂载的 agent preset（留空用宿主默认模型路由）
+        followerPreset: ''
+        followerCwd: ''
+        reportStrangers: true
+        classifyStrangers: true
+        statePath: ''   # 留空则用 $DSH_HOME/storages/dsh-mail-bridge/state.json
+        injectGuidance: true

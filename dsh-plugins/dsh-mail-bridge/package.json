@@ -1,0 +1,32 @@
+{
+  "name": "@deepseek-ai/dsh-mail-bridge",
+  "description": "邮件↔会话桥 for DeepSeek Harness: IMAP 收信，把邮件线程路由到对应 AI 分身会话并唤醒；分身以「回复」方式回信，保持同一邮件线程。",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "test": "vitest run",
+    "check": "node scripts/check-all.mjs"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.5",
+    "@types/node": "^22.20.2",
+    "@types/nodemailer": "^7.0.0",
+    "imapflow": "^1.0.0",
+    "mailparser": "^3.7.0",
+    "nodemailer": "^7.0.0"
+  }
+}
