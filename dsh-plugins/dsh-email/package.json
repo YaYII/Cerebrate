@@ -1,0 +1,42 @@
+{
+  "name": "@deepseek-ai/dsh-email",
+  "description": "邮件发送插件 for DeepSeek Harness: 内置 QQ 邮箱 SMTP 发件凭证与默认收件人，模型侧 email_send 工具直接发信，无需每次向用户索取邮箱与授权码。Plugin-only, no MCP.",
+  "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "dsh-plugins/dsh-email"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "test": "vitest run",
+    "testwatch": "vitest",
+    "check": "node scripts/check-all.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/nodemailer": "^7.0.0",
+    "nodemailer": "^7.0.0"
+  }
+}

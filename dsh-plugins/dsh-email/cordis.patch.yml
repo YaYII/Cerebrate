@@ -1,0 +1,20 @@
+# dsh-email 装配示例：加入 DSH host 的 cordis 配置
+# 复制到 DSH 部署的 cordis.yml 或 patch 文件即可加载插件。
+#
+# 注意：sender / authCode 是真实发信凭证，仓库内一律写占位符；
+# 真实值请写进部署侧 patch（如 ~/.dsh/profiles/web/cordis.patch.yml）。
+# QQ 邮箱授权码获取：QQ 邮箱 → 设置 → 账号 → 开启 SMTP 服务 → 生成授权码。
+- insert:
+    - id: dsh-email
+      name: '@deepseek-ai/dsh-email'
+      config:
+        smtpHost: 'smtp.qq.com'
+        smtpPort: 465
+        smtpSecure: true
+        sender: '<发件QQ邮箱账号>'
+        authCode: '<QQ邮箱SMTP授权码>'
+        senderName: 'DSH 邮件助手'
+        defaultRecipient: '<默认收件人邮箱>'
+        timeoutMs: 20000
+        maxAttachmentBytes: 26214400
+        injectGuidance: true
