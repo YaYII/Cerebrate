@@ -27,7 +27,13 @@ const TEST_NOISE = [
 export const DSEDT_INTENTS: Intent[] = [
   {
     name: '核验成功-主档收敛',
-    appliesWhen: { labelContains: 'verified=true' },
+    // 适用前提必须锚定**核验写流程**，不能只认 `verified=true`。
+    // 真实流量实证（2026-09-15）：仅凭 `verified=true` 会误命中两条**本就不写主档**的路径——
+    //   商户查询 `核验结果命中缓存: refId=…, verified=true`（读流程）
+    //   幂等重复 `核验命中结果缓存: verified=true`（缓存短路，不重复收敛）
+    // 两者都会被判成 failed/漏做「主档落库」，属**假阳性**（误报比漏报更危险）。
+    // `核验完成:` 是完成服务在写流程里独有的行，可干净地把三条路径分开。
+    appliesWhen: { labelContains: '核验完成:' },
     expect: [
       { name: '核验完成(成功)', match: { labelContains: 'verified=true' }, mustSucceed: true },
       { name: '主档落库(收敛或INSERT兜底)', match: { labelContains: '主档' } },

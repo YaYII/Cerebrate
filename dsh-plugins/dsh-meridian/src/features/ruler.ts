@@ -247,9 +247,21 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
       continue
     }
     // 非行为路径的相位不参与「额外路径」判定：
-    // `log` = 普通日志行；`slow` = 性能事实（慢查询/分段耗时）。
-    // 它们回答「多快/多慢」，不回答「流程走到哪一步」——混入路径判定会产生噪音式误报。
-    if (event.phase === 'log' || event.phase === 'slow') continue
+    // - `log` = 普通日志行；`slow` = 性能事实（慢查询/分段耗时）。
+    //   它们回答「多快/多慢」，不回答「流程走到哪一步」——混入路径判定会产生噪音式误报。
+    // - `request-in` / `body` / `request-out` = 可观测信封（TraceFilter 对**每个**请求
+    //   无条件产出，且案例已按 traceId 切分，故每个案例恰好各 1 条）。
+    //   零判别力：任何案例都必然含有它们，把它们当「越权路径」只会造成恒定误报。
+    //   真实流量实证（2026-09-15）：一次完全正常的核验被判 13 处偏离，其中 3 处即此类。
+    if (
+      event.phase === 'log' ||
+      event.phase === 'slow' ||
+      event.phase === 'request-in' ||
+      event.phase === 'body' ||
+      event.phase === 'request-out'
+    ) {
+      continue
+    }
     findings.push({
       kind: 'move-on-log',
       severity: 'medium',

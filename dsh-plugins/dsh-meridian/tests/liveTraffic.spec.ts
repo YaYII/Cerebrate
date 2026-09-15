@@ -19,6 +19,8 @@ import { describe, it } from 'node:test'
 import { buildFingerprint, compareFingerprints, normalizeLabel } from '../src/features/fingerprint'
 import { computeHotspots } from '../src/features/hotspots'
 import { ingestLogText } from '../src/features/ingest'
+import { judgeCase } from '../src/features/ruler'
+import { DSEDT_INTENTS } from '../src/packs/dsedtIntent'
 import { DSEDT_PACK } from '../src/packs/dsedtJavaLogback'
 
 /** 真实单据号（本次端到端流程产生的 orderNo）。 */
@@ -121,5 +123,65 @@ describe('真实流量：分段证据不得回归', () => {
       !event.segments.some((segment) => segment.name === 'pemLen'),
       '非耗时键值不得混入分段',
     )
+  })
+})
+
+/** 真实行 L59：商户查询（读流程）命中结果缓存。 */
+const L_CACHE_QUERY = `2026-09-15 14:41:18.535 [http-nio-8000-exec-2] [0915144118-2f398912] INFO  c.d.v.controller.MpayController - 核验结果命中缓存: refId=${ORDER}, verified=true`
+
+/** 真实行 L69：幂等重复核验被结果缓存短路（不重复收敛主档）。 */
+const L_CACHE_IDEMPOTENT = '2026-09-15 14:41:18.595 [http-nio-8000-exec-3] [0915144118-4c88d61c] INFO  c.d.v.s.b.i.VerificationServiceImpl - 核验命中结果缓存: verified=true'
+
+/** 真实行 L47：核验写流程的完成行。 */
+const L_CONFIRM_DONE = `2026-09-15 14:41:18.434 [http-nio-8000-exec-1] [0915144118-2e27a53b] INFO  c.d.v.s.b.i.VerificationServiceImpl - 核验完成: orderNo=${ORDER}, refId=E2E-1789454477943-8cf3dd, verified=true, bindResult=SUCCESS, 核验耗时=58ms, 状态持有耗时=60ms`
+
+/** 真实行 L48：主档收敛（写流程终态）。 */
+const L_CONVERGE = `2026-09-15 14:41:18.490 [http-nio-8000-exec-1] [0915144118-2e27a53b] INFO  c.d.v.s.b.i.VerificationServiceImpl - 主档收敛为 SUCCESS(定向UPDATE): orderNo=${ORDER}`
+
+/** 真实行 L1：请求进入（可观测信封）。 */
+const L_REQ_IN = '2026-09-15 14:41:18.000 [http-nio-8000-exec-1] [0915144118-2e27a53b] INFO  c.d.verification.filter.TraceFilter - → 请求进入 POST /api/h5/confirm-verify 来源IP=172.28.0.1'
+
+/** 真实行 L13：响应体（可观测信封）。 */
+const L_BODY = '2026-09-15 14:41:18.300 [http-nio-8000-exec-1] [0915144118-2e27a53b] INFO  c.d.verification.filter.TraceFilter - ← 响应体 [application/json] {"verified":true}'
+
+/** 便捷：对一段日志里的**指定案例**跑某意图判定。 */
+function judge(traceId: string, text: string, intentName: string) {
+  const result = ingestLogText(text, { source: 'live.log', pack: DSEDT_PACK })
+  const facts = result.cases.find((item) => item.caseId === traceId) ?? result.cases[0]
+  const intent = DSEDT_INTENTS.find((item) => item.name === intentName)!
+  return { verdict: judgeCase(intent, facts, result.verdict), facts, result }
+}
+
+describe('真实流量：意图的适用前提必须锚定写流程（假阳性回归）', () => {
+  it('商户查询（读流程）命中 verified=true 时判 out-of-scope，不得报「漏做主档」', () => {
+    const { verdict } = judge('0915144118-2f398912', L_CACHE_QUERY, '核验成功-主档收敛')
+
+    assert.equal(verdict.status, 'out-of-scope', '读流程本就不写主档，硬判是假阳性（误报比漏报更危险）')
+    assert.equal(verdict.findings.length, 0)
+  })
+
+  it('幂等重复核验（缓存短路）判 out-of-scope，不得报「漏做主档」', () => {
+    const { verdict } = judge('0915144118-4c88d61c', L_CACHE_IDEMPOTENT, '核验成功-主档收敛')
+
+    assert.equal(verdict.status, 'out-of-scope')
+    assert.equal(verdict.findings.length, 0)
+  })
+
+  it('核验写流程仍被正常判定且两步全中', () => {
+    const { verdict } = judge('0915144118-2e27a53b', [L_CONFIRM_DONE, L_CONVERGE].join('\n'), '核验成功-主档收敛')
+
+    assert.notEqual(verdict.status, 'out-of-scope', '收口不得把真正的写流程也排除掉')
+    assert.deepEqual(verdict.matched, ['核验完成(成功)', '主档落库(收敛或INSERT兜底)'])
+    assert.deepEqual(verdict.missing, [])
+  })
+})
+
+describe('真实流量：可观测信封不得被当成越权路径（误报回归）', () => {
+  it('请求进入 / 响应体 / HTTP 状态不产生 move-on-log', () => {
+    const text = [L_REQ_IN, L_CONFIRM_DONE, L_BODY, L_OUT_200, L_CONVERGE].join('\n')
+    const { verdict } = judge('0915144118-2e27a53b', text, '核验成功-主档收敛')
+
+    const extraPaths = verdict.findings.filter((item) => item.kind === 'move-on-log').map((item) => item.message)
+    assert.deepEqual(extraPaths, [], `信封相位零判别力（每个案例恒有各 1 条），报成越权只会恒定误报：${extraPaths.join(' | ')}`)
   })
 })
