@@ -87203,6 +87203,7 @@ const Config = Schema.object({
 	reportStrangers: Schema.boolean().default(true),
 	classifyStrangers: Schema.boolean().default(true),
 	statePath: Schema.string().default(join(process.env.DSH_HOME ?? join(homedir(), ".dsh"), "storages", "dsh-mail-bridge", "state.json")),
+	maxStepsPerTurn: Schema.number().default(40),
 	injectGuidance: Schema.boolean().default(true)
 });
 /** 本包注入消息的来源插件标签。 */
@@ -87242,6 +87243,35 @@ function resolveAgentOptions(ctx, config) {
 		return {};
 	}
 }
+/**
+* 第一封指令的作业准则：**两阶段工作制**。
+*
+* 为什么必须这样（用户明确要求）：数字员工不许「蒙头干活」。收到指令先给方案、
+* 等主人批准，才允许动真实代码/环境——否则主人无从监督，出事也无法追责。
+* 「必须汇报」同样是硬要求：无论成功、失败还是卡住，结束前都要回信，
+* 否则主人只会看到「发了邮件没任何反应」。
+*/
+const PLAN_RULES = [
+	"处置要求（两阶段工作制，必须严格遵守）：",
+	"1. 本轮**只做只读调研**：可以读代码、查团队记忆与知识库、查看运行状态；",
+	"   **绝对不要**修改文件、执行写操作、部署、或对外发送邮件。",
+	"2. 基于调研给出**执行方案**：打算做什么、改哪些文件、有什么风险与影响范围。",
+	"3. 用 mail_reply 把方案回信给主人，并明确请主人确认。",
+	"4. 发完这封回信就**立即结束本轮，不要开始执行**。",
+	"5. 主人回复确认后你会再次被唤醒，那时才真正动手。",
+	"6. 无论本轮成功、失败还是卡住，**结束前必须用 mail_reply 汇报**；卡住也要说清卡在哪。"
+].join("\n");
+/**
+* 后续轮次的作业准则：主人已看过方案，按批准结果决定执行或再请示。
+* 同样要求「必须汇报」——这是主人掌握进展的唯一渠道。
+*/
+const EXECUTE_RULES = [
+	"处置要求：",
+	"1. 这是主人对方案的回应：主人批准 → 开始执行；要求修改 → 调整方案后再用 mail_reply 请示，不要擅自执行。",
+	"2. 执行前先复述你要做什么，避免误解。",
+	"3. 如果发现自己在原地打转（同类操作反复无效），立即停止并汇报卡点，不要硬撑。",
+	"4. 无论成功、失败还是卡住，**结束前必须用 mail_reply 汇报结果**：做了什么、结果如何、有无遗留。"
+].join("\n");
 /** 组装喂给分身的邮件正文提示词。 */
 function mailPrompt(mail, tag, role) {
 	return [
@@ -87256,10 +87286,7 @@ function mailPrompt(mail, tag, role) {
 		mail.text.length > 0 ? mail.text.slice(0, 2e4) : "（无正文）",
 		"",
 		"---",
-		"处置要求：",
-		"1. 这封邮件属于你负责的那条对话线程，请结合你自己的上下文理解并处理，不要另起炉灶。",
-		`2. 需要回信时调用 mail_reply 工具（它会自动把回信接在同一邮件线程上并带上 [#${tag}] 标识）；`,
-		"   不要用 email_send 另发新邮件，否则线程会断，对方回复时就找不到你了。"
+		role === "主人新指令" || role === "established 对端新话题" ? PLAN_RULES : EXECUTE_RULES
 	].join("\n");
 }
 /**
@@ -87443,9 +87470,8 @@ function createRuntime(ctx, config) {
 			updatedAt: now()
 		};
 		const agentOptions = resolveAgentOptions(ctx, config);
-		const cwd = config.followerCwd.length > 0 ? config.followerCwd : process.cwd();
 		const meta = {
-			cwd,
+			cwd: config.followerCwd.length > 0 ? config.followerCwd : process.cwd(),
 			mailThreadTag: tag,
 			mailPeer: mail.fromAddress
 		};
@@ -87477,9 +87503,12 @@ function createRuntime(ctx, config) {
 					form: "instructions"
 				}
 			}));
-			if (workspaces !== void 0) try {
-				const workspace = await workspaces.resolveByPath(cwd);
-				if (workspace !== void 0) await workspace.attachSession(sessionId);
+			if (workspaces === void 0) log("workspaceRegistry 服务不可用：分身不会出现在侧边栏");
+			else try {
+				const workspace = await ensureFollowerWorkspace();
+				if (workspace === void 0) throw new Error("无法解析或创建邮件分身工作区");
+				await workspace.attachSession(sessionId);
+				log(`分身已挂到工作区「${followerWorkspacePath()}」`);
 			} catch (error) {
 				log(`分身归属工作区失败（不阻断本次处理）：${error instanceof Error ? error.message : String(error)}`);
 			}
@@ -87629,6 +87658,40 @@ function createRuntime(ctx, config) {
 			processing = false;
 		}
 	}
+	/** 分身统一挂载的工作区目录。 */
+	function followerWorkspacePath() {
+		return config.followerCwd.length > 0 ? config.followerCwd : process.cwd();
+	}
+	/**
+	* 确保「邮件分身」工作区存在并返回它。
+	* 找不到就创建而不是静默跳过——上一版就是因此让所有分身成了侧边栏里看不见的孤儿。
+	*/
+	async function ensureFollowerWorkspace() {
+		if (workspaces === void 0) return void 0;
+		const path = followerWorkspacePath();
+		return await workspaces.resolveByPath(path) ?? await workspaces.create(path, "邮件分身");
+	}
+	/**
+	* 启动时把历史分身补齐挂载。
+	* 为什么需要：修复挂载逻辑之前创建的分身都没进工作区，主人的对话记录等于丢了；
+	* 启动时补一次，让过去的往来也能在侧边栏回看。
+	*/
+	async function attachKnownFollowers() {
+		const sessions = Object.values(state.threads).map((binding) => binding.sessionId);
+		if (sessions.length === 0) return;
+		try {
+			const workspace = await ensureFollowerWorkspace();
+			if (workspace === void 0) return;
+			let attached = 0;
+			for (const sessionId of sessions) try {
+				await workspace.attachSession(sessionId);
+				attached++;
+			} catch {}
+			log(`历史分身挂载补齐：${attached}/${sessions.length} 个已进入工作区「${followerWorkspacePath()}」`);
+		} catch (error) {
+			log(`历史分身挂载补齐失败（不阻断收信）：${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
 	/** 找出某个会话当前绑定的线程（一个会话同时只维护一条线程）。 */
 	function threadOfSession(sessionId) {
 		for (const binding of Object.values(state.threads)) if (binding.sessionId === sessionId) return binding;
@@ -87645,6 +87708,7 @@ function createRuntime(ctx, config) {
 			}, config.pollIntervalMs);
 			(async () => {
 				await syncOutbound();
+				await attachKnownFollowers();
 				await runInbox();
 			})();
 		},
@@ -87668,6 +87732,9 @@ function createRuntime(ctx, config) {
 				owner: config.owner,
 				allowedSenders: [...config.allowedSenders]
 			};
+		},
+		isFollower(sessionId) {
+			return Object.values(state.threads).some((binding) => binding.sessionId === sessionId);
 		},
 		threads() {
 			const out = {};
@@ -87721,6 +87788,20 @@ function createRuntime(ctx, config) {
 			};
 		}
 	};
+}
+/**
+* 步数护栏提示词：邮件分身单轮步数逼近上限时注入，强制其收尾汇报。
+* 实测教训：一个分身曾连续调用 120 次工具（其中 110 次在跟终端输出较劲）
+* 却不回信，主人完全不知道进展——所以「原地打转」必须被主动打断。
+*/
+function stepLimitNotice(step, limit) {
+	return [
+		`【强制收尾】本会话单轮步数已达 ${step}（上限 ${limit}）。`,
+		"请立即停止新的探索与尝试，现在就：",
+		"1. 用 mail_reply 汇报当前进展：已经完成了什么、卡在哪里、下一步计划是什么；",
+		"2. 然后结束本轮。",
+		"不要继续调试或重试，主人在等你的汇报。"
+	].join("\n");
 }
 /** 折叠进首个 agent step 的邮件桥引导。 */
 function buildGuidance() {
@@ -87869,6 +87950,31 @@ function apply(ctx, config) {
 		return {
 			kind: "enter",
 			messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance)
+		};
+	});
+	ctx.on("agent/pre-step", async ({ agent, step, signal }, next) => {
+		const decision = await next();
+		if (decision.kind === "reject") return decision;
+		const runtime = runtimeHolder;
+		if (runtime === void 0) return decision;
+		const limit = config.maxStepsPerTurn;
+		if (limit <= 0 || step < limit || (step - limit) % 10 !== 0) return decision;
+		if (!runtime.isFollower(agent.session.id)) return decision;
+		signal.throwIfAborted();
+		const notice = createUserMessage({
+			content: [{
+				type: "text",
+				text: stepLimitNotice(step, limit)
+			}],
+			source: {
+				kind: "plugin",
+				plugin: PLUGIN_TAG,
+				form: "instructions"
+			}
+		});
+		return {
+			kind: "enter",
+			messages: [...decision.messages, notice]
 		};
 	});
 }

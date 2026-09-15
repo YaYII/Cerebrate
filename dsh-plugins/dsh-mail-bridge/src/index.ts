@@ -114,6 +114,8 @@ export interface Config {
   classifyStrangers: boolean
   /** 状态文件路径。 */
   statePath: string
+  /** 邮件分身单轮最大步数：超过即强制收尾并汇报，防止原地空转烧 token。 */
+  maxStepsPerTurn: number
   /** 是否在首个 step 注入邮件桥引导。 */
   injectGuidance: boolean
 }
@@ -144,6 +146,7 @@ export const Config: z<Config> = z.object({
   reportStrangers: z.boolean().default(true),
   classifyStrangers: z.boolean().default(true),
   statePath: z.string().default(join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'storages', 'dsh-mail-bridge', 'state.json')),
+  maxStepsPerTurn: z.number().default(40),
   injectGuidance: z.boolean().default(true),
 })
 
@@ -174,7 +177,14 @@ interface AgentsLike {
 
 /** 宿主工作区服务（把分身挂到工作区，侧边栏才看得见）。 */
 interface WorkspaceLike {
-  resolveByPath(path: string): Promise<{ attachSession(sessionId: string): Promise<void> } | undefined>
+  resolveByPath(path: string): Promise<AttachableWorkspace | undefined>
+  /** 工作区未注册时自动创建，保证分身一定可见（否则主人看不到任何对话）。 */
+  create(path: string, title?: string): Promise<AttachableWorkspace>
+}
+
+/** 可挂载会话的工作区。 */
+interface AttachableWorkspace {
+  attachSession(sessionId: string): Promise<void>
 }
 
 /** 宿主 agentPresets 服务。 */
@@ -225,6 +235,37 @@ function resolveAgentOptions(ctx: Context, config: Config): Record<string, strin
   }
 }
 
+/**
+ * 第一封指令的作业准则：**两阶段工作制**。
+ *
+ * 为什么必须这样（用户明确要求）：数字员工不许「蒙头干活」。收到指令先给方案、
+ * 等主人批准，才允许动真实代码/环境——否则主人无从监督，出事也无法追责。
+ * 「必须汇报」同样是硬要求：无论成功、失败还是卡住，结束前都要回信，
+ * 否则主人只会看到「发了邮件没任何反应」。
+ */
+const PLAN_RULES = [
+  '处置要求（两阶段工作制，必须严格遵守）：',
+  '1. 本轮**只做只读调研**：可以读代码、查团队记忆与知识库、查看运行状态；',
+  '   **绝对不要**修改文件、执行写操作、部署、或对外发送邮件。',
+  '2. 基于调研给出**执行方案**：打算做什么、改哪些文件、有什么风险与影响范围。',
+  '3. 用 mail_reply 把方案回信给主人，并明确请主人确认。',
+  '4. 发完这封回信就**立即结束本轮，不要开始执行**。',
+  '5. 主人回复确认后你会再次被唤醒，那时才真正动手。',
+  '6. 无论本轮成功、失败还是卡住，**结束前必须用 mail_reply 汇报**；卡住也要说清卡在哪。',
+].join('\n')
+
+/**
+ * 后续轮次的作业准则：主人已看过方案，按批准结果决定执行或再请示。
+ * 同样要求「必须汇报」——这是主人掌握进展的唯一渠道。
+ */
+const EXECUTE_RULES = [
+  '处置要求：',
+  '1. 这是主人对方案的回应：主人批准 → 开始执行；要求修改 → 调整方案后再用 mail_reply 请示，不要擅自执行。',
+  '2. 执行前先复述你要做什么，避免误解。',
+  '3. 如果发现自己在原地打转（同类操作反复无效），立即停止并汇报卡点，不要硬撑。',
+  '4. 无论成功、失败还是卡住，**结束前必须用 mail_reply 汇报结果**：做了什么、结果如何、有无遗留。',
+].join('\n')
+
 /** 组装喂给分身的邮件正文提示词。 */
 function mailPrompt(mail: ParsedMail, tag: string, role: string): string {
   const lines = [
@@ -241,10 +282,9 @@ function mailPrompt(mail: ParsedMail, tag: string, role: string): string {
     mail.text.length > 0 ? mail.text.slice(0, 20000) : '（无正文）',
     '',
     '---',
-    '处置要求：',
-    '1. 这封邮件属于你负责的那条对话线程，请结合你自己的上下文理解并处理，不要另起炉灶。',
-    `2. 需要回信时调用 mail_reply 工具（它会自动把回信接在同一邮件线程上并带上 [#${tag}] 标识）；`,
-    '   不要用 email_send 另发新邮件，否则线程会断，对方回复时就找不到你了。',
+    role === '主人新指令' || role === 'established 对端新话题'
+      ? PLAN_RULES
+      : EXECUTE_RULES,
   ]
   return lines.join('\n')
 }
@@ -261,6 +301,8 @@ interface BridgeRuntime {
   stop(): Promise<void>
   status(): JsonObject
   threads(): JsonObject
+  /** 该会话是否为邮件桥创建的分身（用于施加步数护栏）。 */
+  isFollower(sessionId: string): boolean
   reply(sessionId: string, body: string, attachments: readonly string[]): Promise<JsonObject>
 }
 
@@ -471,10 +513,16 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       }))
       // 挂到工作区，否则分身虽然建好了，却在侧边栏里完全看不见——
       // 用户会以为「发邮件没任何反应」，而实际分身正在后台干活（实测踩过）。
-      if (workspaces !== undefined) {
+      // 注意：找不到工作区时**必须自动创建**而不是静默跳过；上一版就是因为
+      // followerCwd 不在已注册工作区列表里而静默跳过，分身全部成了孤儿会话。
+      if (workspaces === undefined) {
+        log('workspaceRegistry 服务不可用：分身不会出现在侧边栏')
+      } else {
         try {
-          const workspace = await workspaces.resolveByPath(cwd)
-          if (workspace !== undefined) await workspace.attachSession(sessionId)
+          const workspace = await ensureFollowerWorkspace()
+          if (workspace === undefined) throw new Error('无法解析或创建邮件分身工作区')
+          await workspace.attachSession(sessionId)
+          log(`分身已挂到工作区「${followerWorkspacePath()}」`)
         } catch (error) {
           log(`分身归属工作区失败（不阻断本次处理）：${error instanceof Error ? error.message : String(error)}`)
         }
@@ -645,6 +693,47 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
     }
   }
 
+  /** 分身统一挂载的工作区目录。 */
+  function followerWorkspacePath(): string {
+    return config.followerCwd.length > 0 ? config.followerCwd : process.cwd()
+  }
+
+  /**
+   * 确保「邮件分身」工作区存在并返回它。
+   * 找不到就创建而不是静默跳过——上一版就是因此让所有分身成了侧边栏里看不见的孤儿。
+   */
+  async function ensureFollowerWorkspace(): Promise<AttachableWorkspace | undefined> {
+    if (workspaces === undefined) return undefined
+    const path = followerWorkspacePath()
+    return await workspaces.resolveByPath(path) ?? await workspaces.create(path, '邮件分身')
+  }
+
+  /**
+   * 启动时把历史分身补齐挂载。
+   * 为什么需要：修复挂载逻辑之前创建的分身都没进工作区，主人的对话记录等于丢了；
+   * 启动时补一次，让过去的往来也能在侧边栏回看。
+   */
+  async function attachKnownFollowers(): Promise<void> {
+    const sessions = Object.values(state.threads).map(binding => binding.sessionId)
+    if (sessions.length === 0) return
+    try {
+      const workspace = await ensureFollowerWorkspace()
+      if (workspace === undefined) return
+      let attached = 0
+      for (const sessionId of sessions) {
+        try {
+          await workspace.attachSession(sessionId)
+          attached++
+        } catch {
+          // 会话可能已被清理，跳过即可，不影响其他分身
+        }
+      }
+      log(`历史分身挂载补齐：${attached}/${sessions.length} 个已进入工作区「${followerWorkspacePath()}」`)
+    } catch (error) {
+      log(`历史分身挂载补齐失败（不阻断收信）：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   /** 找出某个会话当前绑定的线程（一个会话同时只维护一条线程）。 */
   function threadOfSession(sessionId: string): ThreadBinding | undefined {
     for (const binding of Object.values(state.threads)) {
@@ -668,6 +757,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       // 启动补课：先同步出站信任与线程末梢，再补拉离线期间的来信
       void (async () => {
         await syncOutbound()
+        await attachKnownFollowers()
         await runInbox()
       })()
     },
@@ -693,6 +783,10 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
         owner: config.owner,
         allowedSenders: [...config.allowedSenders],
       }
+    },
+
+    isFollower(sessionId: string): boolean {
+      return Object.values(state.threads).some(binding => binding.sessionId === sessionId)
     },
 
     threads(): JsonObject {
@@ -753,6 +847,21 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       }
     },
   }
+}
+
+/**
+ * 步数护栏提示词：邮件分身单轮步数逼近上限时注入，强制其收尾汇报。
+ * 实测教训：一个分身曾连续调用 120 次工具（其中 110 次在跟终端输出较劲）
+ * 却不回信，主人完全不知道进展——所以「原地打转」必须被主动打断。
+ */
+function stepLimitNotice(step: number, limit: number): string {
+  return [
+    `【强制收尾】本会话单轮步数已达 ${step}（上限 ${limit}）。`,
+    '请立即停止新的探索与尝试，现在就：',
+    '1. 用 mail_reply 汇报当前进展：已经完成了什么、卡在哪里、下一步计划是什么；',
+    '2. 然后结束本轮。',
+    '不要继续调试或重试，主人在等你的汇报。',
+  ].join('\n')
 }
 
 /** 折叠进首个 agent step 的邮件桥引导。 */
@@ -869,6 +978,27 @@ export function apply(ctx: Context, config: Config): void {
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
     })
   }
+
+  // 4) 步数护栏：邮件分身单轮步数达到上限后，每 10 步注入一次强制收尾指令。
+  //    为什么必须由插件强制：提示词管不住长时间空转，只有运行时打断才可靠。
+  ctx.on('agent/pre-step', async (
+    { agent, step, signal },
+    next,
+  ): Promise<PreStepDecision> => {
+    const decision = await next()
+    if (decision.kind === 'reject') return decision
+    const runtime = runtimeHolder
+    if (runtime === undefined) return decision
+    const limit = config.maxStepsPerTurn
+    if (limit <= 0 || step < limit || (step - limit) % 10 !== 0) return decision
+    if (!runtime.isFollower(agent.session.id)) return decision
+    signal.throwIfAborted()
+    const notice = createUserMessage({
+      content: [{ type: 'text', text: stepLimitNotice(step, limit) }],
+      source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+    })
+    return { kind: 'enter', messages: [...decision.messages, notice] }
+  })
 }
 
 export { emptyState }

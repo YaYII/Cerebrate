@@ -37,6 +37,8 @@
         # 全局默认模型被改动后数字员工整体不可用）
         followerProvider: ''
         followerModel: ''
+        # 单轮步数上限：超过后每 10 步强制注入「收尾并汇报」（0=关闭）
+        maxStepsPerTurn: 40
         reportStrangers: true
         classifyStrangers: true
         statePath: ''   # 留空则用 $DSH_HOME/storages/dsh-mail-bridge/state.json
