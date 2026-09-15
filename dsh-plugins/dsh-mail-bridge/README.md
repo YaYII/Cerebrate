@@ -59,7 +59,8 @@
 | `sender` / `authCode` / `senderName` | 空 / 空 / `DSH 数字员工` | 发件凭证（仓库示例只写占位符） |
 | `owner` | 空 | 主人邮箱：指令来源 + 陌生来信上报去向 |
 | `allowedSenders` | `[]` | 显式授权数组 |
-| `followerPreset` | 空 | 新建分身挂载的 agent preset（空=用宿主默认模型路由） |
+| `followerPreset` | 空 | 新建分身挂载的 agent preset（空=不挂载） |
+| `followerProvider` / `followerModel` | 空 | **分身专用模型路由**；留空用宿主 `agentDefaultModel`。显式钉住可避免全局默认模型被改动后数字员工整体不可用 |
 | `followerCwd` | 空 | 新建分身的工作目录（空=宿主进程当前目录） |
 | `reportStrangers` | `true` | 陌生来信是否摘要上报主人 |
 | `classifyStrangers` | `true` | 是否用宿主模型识别陌生来信 |
@@ -74,6 +75,7 @@
 | 主人来信且无线程 | **新建分身**，分配会话标签，回信即入同一线程 |
 | 授权/出站建立信任的对端，新话题 | 同上，新建分身 |
 | 陌生地址 | 规则预筛 → 模型识别 → 广告忽略 / 摘要上报主人 |
+| 自动回复（`Auto-Submitted`，RFC 3834） | 直接忽略——否则「分身回信落回本邮箱 → 再唤醒分身」会形成无限自回环 |
 
 ## 开发与验证
 
