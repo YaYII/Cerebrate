@@ -39,10 +39,16 @@ export const DSEDT_PACK: RulePack = {
   name: 'dsedt-java-logback',
   // 业务对象 = 单据号 orderNo。真实生产里它出现在建单/核验完成/主档收敛/异常等多种行中，
   // 故用包级抽取一次覆盖（逐条规则声明会漏）。抽到它，「一张单据的一生」才成立。
-  // 字符类刻意放宽到「非空白/逗号/括号」：应用自身的脱敏产物形如
-  // `ORD-9006aa…（已脱敏）`，若限定为 [A-Za-z0-9-] 会在 `…` 处截断，
-  // **掩码对解析器变得不可见**，同一单据就会被拆成两个业务对象（实测踩过）。
-  objectId: { pattern: 'orderNo=(?<obj>[^\\s,，)）]+)', group: 'obj' },
+  //
+  // 值边界必须同时满足两个相反的要求（均由 2026-09-15 真实流量实证）：
+  // ① **不能截断应用自身的脱敏产物** `ORDER=ORD-22bd37…（已脱敏）`——
+  //    截断会让掩码对解析器不可见，同一单据被拆成两个业务对象（实测踩过）；
+  // ② **不能吞掉结构分隔符**——真实出现的三种污染形态：
+  //    `orderNo=ORD-…}`（JSON 对象）、`orderNo=ORD-…&timestamp=1789454478504`（签名原文）、
+  //    `orderNo=ORD-…, refId=…`。一旦吞掉，同一个单据号会以多个字符串进入对象集合，
+  //    进而**污染掩码消歧的前缀候选集**，使本该唯一匹配的掩码件被判为「歧义」（实测 3 个候选 → 归并失败）。
+  // 故字符类 = 「非空白、非列表分隔符、非括号引号、非键值/查询分隔符」。
+  objectId: { pattern: 'orderNo=(?<obj>[^\\s,，;；|()（）{}\\[\\]<>"\'&=?]+)', group: 'obj' },
   formats: [
     {
       name: 'dsedt-prod',
@@ -66,10 +72,15 @@ export const DSEDT_PACK: RulePack = {
     {
       name: 'trace-request-out',
       phase: 'request-out',
+      // 真实生产：`← 请求结束 POST /api/h5/entry 状态=200 耗时=314ms`
       pattern: '^← 请求结束 (?<method>\\S+) (?<path>\\S+) 状态=(?<status>\\d+) 耗时=(?<cost>\\d+)ms$',
       label: 'HTTP {status}',
       detail: 'method={method}\npath={path}\n状态={status}',
       durationField: 'cost',
+      // 成败是**区间判断**：2xx/3xx 成功，4xx/5xx 失败。
+      // 少了它，`状态=500` 与 `状态=200` 都判成「未知」，接口退化在指纹里不可见。
+      okField: 'status',
+      okPattern: '^[23]\\d{2}$',
       actor: 'logger',
       stackPop: true,
     },

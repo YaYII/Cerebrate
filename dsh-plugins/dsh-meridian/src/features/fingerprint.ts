@@ -30,24 +30,55 @@ export function shortHash(text: string): string {
 /**
  * 结构键：只保留「事件形状」，剔除一切会随文案/参数/环境变化的信息。
  *
- * 保留：相位（phase）、参与者角色的**数量与顺序位置**（即序列中的位置）。
+ * 保留：相位（phase）、**成败（ok）**、序列位置。
  * 剔除：类名、方法名、标签、耗时、参数、级别。
+ *
+ * 为什么成败属于**结构**而不属于文案：一个步骤从成功变成失败，是**行为路径的断裂**
+ * （高置信），不是措辞变化（低置信）。真实动因（2026-09-15 真实流量）：
+ * 在不含 ok 的结构键下，`状态=200` 退化为 `状态=500` 的运行与基线被判成 `identical`——
+ * 这正是本产品承诺要拦住的那类回归。
  *
  * @param event - 运行时事件。
  * @param index - 该事件在序列中的位置（位置本身属结构信息）。
  * @returns 结构键字符串。
  */
 export function structureKey(event: RuntimeEvent, index: number): string {
-  return `${index}:${event.phase}`
+  // 三态必须可区分：null（未知/无法判断）不能与 false（已判定失败）折叠
+  const outcome = event.ok === null ? '?' : event.ok ? '+' : '-'
+  return `${index}:${event.phase}:${outcome}`
 }
 
 /**
- * 标签归一化：把易变值替换为占位符，只留下「文案形状」。
+ * 判断一个「键值对里的值」是否**易变**（因此必须抹掉）。
+ *
+ * 判据来自真实语料（2026-09-15 DSEDT 真实流量）：
+ * - 长数字串（≥6 位）= 时间戳/流水号/计数 → 易变；
+ * - 含数字但不是 3 位状态码（`200`/`202`/`500`）= 单号残段/耗时/长度 → 易变；
+ * - 超长自由文本（> 24 字符）= 参数/原文 → 易变；
+ * - 其余短令牌 = 分类值（`true`/`SUCCESS`/`WHITELIST`/`mpay`）→ **必须保留**。
+ *
+ * 为什么不能一律抹掉：把 `HTTP 200` 与 `HTTP 500` 都归一成 `HTTP <n>` 后，
+ * **接口从成功退化为失败在指纹里完全不可见**——实测踩过这个盲点。
+ *
+ * @param value - 键值对里的值（不含 `=`）。
+ * @returns 是否易变。
+ */
+function isVolatileValue(value: string): boolean {
+  if (/\d{6,}/.test(value)) return true
+  if (/\d/.test(value) && !/^[1-5]\d{2}$/.test(value)) return true
+  return value.length > 24
+}
+
+/**
+ * 标签归一化：把**易变值**替换为占位符，保留**分类值**。
  *
  * 动因（来自真实数据的教训）：真实日志标签形如
  * `核验完成: orderNo=ORD-CONFIRM001, 核验耗时=5ms`——单号与耗时每次运行都不同。
  * 若直接入指纹，**每次跑都会报「标签变化」**，噪音淹没真信号。
- * 归一化后：数值变化不再影响指纹，只有**文案本身被改写（改名/改措辞）**才会。
+ *
+ * 但「易变」不等于「所有值」：状态码、成功标志、结果枚举**恰恰是要比对的对象**。
+ * 因此这里只抹易变值（ID、耗时、计数、长文本），保留分类值——
+ * 后者是「AI 的结果是否按逻辑运行」这条标尺上真正的刻度。
  *
  * @param label - 原始短标签。
  * @returns 归一化后的标签。
@@ -60,10 +91,14 @@ export function normalizeLabel(label: string): string {
     .replace(/\b[0-9a-fA-F]{8,}\b/g, '<id>')
     // 带连字符的 UUID
     .replace(/\b[0-9a-fA-F-]{16,}\b/g, '<id>')
-    // 纯数字与带单位数值（含毫秒）
-    .replace(/\b\d+(\.\d+)?(ms|s|MB|KB|次)?\b/g, '<n>')
-    // 键值对里的值（保留键名，抹掉值）
-    .replace(/=([^\s,，;；]+)/g, '=<v>')
+    // 带单位数值（耗时/体积）：一定易变
+    .replace(/\b\d+(\.\d+)?(ms|s|MB|KB)\b/g, '<n>')
+    // 中文量词前的数字（`11 条`/`3 次`）：计数易变，但量词本身保留
+    .replace(/\b\d+(\.\d+)?(?=\s*(?:次|条|个|笔|张))/g, '<n>')
+    // 键值对：保留键名，只抹易变的值（分类值原样留下）
+    .replace(/=([^\s,，;；|]+)/g, (whole, value: string) => (isVolatileValue(value) ? '=<v>' : whole))
+    // 其余裸数字：≥4 位视为易变（计数/长度）；1-3 位可能是状态码/级别，保留
+    .replace(/\b\d{4,}\b/g, '<n>')
 }
 
 /**

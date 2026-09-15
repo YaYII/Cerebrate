@@ -316,7 +316,11 @@ function classify(
     // 截断会丢失源数据精度——证据应当忠实于原始值，四舍五入留给展示层。
     const durationMs = durationRaw === undefined || durationRaw === '' ? null : Number.parseFloat(durationRaw)
     const okRaw = rule.okField === undefined ? undefined : groups[rule.okField]
-    const ok = okRaw === undefined || rule.okEquals === undefined ? null : okRaw === rule.okEquals
+    // 成败判定支持两种声明：等值（`okEquals`）与区间（`okPattern`，如 HTTP 2xx/3xx 视为成功）。
+    // 两者都未声明时必须是 null——**未知不等于成功**，否则失败会被静默算作正常。
+    let ok: boolean | null = null
+    if (okRaw !== undefined && rule.okEquals !== undefined) ok = okRaw === rule.okEquals
+    else if (okRaw !== undefined && rule.okRegex !== null) ok = rule.okRegex.test(okRaw)
     // 案例标识既可来自行首（Java/MDC），也可来自消息体（PHP/JSON 上下文）
     const caseIdRaw = rule.caseIdField === undefined ? undefined : groups[rule.caseIdField]
     const caseId = caseIdRaw !== undefined && caseIdRaw !== '' ? caseIdRaw : null

@@ -48,6 +48,16 @@ export interface MessageRule {
   okField?: string
   /** 成功判定期望值。 */
   okEquals?: string
+  /**
+   * 成功判定的**正则**期望（与 `okEquals` 二选一）：值匹配该正则即视为成功。
+   *
+   * 动因（来自 2026-09-15 真实流量）：`← 请求结束 POST … 状态=200` 这类行的成败
+   * **不是一个等值判断，而是一个区间**（2xx/3xx 成功，4xx/5xx 失败）。
+   * 只有 `okEquals` 时，`状态=200` 与 `状态=500` 都判成 `ok=null`（未知），
+   * 于是「接口从 200 退化为 500」在行为指纹里**完全不可见**——
+   * 实测确认过这一盲点：两次运行的指纹被判成 `identical`。
+   */
+  okPattern?: string
   /** 参与者归属：`logger` = 取 logger 简名；`stack` = 取调用栈顶。 */
   actor?: 'logger' | 'stack'
   /**
@@ -98,6 +108,8 @@ export interface RulePack {
 export interface CompiledRule extends MessageRule {
   /** 编译所得正则。 */
   regex: RegExp
+  /** 编译所得成功判定正则（未声明 `okPattern` 时为 null）。 */
+  okRegex: RegExp | null
 }
 
 /** 编译后的规则包。 */
@@ -119,7 +131,11 @@ export interface CompiledRulePack {
  */
 export function compileRulePack(pack: RulePack): CompiledRulePack {
   const formats = pack.formats.map((item) => compileFormat(item))
-  const rules = pack.rules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern) }))
+  const rules = pack.rules.map((rule) => ({
+    ...rule,
+    regex: new RegExp(rule.pattern),
+    okRegex: rule.okPattern === undefined ? null : new RegExp(rule.okPattern),
+  }))
   return { pack, formats, rules }
 }
 
