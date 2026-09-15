@@ -79,6 +79,81 @@ export interface IngestResult {
   warnings: string[]
 }
 
+/**
+ * 常见的掩码标记（被观测系统自身的脱敏产物）。
+ *
+ * 真实案例（2026-09-14 DSEDT 生产日志）：同一个 `orderNo` 在 5 行里是完整值，
+ * 在 1 行里被应用自己写成 `ORD-9006aa…（已脱敏）`——若原样使用，
+ * **同一张单据会被识别成两个业务对象**，生命周期被切断。
+ */
+const MASK_MARKERS: readonly RegExp[] = [
+  /…/, // 如 `ORD-9006aa…（已脱敏）`
+  /\.{3,}/, // 如 `ORD-9006aa...`
+  /\*{2,}/, // 如 `ORD-****`
+]
+
+/** 判断一个标识是否含掩码标记。 */
+function hasMaskMarker(value: string): boolean {
+  return MASK_MARKERS.some((marker) => marker.test(value));
+}
+
+/**
+ * 用包级声明从消息里抽取业务对象标识（**原样返回，不做消歧**）。
+ *
+ * 消歧放在收齐全部事实之后统一进行（见 `unifyMaskedObjects`）：
+ * 抽取阶段信息不全，任何"就地猜测"都可能把两张单据合并。
+ *
+ * @param text - 消息体。
+ * @param spec - 包级抽取声明。
+ * @returns 抽到的原始标识；未命中返回空串。
+ */
+function extractObjectId(text: string, spec: { pattern: string; group: string } | undefined): string {
+  if (spec === undefined) return ''
+  return new RegExp(spec.pattern).exec(text)?.groups?.[spec.group]?.trim() ?? ''
+}
+
+/**
+ * 掩码标识消歧：把「被掩码截断的标识」归并到唯一的完整标识上。
+ *
+ * 规则（保守，宁可不错）：
+ * - 掩码值 `M` 若**恰好是某一个**完整标识的前缀 → 归并为该完整标识；
+ * - 若匹配 0 个或多个完整标识 → **保持原样**（不猜），并计入 `ambiguous` 由上层披露。
+ *
+ * 真实动因（2026-09-14 DSEDT 生产日志）：同一 `orderNo` 在 5 行里是完整值，
+ * 在 1 行里被应用自己的脱敏写成 `ORD-9006aa…（已脱敏）`——
+ * 不消歧会把**同一张单据识别成两个业务对象**，生命周期被切断。
+ *
+ * @param events - 事件序列（就地修改 objectId）。
+ * @returns 消歧统计，供披露使用。
+ */
+function unifyMaskedObjects(events: RuntimeEvent[]): { masked: number; unified: number; ambiguous: number } {
+  const maskedEvents = events.filter((event) => event.objectIdMasked)
+  if (maskedEvents.length === 0) return { masked: 0, unified: 0, ambiguous: 0 }
+  const fullIds = [...new Set(events.filter((event) => !event.objectIdMasked && event.objectId !== '').map((event) => event.objectId))]
+  let unified = 0
+  let ambiguous = 0
+  for (const event of maskedEvents) {
+    // 先剥离掩码标记再做前缀匹配：标记本身不属于标识内容
+    // （如 `ORD-9006aa…（已脱敏）` → 前缀 `ORD-9006aa`）
+    const prefix = event.objectId.replace(/….*$/, '').replace(/\.{3,}.*$/, '').replace(/\*{2,}.*$/, '').trim()
+    if (prefix === '') {
+      ambiguous += 1
+      continue
+    }
+    const candidates = fullIds.filter((full) => full.startsWith(prefix))
+    if (candidates.length === 1) {
+      event.objectId = candidates[0]
+      event.objectIdMasked = false
+      unified += 1
+    } else {
+      // 不唯一就不猜：保留原值（含标记），由上层披露
+      event.objectId = prefix
+      ambiguous += 1
+    }
+  }
+  return { masked: maskedEvents.length, unified, ambiguous }
+}
+
 /** 内部：带原始行的解析记录。 */
 interface LineRecord {
   parsed: ParsedRecord
@@ -307,6 +382,8 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
     // 有效案例标识：优先行首 traceId（Java/MDC），其次规则从消息抽取（PHP/JSON）
     const caseId = parsed.traceId !== '' ? parsed.traceId : (outcome.caseId ?? '')
     if (caseId === '') missingCase += 1
+    const extracted = extractObjectId(record.text, compiled.pack.objectId)
+    const resolvedValue = outcome.objectId ?? (extracted !== '' ? extracted : parsed.objectId) ?? ''
     if (outcome.phase === 'call') stack.push(outcome.actor)
     if (outcome.phase === 'return' || outcome.phase === 'exception') stack.pop()
     events.push({
@@ -317,8 +394,9 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
       logger: parsed.logger,
       thread: parsed.thread,
       caseId,
-      // 业务对象标识：规则抽取优先；JSON Lines 可能已直接给出（如 pino 的 app_no）
-      objectId: outcome.objectId ?? parsed.objectId ?? '',
+      // 业务对象标识优先级：规则级抽取 > 包级通用抽取 > 格式自带（JSON Lines）
+      objectId: resolvedValue,
+      objectIdMasked: hasMaskMarker(resolvedValue),
       segments: outcome.segments,
       phase: outcome.phase,
       from: outcome.from,
@@ -355,6 +433,13 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
     )
   } else if (verdict === 'degraded') {
     warnings.push(`部分行未识别（${coverage.orphanLines} 行），存在格式漂移或非日志输出。`)
+  }
+  const maskStats = unifyMaskedObjects(events)
+  if (maskStats.masked > 0) {
+    warnings.push(
+      `发现 ${maskStats.masked} 条事件的业务对象标识带**掩码标记**（被观测系统自身的脱敏产物，如 \`ORD-9006aa…（已脱敏）\`）：` +
+        `其中 ${maskStats.unified} 条按「前缀唯一匹配」归并到完整标识，${maskStats.ambiguous} 条无法唯一确定（已保持原样，未猜测）。`,
+    )
   }
   if (fallbackLines > 0) {
     warnings.push(

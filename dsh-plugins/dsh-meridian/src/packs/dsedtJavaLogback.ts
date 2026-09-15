@@ -19,9 +19,30 @@ import type { RulePack } from '../features/rulePack'
 /** 类名/方法名占位（容忍简名与全限定名两种写法）。 */
 const IDENT = '[\\w.$]+'
 
+/**
+ * 分段耗时通用模式：`名称=数字ms`。
+ *
+ * 真实生产（2026-09-14，797ms 的 confirm-verify 请求）里，多种阶段日志共用这一写法：
+ * `抢占+载入=24ms`、`结果缓存=63ms`、`RSA=40ms`、`①查碼(Redis命中)=5ms`。
+ * 抽成常量避免每个规则各写一份。
+ */
+const SEGMENT_SPEC = {
+  pattern: '(?<name2>[^\\s=]+)=(?<ms2>[\\d.]+)ms',
+  nameGroup: 'name2',
+  valueGroup: 'ms2',
+  // 「合计」是汇总行不是阶段，混入热点排行会误导优化方向
+  ignore: ['合计'],
+}
+
 /** DSEDT 接入声明。 */
 export const DSEDT_PACK: RulePack = {
   name: 'dsedt-java-logback',
+  // 业务对象 = 单据号 orderNo。真实生产里它出现在建单/核验完成/主档收敛/异常等多种行中，
+  // 故用包级抽取一次覆盖（逐条规则声明会漏）。抽到它，「一张单据的一生」才成立。
+  // 字符类刻意放宽到「非空白/逗号/括号」：应用自身的脱敏产物形如
+  // `ORD-9006aa…（已脱敏）`，若限定为 [A-Za-z0-9-] 会在 `…` 处截断，
+  // **掩码对解析器变得不可见**，同一单据就会被拆成两个业务对象（实测踩过）。
+  objectId: { pattern: 'orderNo=(?<obj>[^\\s,，)）]+)', group: 'obj' },
   formats: [
     {
       name: 'dsedt-prod',
@@ -156,13 +177,41 @@ export const DSEDT_PACK: RulePack = {
       label: '核验确认-分段耗时',
       detail: '{0}',
       durationField: 'total',
-      segments: {
-        pattern: '(?<name>[^\\s=]+)= (?<ms>\\d+)ms|(?<name2>[^\\s=]+)=(?<ms2>\\d+)ms',
-        nameGroup: 'name2',
-        valueGroup: 'ms2',
-        // 「合计」是汇总行不是阶段，混入热点排行会误导优化方向
-        ignore: ['合计'],
-      },
+      segments: SEGMENT_SPEC,
+      actor: 'logger',
+    },
+    {
+      // 真实生产：`complete分段(慢): 绑定判定=0ms 签名(私钥取用+RSA)=40ms 结果缓存=63ms 合计=103ms path=WHITELIST`
+      name: 'complete-stage-breakdown',
+      phase: 'slow',
+      pattern: '^complete分段.*合计=(?<total>[\\d.]+)ms.*$',
+      durationField: 'total',
+      segments: SEGMENT_SPEC,
+      actor: 'logger',
+    },
+    {
+      // 真实生产：`signForMerchant分段(慢): 取私钥=0ms 解析=0ms RSA=40ms merchant=mpay pemLen=1703`
+      // 无「合计」→ 只抽分段，不设总耗时（分段本身即证据）
+      name: 'sign-stage-breakdown',
+      phase: 'slow',
+      pattern: '^signForMerchant分段.*$',
+      segments: SEGMENT_SPEC,
+      actor: 'logger',
+    },
+    {
+      // 真实生产：`verifyCode逐步: ①查碼(Redis命中)=5ms qr=B8AC022E…`
+      name: 'verifycode-stage',
+      phase: 'slow',
+      pattern: '^verifyCode逐步: .*$',
+      segments: SEGMENT_SPEC,
+      actor: 'logger',
+    },
+    {
+      // 真实生产：`verifyCode总计: 23ms (①查碼+②快照+③核銷裁決)`
+      name: 'verifycode-total',
+      phase: 'slow',
+      pattern: '^verifyCode总计: (?<total>[\\d.]+)ms.*$',
+      durationField: 'total',
       actor: 'logger',
     },
     {

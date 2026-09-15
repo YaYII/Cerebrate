@@ -73,7 +73,7 @@ describe('口径正确性（避免重复计算与假性结论）', () => {
   it('p95 采用最近秩法且不越界', () => {
     const events = [10, 20, 30, 40, 50].map((ms, index) => ({
       id: `e${index}`, seq: index + 1, ts: '', level: 'INFO', logger: 'L', thread: '',
-      caseId: '', objectId: '', phase: 'step' as const, from: null, to: null,
+      caseId: '', objectId: '', objectIdMasked: false, phase: 'step' as const, from: null, to: null,
       label: '同一活动', detail: '', durationMs: ms, ok: null, segments: [],
       evidence: { source: 'x.log', line: index + 1, lineCount: 1, snippet: 'x' },
     }))

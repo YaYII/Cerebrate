@@ -82,6 +82,16 @@ export interface RulePack {
   formats: FormatSpec[]
   /** 消息规则（按声明顺序匹配，先命中先产出）。 */
   rules: MessageRule[]
+  /**
+   * 包级业务对象抽取：对**每一条**消息统一尝试（可选）。
+   *
+   * 动因（来自真实生产语料）：业务对象标识（如 `orderNo`）常出现在多种日志行里
+   * （建单、核验完成、主档收敛、异常…），逐条规则声明既繁琐又容易漏。
+   * 包级声明一次即可让所有相关事件获得业务对象维度，从而让「一张单据的一生」成立。
+   *
+   * 优先级：规则级 `objectIdField` 命中时优先，否则回落到包级抽取。
+   */
+  objectId?: { pattern: string; group: string }
 }
 
 /** 编译后的规则。 */

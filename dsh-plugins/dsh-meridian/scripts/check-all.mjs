@@ -24,7 +24,7 @@ function main() {
   const steps = [
     ['注释语言检查', 'node', [join(ROOT, 'scripts', 'check-comments.mjs')]],
     ['类型检查', 'node', [resolvePkg('typescript/bin/tsc'), '--noEmit']],
-    ['单元测试', 'node', ['--import', 'tsx', '--test', 'tests/ingest.spec.ts', 'tests/ruler.spec.ts', 'tests/crossLanguage.spec.ts', 'tests/acceptance.spec.ts', 'tests/multiLanguage.spec.ts', 'tests/hotspots.spec.ts']],
+    ['单元测试', 'node', ['--import', 'tsx', '--test', 'tests/ingest.spec.ts', 'tests/ruler.spec.ts', 'tests/crossLanguage.spec.ts', 'tests/acceptance.spec.ts', 'tests/multiLanguage.spec.ts', 'tests/hotspots.spec.ts', 'tests/productionCorpus.spec.ts']],
     ['构建', 'node', [resolvePkg('tsdown/dist/run.mjs')]],
     ['插件冒烟（装配 + 注册 + 真实日志调用）', 'node', [join(ROOT, 'scripts', 'dev-smoke.mjs')]],
   ]
