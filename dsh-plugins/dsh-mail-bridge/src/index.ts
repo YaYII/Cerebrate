@@ -102,6 +102,10 @@ export interface Config {
   allowedSenders: string[]
   /** 新建分身时挂载的 agent preset（留空则不挂载，用宿主默认模型路由）。 */
   followerPreset: string
+  /** 分身专用模型 provider（留空则用宿主 agentDefaultModel 默认值）。 */
+  followerProvider: string
+  /** 分身专用模型 id（留空则用宿主 agentDefaultModel 默认值）。 */
+  followerModel: string
   /** 新建分身的工作目录（留空用宿主进程当前目录）。 */
   followerCwd: string
   /** 是否把陌生来信摘要上报主人。 */
@@ -134,6 +138,8 @@ export const Config: z<Config> = z.object({
   owner: z.string().default(''),
   allowedSenders: z.array(z.string()).default([]),
   followerPreset: z.string().default(''),
+  followerProvider: z.string().default(''),
+  followerModel: z.string().default(''),
   followerCwd: z.string().default(''),
   reportStrangers: z.boolean().default(true),
   classifyStrangers: z.boolean().default(true),
@@ -195,7 +201,11 @@ interface DefaultModelLike {
  * 本就没有「调用方 agent」。正确来源是宿主的 agentDefaultModel 服务；
  * 用 ctx.get 惰性读取（取不到就返回空，交由宿主自身默认处理）。
  */
-function resolveAgentOptions(ctx: Context): Record<string, string> {
+function resolveAgentOptions(ctx: Context, config: Config): Record<string, string> {
+  // 部署显式钉住的路由优先：数字员工不该因为有人在 UI 上改了全局默认模型就整体瘫痪
+  if (config.followerProvider.length > 0 && config.followerModel.length > 0) {
+    return { provider: config.followerProvider, model: config.followerModel }
+  }
   const service = ctx.get('agentDefaultModel') as DefaultModelLike | undefined
   if (service === undefined) return {}
   try {
@@ -394,7 +404,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
     try {
       const resumed = await agents.resume({
         resumeSessionId: sessionId,
-        agentOptions: resolveAgentOptions(ctx),
+        agentOptions: resolveAgentOptions(ctx, config),
         ...(config.followerPreset.length > 0
           ? { setup: async (agentCtx: unknown) => { await presets?.mount(agentCtx, config.followerPreset) } }
           : {}),
@@ -402,8 +412,9 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       resumed.agent.followup(message)
       return true
     } catch (error) {
-      log(`续接会话失败（session=${sessionId}）：${error instanceof Error ? error.message : String(error)}`)
-      return false
+      const detail = error instanceof Error ? error.message : String(error)
+      log(`续接会话失败（session=${sessionId}）：${detail}`)
+      throw new Error(`续接会话失败：${detail}`)
     }
   }
 
@@ -425,11 +436,10 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       createdAt: now(),
       updatedAt: now(),
     }
-    upsertThread(state, binding)
-    indexMessage(state, mail.messageId, tag)
-    persist()
-
-    const agentOptions = resolveAgentOptions(ctx)
+    // 注意顺序：**先建分身、建成功后才落线程绑定**。
+    // 反过来的话，创建失败时会在状态里留下指向不存在会话的孤儿线程，
+    // 而重试机制会让孤儿越积越多（实测踩过）。
+    const agentOptions = resolveAgentOptions(ctx, config)
     const cwd = config.followerCwd.length > 0 ? config.followerCwd : process.cwd()
     const meta: Record<string, string> = { cwd, mailThreadTag: tag, mailPeer: mail.fromAddress }
     try {
@@ -446,13 +456,20 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
           ? { setup: async (agentCtx: unknown) => { await presets?.mount(agentCtx, config.followerPreset) } }
           : {}),
       })
+      upsertThread(state, binding)
+      indexMessage(state, mail.messageId, tag)
+      persist()
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: mailPrompt(mail, tag, role) }],
         source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
       }))
       log(`已新建分身 session=${sessionId} 绑定线程 [#${tag}] 对端 ${mail.fromAddress}`)
     } catch (error) {
-      log(`新建分身失败（session=${sessionId}）：${error instanceof Error ? error.message : String(error)}`)
+      // 抛出而不是吞掉：交给收信循环按 MAX_DELIVERY_ATTEMPTS 重试，
+      // 否则一次瞬时失败就会把这封信永久丢掉。
+      const detail = error instanceof Error ? error.message : String(error)
+      log(`新建分身失败（session=${sessionId}）：${detail}`)
+      throw new Error(`新建分身失败：${detail}`)
     }
   }
 

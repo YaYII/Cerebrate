@@ -33,6 +33,10 @@
         # 新建分身挂载的 agent preset（留空用宿主默认模型路由）
         followerPreset: ''
         followerCwd: ''
+        # 分身专用模型路由（留空则用宿主 agentDefaultModel；显式钉住可避免
+        # 全局默认模型被改动后数字员工整体不可用）
+        followerProvider: ''
+        followerModel: ''
         reportStrangers: true
         classifyStrangers: true
         statePath: ''   # 留空则用 $DSH_HOME/storages/dsh-mail-bridge/state.json

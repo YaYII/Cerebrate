@@ -87193,6 +87193,8 @@ const Config = Schema.object({
 	owner: Schema.string().default(""),
 	allowedSenders: Schema.array(Schema.string()).default([]),
 	followerPreset: Schema.string().default(""),
+	followerProvider: Schema.string().default(""),
+	followerModel: Schema.string().default(""),
 	followerCwd: Schema.string().default(""),
 	reportStrangers: Schema.boolean().default(true),
 	classifyStrangers: Schema.boolean().default(true),
@@ -87217,7 +87219,11 @@ function now() {
 * 本就没有「调用方 agent」。正确来源是宿主的 agentDefaultModel 服务；
 * 用 ctx.get 惰性读取（取不到就返回空，交由宿主自身默认处理）。
 */
-function resolveAgentOptions(ctx) {
+function resolveAgentOptions(ctx, config) {
+	if (config.followerProvider.length > 0 && config.followerModel.length > 0) return {
+		provider: config.followerProvider,
+		model: config.followerModel
+	};
 	const service = ctx.get("agentDefaultModel");
 	if (service === void 0) return {};
 	try {
@@ -87401,15 +87407,16 @@ function createRuntime(ctx, config) {
 		try {
 			(await agents.resume({
 				resumeSessionId: sessionId,
-				agentOptions: resolveAgentOptions(ctx),
+				agentOptions: resolveAgentOptions(ctx, config),
 				...config.followerPreset.length > 0 ? { setup: async (agentCtx) => {
 					await presets?.mount(agentCtx, config.followerPreset);
 				} } : {}
 			})).agent.followup(message);
 			return true;
 		} catch (error) {
-			log(`续接会话失败（session=${sessionId}）：${error instanceof Error ? error.message : String(error)}`);
-			return false;
+			const detail = error instanceof Error ? error.message : String(error);
+			log(`续接会话失败（session=${sessionId}）：${detail}`);
+			throw new Error(`续接会话失败：${detail}`);
 		}
 	}
 	/** 新建一个分身会话并绑定线程（主人新指令 / 信任对端的新话题）。 */
@@ -87420,7 +87427,7 @@ function createRuntime(ctx, config) {
 		}
 		const tag = createThreadTag();
 		const sessionId = `mail-${randomUUID()}`;
-		upsertThread(state, {
+		const binding = {
 			tag,
 			sessionId,
 			peer: mail.fromAddress,
@@ -87429,10 +87436,8 @@ function createRuntime(ctx, config) {
 			references: [...new Set([...mail.references, mail.messageId])],
 			createdAt: now(),
 			updatedAt: now()
-		});
-		indexMessage(state, mail.messageId, tag);
-		persist();
-		const agentOptions = resolveAgentOptions(ctx);
+		};
+		const agentOptions = resolveAgentOptions(ctx, config);
 		const meta = {
 			cwd: config.followerCwd.length > 0 ? config.followerCwd : process.cwd(),
 			mailThreadTag: tag,
@@ -87444,14 +87449,18 @@ function createRuntime(ctx, config) {
 				await presets.resolve(config.followerPreset);
 				meta.agentPreset = config.followerPreset;
 			}
-			(await agents.create({
+			const handle = await agents.create({
 				sessionId,
 				meta,
 				...Object.keys(agentOptions).length > 0 ? { agentOptions } : {},
 				...config.followerPreset.length > 0 ? { setup: async (agentCtx) => {
 					await presets?.mount(agentCtx, config.followerPreset);
 				} } : {}
-			})).agent.followup(createUserMessage({
+			});
+			upsertThread(state, binding);
+			indexMessage(state, mail.messageId, tag);
+			persist();
+			handle.agent.followup(createUserMessage({
 				content: [{
 					type: "text",
 					text: mailPrompt(mail, tag, role)
@@ -87464,7 +87473,9 @@ function createRuntime(ctx, config) {
 			}));
 			log(`已新建分身 session=${sessionId} 绑定线程 [#${tag}] 对端 ${mail.fromAddress}`);
 		} catch (error) {
-			log(`新建分身失败（session=${sessionId}）：${error instanceof Error ? error.message : String(error)}`);
+			const detail = error instanceof Error ? error.message : String(error);
+			log(`新建分身失败（session=${sessionId}）：${detail}`);
+			throw new Error(`新建分身失败：${detail}`);
 		}
 	}
 	/** 把陌生来信摘要上报主人，由主人决定是否指派。 */
