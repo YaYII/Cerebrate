@@ -18787,7 +18787,7 @@ function buildGuidance(config) {
 /** 引导消息是否已存在于会话可见面。 */
 function guidanceAlreadyInjected(agent) {
 	return agent.session.surface.nodes.some((seq) => {
-		const event = agent.session.events[seq];
+		const event = agent.session.eventAt(seq);
 		return event?.type === "user/message" && event.data.source.kind === "plugin" && event.data.source.plugin === PLUGIN_TAG;
 	});
 }

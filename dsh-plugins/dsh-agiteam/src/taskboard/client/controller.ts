@@ -1,0 +1,506 @@
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { TaskboardSnapshot } from '../service/index.js'
+import { TASK_STATUSES } from '../domain/index.js'
+import type {
+  TaskStatus, TaskboardChangeWatchResult, TaskboardRemoteMutationRequest, TaskboardRemoteMutationResult, TaskboardTask, TaskDetail,
+} from '../domain/index.js'
+
+export type TaskboardView = 'dashboard' | 'board' | 'list' | 'labels' | 'gantt' | 'workflows' | 'workbench'
+
+export interface TaskboardRoute {
+  readonly open: boolean
+  readonly projectId?: string
+  readonly view: TaskboardView
+  readonly taskId?: string
+}
+
+export type RevisionChange = 'initial' | 'same' | 'next' | 'gap' | 'reset'
+
+export const AUTOMATION_LOG_PREVIEW_LIMIT = 10
+export const BOARD_COLUMN_PAGE_SIZE = 15
+
+/** Keep the dashboard log short; the remainder opens in a dialog. */
+export function previewAutomationRuns<T>(runs: readonly T[], limit = AUTOMATION_LOG_PREVIEW_LIMIT): {
+  readonly preview: readonly T[]
+  readonly remaining: number
+} {
+  return { preview: runs.slice(0, limit), remaining: Math.max(0, runs.length - limit) }
+}
+
+export interface BoardOrderedTask {
+  readonly sortOrder: number
+  readonly createdAt: number
+  readonly id: string
+}
+
+/** Authoritative board column order: manual `sortOrder` first, descending.
+ *
+ *  Descending keeps the newest card on top without a separate rule, because `createTask`
+ *  assigns an increasing `sortOrder` per project. Ordering by anything else (`updatedAt`,
+ *  for one) silently discards every drag-to-reorder write. */
+export function boardColumnOrder<T extends BoardOrderedTask>(tasks: readonly T[]): T[] {
+  return [...tasks].sort((left, right) => {
+    if (right.sortOrder !== left.sortOrder) return right.sortOrder - left.sortOrder
+    if (right.createdAt !== left.createdAt) return right.createdAt - left.createdAt
+    return left.id.localeCompare(right.id)
+  })
+}
+
+/** One page of a board column in manual order; later clicks reveal another page below. */
+export function paginateBoardColumn<T extends BoardOrderedTask>(
+  tasks: readonly T[],
+  visibleCount = BOARD_COLUMN_PAGE_SIZE,
+): { readonly visible: readonly T[]; readonly remaining: number } {
+  const ordered = boardColumnOrder(tasks)
+  const limit = Math.max(0, visibleCount)
+  return {
+    visible: ordered.slice(0, limit),
+    remaining: Math.max(0, ordered.length - limit),
+  }
+}
+
+const BOARD_ORDER_STEP = 1000
+
+/** `sortOrder` that lands a card directly above `target`, or at the column end when dropped on
+ *  empty space. Midpoints keep neighbouring cards untouched, so one drop is one write. */
+export function boardDropSortOrder(
+  column: readonly BoardOrderedTask[],
+  draggedId: string,
+  target?: { readonly id: string },
+): number | undefined {
+  const ordered = boardColumnOrder(column).filter(task => task.id !== draggedId)
+  if (target === undefined) {
+    const last = ordered[ordered.length - 1]
+    return last === undefined ? undefined : last.sortOrder - BOARD_ORDER_STEP
+  }
+  const at = ordered.findIndex(task => task.id === target.id)
+  if (at < 0) return undefined
+  const below = ordered[at]!
+  const above = ordered[at - 1]
+  return above === undefined ? below.sortOrder + BOARD_ORDER_STEP : (above.sortOrder + below.sortOrder) / 2
+}
+
+/** Human quick-add from the web form: land in Backlog so drafts are not claimed. */
+export function humanQuickCreateRequest(projectId: string, title: string): {
+  readonly projectId: string
+  readonly title: string
+  readonly creator: 'human:web-client'
+  readonly status: 'backlog'
+} {
+  return { projectId, title: title.trim(), creator: 'human:web-client', status: 'backlog' }
+}
+
+/** Content types the page can render inline; everything else is download-only. */
+export function isPreviewableAttachment(contentType: string): boolean {
+  return /^image\/(gif|jpeg|png|webp)$/i.test(contentType.trim())
+}
+
+/** Empty descriptions open Write; saved Markdown opens Preview. */
+export function descriptionComposerMode(description: string): 'write' | 'preview' {
+  return description.trim() === '' ? 'write' : 'preview'
+}
+
+/** Accept a create mutation result only when it carries a task id. */
+export function createdTaskId(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const id = (value as { id?: unknown }).id
+  return typeof id === 'string' && id.length > 0 ? id : undefined
+}
+
+/** Fill empty automation model fields from Host defaults without overwriting an explicit rule. */
+export function applyAutomationDefaults<T>(
+  config: T & { readonly modelRoute?: string; readonly reasoning?: string },
+  defaults: { readonly modelRoute?: string; readonly reasoning?: string } | undefined,
+): T & { readonly modelRoute?: string; readonly reasoning?: string } {
+  return {
+    ...config,
+    ...(config.modelRoute === undefined && defaults?.modelRoute !== undefined ? { modelRoute: defaults.modelRoute } : {}),
+    ...(config.reasoning === undefined && defaults?.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
+  }
+}
+
+/** Classify bounded-snapshot revisions after events, reconnects, or a Host restart. */
+export function classifyRevisionChange(previous: number | undefined, next: number): RevisionChange {
+  if (previous === undefined) return 'initial'
+  if (next === previous) return 'same'
+  if (next < previous) return 'reset'
+  return next === previous + 1 ? 'next' : 'gap'
+}
+
+export type TaskListSortKey = 'identifier' | 'title' | 'status' | 'priority' | 'dueDate'
+
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 }
+const STATUS_RANK = new Map(TASK_STATUSES.map((status, index) => [status as string, index]))
+
+/** Rank one task for the list view. Priority and status are enums with a meaningful order, so
+ *  comparing their raw strings put "high" before "low" before "urgent" -- alphabetical noise. */
+function sortValue(task: TaskListSortable, key: TaskListSortKey): string | number {
+  if (key === 'priority') return PRIORITY_RANK[task.priority] ?? Number.MAX_SAFE_INTEGER
+  if (key === 'status') return STATUS_RANK.get(task.status) ?? Number.MAX_SAFE_INTEGER
+  // Undated tasks sort last in both directions rather than leading the ascending page.
+  if (key === 'dueDate') return task.dueDate ?? '\uffff'
+  return key === 'title' ? task.title : task.identifier
+}
+
+export interface TaskListSortable {
+  readonly identifier: string
+  readonly title: string
+  readonly status: string
+  readonly priority: string
+  readonly dueDate?: string
+}
+
+/** Order the list view by one column, in the requested direction. */
+export function sortTaskList<T extends TaskListSortable>(
+  tasks: readonly T[],
+  key: TaskListSortKey,
+  direction: 'asc' | 'desc' = 'asc',
+): T[] {
+  const sign = direction === 'asc' ? 1 : -1
+  return [...tasks].sort((left, right) => {
+    const a = sortValue(left, key)
+    const b = sortValue(right, key)
+    if (typeof a === 'number' && typeof b === 'number') {
+      if (a !== b) return (a - b) * sign
+    } else if (a !== b) {
+      return String(a).localeCompare(String(b), undefined, { numeric: true }) * sign
+    }
+    // Stable, direction-independent tiebreak so equal rows never shuffle between renders.
+    return left.identifier.localeCompare(right.identifier, undefined, { numeric: true })
+  })
+}
+
+export type BoardDropIntent =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'reorder'; readonly taskId: string; readonly expectedVersion: number; readonly sortOrder: number }
+  | { readonly kind: 'move'; readonly taskId: string; readonly expectedVersion: number; readonly status: TaskStatus; readonly sortOrder?: number }
+
+/** Map a board drop onto reorder-within-column or a human status move.
+ *
+ *  `column` is every task already in the destination column, so a drop on empty space can
+ *  append to the end instead of being discarded. */
+export function boardDropIntent(
+  dragged: { readonly id: string; readonly status: TaskStatus; readonly version: number; readonly archivedAt?: number } | undefined,
+  targetStatus: TaskStatus,
+  column: readonly BoardOrderedTask[] = [],
+  target?: { readonly id: string },
+): BoardDropIntent {
+  if (dragged === undefined || dragged.archivedAt !== undefined) return { kind: 'none' }
+  if (target !== undefined && dragged.id === target.id) return { kind: 'none' }
+  const sortOrder = boardDropSortOrder(column, dragged.id, target)
+  if (dragged.status === targetStatus) {
+    if (sortOrder === undefined) return { kind: 'none' }
+    return { kind: 'reorder', taskId: dragged.id, expectedVersion: dragged.version, sortOrder }
+  }
+  return {
+    kind: 'move',
+    taskId: dragged.id,
+    expectedVersion: dragged.version,
+    status: targetStatus,
+    ...(sortOrder === undefined ? {} : { sortOrder }),
+  }
+}
+
+/** Labels present on the project catalog or any task, in first-seen order. */
+export function projectLabelCatalog(projectLabels: readonly string[], tasks: readonly { readonly labels: readonly string[] }[]): string[] {
+  const seen = new Set<string>()
+  const catalog: string[] = []
+  for (const label of [...projectLabels, ...tasks.flatMap(task => task.labels)]) {
+    const name = label.trim()
+    if (name === '' || seen.has(name)) continue
+    seen.add(name)
+    catalog.push(name)
+  }
+  return catalog
+}
+
+/** Tasks that carry `label`, or unlabeled tasks when `label` is undefined. */
+export function tasksForLabel<T extends { readonly labels: readonly string[] }>(tasks: readonly T[], label: string | undefined): T[] {
+  return tasks.filter(task => label === undefined ? task.labels.length === 0 : task.labels.includes(label))
+}
+
+const VIEWS = new Set<TaskboardView>(['dashboard', 'board', 'list', 'labels', 'gantt', 'workflows', 'workbench'])
+const RECENT_PROJECT_KEY = 'dsh-taskboard.recent-project'
+
+/** Restore only an open project-less route; explicit deep links always win. */
+export function restoreRecentProject(route: TaskboardRoute, recent: string | null): TaskboardRoute {
+  return !route.open || route.projectId !== undefined || recent === null || recent === '' ? route : { ...route, projectId: recent }
+}
+
+/** Render the unsent native-conversation draft created only on explicit user request. */
+export function renderTaskSessionDraft(detail: TaskDetail): string {
+  const { task } = detail
+  const comments = detail.comments.length === 0
+    ? '- None'
+    : detail.comments.map(item => `- ${item.authorId}: ${item.body}`).join('\n')
+  const relations = detail.relations.length === 0
+    ? '- None'
+    : detail.relations.map(item => {
+        const direction = item.sourceTaskId === task.id ? 'outgoing' : 'incoming'
+        const other = item.sourceTaskId === task.id ? item.targetTaskId : item.sourceTaskId
+        return `- ${item.kind} (${direction}): ${other}`
+      }).join('\n')
+  const attachments = detail.attachments.length === 0
+    ? '- None'
+    : detail.attachments.map(item => `- ${item.id}: ${item.filename} (${item.contentType}, ${item.byteSize} bytes)`).join('\n')
+  const development = task.developmentContext === undefined
+    ? 'Project workspace'
+    : task.developmentContext.kind === 'branch'
+      ? `Branch ${task.developmentContext.branch}`
+      : `Worktree ${task.developmentContext.path}, branch ${task.developmentContext.branch}`
+  return [
+    `Work on Task ${task.identifier}.`,
+    `Opaque task id: ${task.id}`,
+    `Current task revision: ${task.version}`,
+    '',
+    `Title: ${task.title}`,
+    '',
+    'Description and acceptance details:',
+    task.description || '(No description supplied.)',
+    '',
+    'Current comments:', comments,
+    '',
+    'Relations and dependency state:', relations,
+    '',
+    `Development context: ${development}`,
+    '',
+    'Attachment references:', attachments,
+    '',
+    'Use taskboard_get with the exact opaque id before any write. Claim only if eligible, verify the work, and submit it for human review. Never modify the task description; write the final result as a comment. Never accept it as done.',
+  ].join('\n')
+}
+
+/** Generated Taskboard Remote namespace consumed by the native page. */
+export interface TaskboardRemoteNamespace {
+  snapshot(projectId?: string): Promise<RemoteResult<string>>
+  taskDetail(taskId: string): Promise<RemoteResult<string>>
+  mutate(request: TaskboardRemoteMutationRequest): Promise<RemoteResult<TaskboardRemoteMutationResult>>
+}
+
+/** Decode one refresh-safe Taskboard hash without consulting browser state. */
+export function decodeTaskboardHash(hash: string): TaskboardRoute {
+  if (!hash.startsWith('#taskboard')) return { open: false, view: 'board' }
+  const [, projectId, rawView, taskId] = hash.slice(1).split('/')
+  const view = VIEWS.has(rawView as TaskboardView) ? rawView as TaskboardView : 'board'
+  return {
+    open: true,
+    ...(projectId === undefined || projectId === '-' ? {} : { projectId: decodeURIComponent(projectId) }),
+    view,
+    ...(taskId === undefined ? {} : { taskId: decodeURIComponent(taskId) }),
+  }
+}
+
+function parseRoute(): TaskboardRoute {
+  const route = decodeTaskboardHash(typeof location === 'undefined' ? '' : location.hash)
+  if (!route.open || route.projectId !== undefined || typeof localStorage === 'undefined') return route
+  try {
+    return restoreRecentProject(route, localStorage.getItem(RECENT_PROJECT_KEY))
+  } catch {
+    return route
+  }
+}
+
+/** Encode one open page route for deep-link and refresh restoration. */
+export function encodeTaskboardRoute(route: TaskboardRoute): string {
+  const project = encodeURIComponent(route.projectId ?? '-')
+  const task = route.taskId === undefined ? '' : `/${encodeURIComponent(route.taskId)}`
+  return `#taskboard/${project}/${route.view}${task}`
+}
+
+function watcherId(): string {
+  const random = globalThis.crypto as { randomUUID?: () => string } | undefined
+  return random?.randomUUID?.() ?? `watcher-${String(Math.trunc(Math.random() * 1e12))}`
+}
+
+/** Connection face used by the page after Harness 0.1.2: generation invalidation plus the dedicated RPC channel. */
+export interface TaskboardConnection {
+  readonly generation: {
+    subscribe(listener: () => void): () => void
+  }
+  readonly rpc: {
+    call(
+      channel: string,
+      endpoint: string,
+      payload: unknown,
+      signal?: AbortSignal,
+    ): Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }>
+  }
+}
+
+/** Bind an observable so `useSyncExternalStore` can take the methods without losing `this`. */
+export function observeSnapshot<T>(source: {
+  subscribe(listener: () => void): () => void
+  getSnapshot(): T
+}): {
+  subscribe(listener: () => void): () => void
+  getSnapshot(): T
+} {
+  return {
+    subscribe: listener => source.subscribe(listener),
+    getSnapshot: () => source.getSnapshot(),
+  }
+}
+
+/** Browser-local page state and route codec; business state always comes from the Host. */
+export class TaskboardClientController {
+  private route = parseRoute()
+  private listeners = new Set<() => void>()
+  private globalRevision: number | undefined
+  /** Identifies this page's long-poll loop so the Host can release a waiter this page abandoned:
+   *  an abort is local and never reaches the Host, so the old waiter held its slot until timeout. */
+  private readonly watcherId = watcherId()
+
+  constructor(
+    readonly connection: TaskboardConnection,
+    private readonly remote: TaskboardRemoteNamespace,
+    private readonly selectSession?: (sessionId: string) => void | Promise<void>,
+    private readonly createTaskSession?: (workspaceId: string, draft: string) => Promise<string>,
+  ) {
+    if (typeof window !== 'undefined') window.addEventListener('hashchange', this.onRoute)
+  }
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  readonly getSnapshot = (): TaskboardRoute => this.route
+
+  open(): void {
+    this.navigate({ ...this.route, open: true })
+  }
+
+  close(): void {
+    if (typeof history !== 'undefined') history.pushState(null, '', `${location.pathname}${location.search}`)
+    this.route = { open: false, view: this.route.view, ...(this.route.projectId === undefined ? {} : { projectId: this.route.projectId }) }
+    this.publish()
+  }
+
+  select(projectId: string | undefined, view: TaskboardView = this.route.view, taskId?: string): void {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (projectId === undefined) localStorage.removeItem(RECENT_PROJECT_KEY)
+        else localStorage.setItem(RECENT_PROJECT_KEY, projectId)
+      } catch { /* route state remains authoritative when storage is unavailable */ }
+    }
+    this.navigate({ open: true, view, ...(projectId === undefined ? {} : { projectId }), ...(taskId === undefined ? {} : { taskId }) })
+  }
+
+  async snapshot(projectId?: string, signal?: AbortSignal): Promise<TaskboardSnapshot> {
+    signal?.throwIfAborted()
+    const result = await this.remote.snapshot(projectId)
+    if (!result.ok) throw new Error(result.error.message)
+    return JSON.parse(result.value) as TaskboardSnapshot
+  }
+
+  async detail(taskId: string, signal?: AbortSignal): Promise<TaskDetail> {
+    signal?.throwIfAborted()
+    const result = await this.remote.taskDetail(taskId)
+    if (!result.ok) throw new Error(result.error.message)
+    return JSON.parse(result.value) as TaskDetail
+  }
+
+  subscribeConnection(listener: () => void): () => void {
+    return this.connection.generation.subscribe(listener)
+  }
+
+  recordSnapshotRevision(revision: number): RevisionChange {
+    const change = classifyRevisionChange(this.globalRevision, revision)
+    this.globalRevision = revision
+    return change
+  }
+
+  async openSession(sessionId: string): Promise<void> {
+    if (this.selectSession === undefined) throw new Error('native Session navigation is unavailable')
+    await this.selectSession(sessionId)
+    this.close()
+  }
+
+  async openNewSession(workspaceId: string, detail: TaskDetail): Promise<string> {
+    if (this.createTaskSession === undefined) throw new Error('native Session creation is unavailable')
+    const sessionId = await this.createTaskSession(workspaceId, renderTaskSessionDraft(detail))
+    await this.mutate('task.bind-session', {
+      taskId: detail.task.id,
+      expectedVersion: detail.task.version,
+      sessionId,
+      agentId: sessionId,
+    })
+    this.close()
+    return sessionId
+  }
+
+  async mutate(endpoint: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted()
+    const result = await this.connection.rpc.call('/taskboard', endpoint, payload, signal)
+    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    return result.value
+  }
+
+  /** Search the whole project in SQLite. The board can only filter the tasks a snapshot carried. */
+  async searchTasks(projectId: string, search: string, signal?: AbortSignal): Promise<TaskboardTask[]> {
+    return await this.mutate('task.search', { projectId, search }, signal) as TaskboardTask[]
+  }
+
+  async watchChanges(afterRevision: number, signal?: AbortSignal): Promise<TaskboardChangeWatchResult> {
+    signal?.throwIfAborted()
+    const carried = await this.remote.mutate({
+      endpoint: 'changes.watch',
+      payloadJson: JSON.stringify({ afterRevision, timeoutMs: 10_000, watcherId: this.watcherId }),
+    })
+    signal?.throwIfAborted()
+    if (!carried.ok) throw new Error(carried.error.message)
+    if (!carried.value.ok) {
+      throw new Error(`${carried.value.errorCode ?? 'taskboard'}: ${carried.value.errorMessage ?? 'change watch failed'}`)
+    }
+    return JSON.parse(carried.value.valueJson ?? 'null') as TaskboardChangeWatchResult
+  }
+
+  async uploadAttachment(taskId: string, expectedVersion: number, file: File, commentId?: string, signal?: AbortSignal): Promise<void> {
+    const ticket = await this.mutate('attachment.upload-ticket', {
+      taskId, expectedVersion, filename: file.name, contentType: file.type || 'application/octet-stream',
+      ...(commentId === undefined ? {} : { commentId }),
+    }, signal) as { url: string; method: 'PUT' }
+    const response = await fetch(ticket.url, { method: ticket.method, body: file, ...(signal === undefined ? {} : { signal }), headers: { 'content-type': 'application/octet-stream' } })
+    if (!response.ok) throw new Error(`attachment upload failed (${response.status}): ${await response.text()}`)
+  }
+
+  async downloadAttachment(attachmentId: string, filename: string): Promise<void> {
+    const ticket = await this.mutate('attachment.download-ticket', { attachmentId, disposition: 'attachment' }) as { url: string }
+    const anchor = document.createElement('a')
+    anchor.href = ticket.url
+    anchor.download = filename
+    anchor.rel = 'noopener'
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+  }
+
+  /** One-time inline URL for previewing an attachment in place; the ticket expires after one GET. */
+  async previewAttachmentUrl(attachmentId: string): Promise<string> {
+    const ticket = await this.mutate('attachment.download-ticket', { attachmentId, disposition: 'inline' }) as { url: string }
+    return ticket.url
+  }
+
+  dispose(): void {
+    if (typeof window !== 'undefined') window.removeEventListener('hashchange', this.onRoute)
+    this.listeners.clear()
+  }
+
+  private readonly onRoute = (): void => {
+    this.route = parseRoute()
+    this.publish()
+  }
+
+  private navigate(route: TaskboardRoute): void {
+    const hash = encodeTaskboardRoute(route)
+    // Re-selecting the same view used to push a duplicate entry, so Back had to be pressed once
+    // per click to leave the page.
+    if (typeof history !== 'undefined' && hash !== location.hash) history.pushState(null, '', hash)
+    this.route = route
+    this.publish()
+  }
+
+  private publish(): void {
+    for (const listener of [...this.listeners]) listener()
+  }
+}

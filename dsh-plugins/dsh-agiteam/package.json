@@ -1,0 +1,81 @@
+{
+  "name": "@deepseek-ai/dsh-agiteam",
+  "description": "AGI 团队开发引擎 for DeepSeek Harness: 需求分析→评审门禁→产品功能→用例评审→正式开发→逐功能验收→模拟用户场景 E2E 的完整团队开发流程编排插件。多角色子 agent（主管/需求/架构/产品/需求评审/产品评审/测试设计/开发/验收）协作，全流程 AI 自动评审门禁。含可视化面板（追溯矩阵/审计日志/多层校验）。",
+  "version": "0.2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "dsh-plugins/dsh-agiteam"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
+    "build": "npm run build:tb-host && tsdown",
+    "build:client": "tsc -p tsconfig.client.json && tsdown -c tsdown.client.config.ts",
+    "build:all": "npm run build && npm run build:client",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check-all": "node scripts/check-all.mjs",
+    "build:tb-host": "tsc -p tsconfig.tb-host.json"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,10 @@
+# dsh-agiteam bundle patch — the loader entry for the plugin package.
+# 架构：dsh-agiteam = AGI 团队大脑（agiteam_* 工具 + 九阶段流程），
+# 内嵌 taskboard 底座（src/taskboard，vendored Apache-2.0）提供成熟 UI/存储。
+# host 注册：tsc 编译 taskboard（lib/taskboard-host，转 @Remote 装饰器）+ tsdown 打包。
+- insert:
+    - id: agiteam
+      name: '@deepseek-ai/dsh-agiteam'
+      config:
+        artifactsDir: '.teamdev'
+        injectGuidance: true

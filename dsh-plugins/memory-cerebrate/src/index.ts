@@ -161,7 +161,7 @@ const PLUGIN_TAG = 'memory-cerebrate'
  */
 function guidanceAlreadyInjected(agent: Agent): boolean {
   return agent.session.surface.nodes.some((seq) => {
-    const event = agent.session.events[seq]
+    const event = agent.session.eventAt(seq)
     return event?.type === 'user/message'
       && event.data.source.kind === 'plugin'
       && event.data.source.plugin === PLUGIN_TAG

@@ -161,7 +161,7 @@ export function apply(ctx: Context, config: Config): void {
       const decision = await next()
       if (decision.kind === 'reject' || (step === 1 && decision.messages.length === 0)) return decision
       if (agent.session.surface.nodes.some(seq => {
-        const event = agent.session.events[seq]
+        const event = agent.session.eventAt(seq)
         return event?.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === name
       })) return decision
       signal.throwIfAborted()

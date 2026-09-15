@@ -130,8 +130,8 @@ async function driveBuild(handle: AgentHandle, task: string): Promise<BuildResul
  * 时误报空成功。遍历完整事件数组（而非 surface，后者可能丢弃 turn/end
  * 与工具事件），确保失败的轮次可靠上报错误。
  */
-function extractOutcome(agent: { session: { events: readonly unknown[] } }): { report: string; error?: string } {
-  const events = agent.session.events
+function extractOutcome(agent: { session: { snapshotEvents(): readonly unknown[] } }): { report: string; error?: string } {
+  const events = agent.session.snapshotEvents()
   let report = ''
   let turnError = ''
   for (const raw of events) {

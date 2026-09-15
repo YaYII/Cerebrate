@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "strict": true,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": false,
+    "types": [
+      "node"
+    ],
+    "outDir": "lib/taskboard-host",
+    "rootDir": "src/taskboard",
+    "declaration": false,
+    "rewriteRelativeImportExtensions": true,
+    "sourceMap": false
+  },
+  "include": [
+    "src/taskboard/**/*.ts"
+  ],
+  "exclude": [
+    "src/taskboard/client",
+    "tests"
+  ]
+}

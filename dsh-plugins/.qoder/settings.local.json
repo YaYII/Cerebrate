@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ss -tlnp 2>/dev/null | head -50)",
+      "Bash(ps aux | grep -iE \"node|python3\" | grep -vE \"grep|qoder|vscode\" | head -30)",
+      "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Image}}\\\\t{{.Ports}}\\\\t{{.Status}}\" 2>/dev/null | head -30)",
+      "Bash(ls -la /home/as-workstation01/.dsh/ 2>/dev/null; echo \"---\"; head -60 /home/as-workstation01/.dsh/agentrouter-proxy.mjs 2>/dev/null)",
+      "Bash(curl -s -m 5 http://127.0.0.1:4000/health 2>&1; echo \"---LIVENESS---\"; curl -s -m 5 http://127.0.0.1:4000/health/liveliness 2>&1; echo \"---MODELS---\"; curl -s -m 5 http://127.0.0.1:4000/v1/models -H \"Authorization: Bearer sk-1234\" 2>&1 | head -c 2000)",
+      "Bash(docker inspect llm-gateway --format '{{json .Config.Cmd}}' 2>/dev/null; echo \"---MOUNTS---\"; docker inspect llm-gateway --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{\"\\\\n\"}}{{end}}' 2>/dev/null; echo \"---ENV---\"; docker inspect llm-gateway --format '{{range .Config.Env}}{{.}}{{\"\\\\n\"}}{{end}}' 2>/dev/null | grep -viE \"key|token|secret|password\" | head -20)",
+      "Bash(head -80 /home/as-workstation01/ai-gateway/README.md 2>/dev/null; echo \"===ACCOUNT-STATE===\"; cat /home/as-workstation01/ai-gateway/account-state.json 2>/dev/null; echo \"===SYNC-LOG-TAIL===\"; tail -15 /home/as-workstation01/ai-gateway/sync.log 2>/dev/null)",
+      "Bash(ps aux | grep -iE \"dashboard|sync_accounts|llm-gateway\" | grep -v grep; echo \"---CRON---\"; crontab -l 2>/dev/null | grep -iE \"llm|gateway|sync\" ; echo \"---TIMER---\"; systemctl --user list-timers 2>/dev/null | grep -iE \"llm|gateway|sync\" | head -5; echo \"---DASHBOARD-PORT---\"; ss -tlnp 2>/dev/null | grep -E \":\\(4000|8888|9000|8085\\)\" )",
+      "Bash(cat /home/as-workstation01/.local/bin/llm-gateway 2>/dev/null | head -100)",
+      "Bash(sed -n 100,220p /home/as-workstation01/.local/bin/llm-gateway 2>/dev/null)",
+      "Read(//home/as-workstation01/.local/bin/**)",
+      "Bash(grep -nE \"CMD_API_KEY|environ|os\\\\.getenv|_KEY_\" /home/as-workstation01/ai-gateway/sync_accounts.py | head -30)",
+      "Bash(cp -p /home/as-workstation01/ai-gateway/gateway.env \"/home/as-workstation01/ai-gateway/gateway.env.bak-addacct3-$\\(date +%Y%m%d%H%M%S\\)\" && ls -la /home/as-workstation01/ai-gateway/gateway.env*)",
+      "Bash(/home/as-workstation01/.local/bin/llm-gateway sync 2>&1)",
+      "Bash(/home/as-workstation01/.local/bin/llm-gateway status 2>&1)",
+      "Bash(/home/as-workstation01/.local/bin/llm-gateway test 2>&1)",
+      "Bash(docker inspect dshagent-app --format '{{range .Config.Env}}{{.}}{{\"\\\\n\"}}{{end}}' 2>/dev/null | grep -iE \"llm|gateway|api|model|base\" | grep -viE \"password|secret\" | head -20; echo \"---NET---\"; docker inspect dshagent-app --format '{{json .NetworkSettings.Networks}}' 2>/dev/null | python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(' \\\\n'.join\\(d.keys\\(\\)\\)\\)\" 2>/dev/null; echo \"---GATEWAY-NET---\"; docker inspect llm-gateway --format '{{json .NetworkSettings.Networks}}' 2>/dev/null | python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('\\\\n'.join\\(d.keys\\(\\)\\)\\)\" 2>/dev/null)",
+      "Bash(docker logs llm-gateway --tail 80 2>&1 | grep -iE \"error|429|retry|fallback|cc-acct|exception|503|success\" | tail -40)",
+      "Bash(docker logs llm-gateway --tail 60 2>&1 | tail -45)",
+      "Bash(KEY=$\\(grep '^LITELLM_MASTER_KEY=' /home/as-workstation01/ai-gateway/gateway.env | cut -d= -f2-\\)\nfor i in 1 2 3; do\ncurl -sS -m 120 -D /tmp/v41h.txt -o /tmp/v41b.txt -X POST http://127.0.0.1:4000/v1/messages \\\\\n  -H \"Authorization: Bearer $KEY\" -H \"anthropic-version: 2023-06-01\" -H \"Content-Type: application/json\" \\\\\n  -d '{\"model\":\"deepseek-v4.1-flash\",\"max_tokens\":30,\"messages\":[{\"role\":\"user\",\"content\":\"回复：ok\"}]}'\necho \"== 第${i}次: $\\(grep -iE '^x-litellm-model-id|^x-litellm-model-api-base' /tmp/v41h.txt | tr -d '\\\\r' | tr '\\\\n' ' '\\)\"\npython3 -c \"import json; d=json.load\\(open\\('/tmp/v41b.txt'\\)\\); print\\('   model:', d.get\\('model'\\), '| resp:', ''.join\\(b.get\\('text',''\\) for b in d.get\\('content',[]\\) if b.get\\('type'\\)=='text'\\).strip\\(\\)[:40]\\) if d.get\\('type'\\)!='error' else print\\('   ERROR:', json.dumps\\(d,ensure_ascii=False\\)[:200]\\)\"\ndone)",
+      "Bash(cat /tmp/v41b.txt 2>/dev/null | python3 -m json.tool 2>/dev/null | head -30)",
+      "Bash(docker exec dshagent-app sh -c 'curl -s -m 5 http://llm-gateway:4000/health/liveliness' 2>&1; echo; echo \"---dsh 视角模型枚举---\"; docker exec dshagent-app sh -c 'curl -s -m 5 http://llm-gateway:4000/v1/models -H \"Authorization: Bearer $LITELLM_MASTER_KEY\"' 2>&1 | head -c 600)",
+      "Bash(docker exec dshagent-app node -e \"\nconst base='http://llm-gateway:4000';\n\\(async\\(\\)=>{\n  const h=await fetch\\(base+'/health/liveliness'\\); console.log\\('liveliness:', \\(await h.text\\(\\)\\).trim\\(\\)\\);\n  const r=await fetch\\(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+process.env.LITELLM_MASTER_KEY},body:JSON.stringify\\({model:'deepseek-v4.1-flash',messages:[{role:'user',content:'只回复三个字：连通了'}],max_tokens:100}\\)}\\);\n  const d=await r.json\\(\\);\n  const c=d.choices?.[0]?.message?.content ?? JSON.stringify\\(d\\).slice\\(0,200\\);\n  console.log\\('chat:', r.status, '| model:', d.model, '| 回复:', \\(c||''\\).trim\\(\\)\\);\n}\\)\\(\\).catch\\(e=>console.log\\('ERR:', e.message\\)\\);\n\" 2>&1)",
+      "Bash(/home/as-workstation01/.local/bin/llm-gateway accounts 2>&1)"
+    ]
+  }
+}
