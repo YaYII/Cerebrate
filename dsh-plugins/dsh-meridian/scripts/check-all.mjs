@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 统一门禁：注释语言 → 类型检查 → 单元测试。
+ * 统一门禁：注释语言 → 类型检查 → 单元测试 → 构建 → 插件冒烟。
  *
  * 与同仓其它插件不同的一点：本插件**零本地依赖**（离线可用），
  * 工具链优先取本地 node_modules，取不到则回退到 DSH 检出（可用 DSH_TOOLCHAIN 覆盖）。
@@ -13,19 +13,20 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const TOOLCHAIN = process.env.DSH_TOOLCHAIN ?? '/home/as-workstation01/Documents/project/deepseek-harness/node_modules'
 
-/** 解析可执行文件路径：先本地，再工具链。 */
-function resolve(bin) {
-  const local = join(ROOT, 'node_modules', '.bin', bin)
-  if (existsSync(local)) return local
-  return join(TOOLCHAIN, '.bin', bin)
+/** 解析包内可执行文件：先本地 node_modules，再回退到 DSH 工具链。 */
+function resolvePkg(rel) {
+  const local = join(ROOT, 'node_modules', rel)
+  return existsSync(local) ? local : join(TOOLCHAIN, rel)
 }
 
 /** 依次执行门禁步骤，任一失败即退出非零。 */
 function main() {
   const steps = [
     ['注释语言检查', 'node', [join(ROOT, 'scripts', 'check-comments.mjs')]],
-    ['类型检查', resolve('tsc'), ['--noEmit']],
+    ['类型检查', 'node', [resolvePkg('typescript/bin/tsc'), '--noEmit']],
     ['单元测试', 'node', ['--import', 'tsx', '--test', 'tests/ingest.spec.ts', 'tests/ruler.spec.ts', 'tests/crossLanguage.spec.ts']],
+    ['构建', 'node', [resolvePkg('tsdown/dist/run.mjs')]],
+    ['插件冒烟（装配 + 注册 + 真实日志调用）', 'node', [join(ROOT, 'scripts', 'dev-smoke.mjs')]],
   ]
   for (const [name, cmd, args] of steps) {
     process.stdout.write(`[${name}] ${cmd}\n`)
@@ -36,8 +37,9 @@ function main() {
       process.exit(1)
     }
     if (name === '注释语言检查') process.stdout.write(result.stdout)
+    else if (name.startsWith('插件冒烟')) process.stdout.write(`  ✓ ${name}（注册 4 工具，真实数据调用通过）\n`)
     else process.stdout.write(`  ✓ ${name}\n`)
   }
-  process.stdout.write('\n✓ 全部门禁通过：注释 ✅ 类型 ✅ 测试 ✅\n')
+  process.stdout.write('\n✓ 全部门禁通过：注释 ✅ 类型 ✅ 测试 ✅ 构建 ✅ 冒烟 ✅\n')
 }
 main()
