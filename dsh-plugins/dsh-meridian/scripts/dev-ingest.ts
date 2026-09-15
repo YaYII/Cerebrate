@@ -15,9 +15,16 @@ import { basename } from 'node:path'
 import { ingestLogText } from '../src/features/ingest'
 import { DSEDT_PACK } from '../src/packs/dsedtJavaLogback'
 import { IHM2_PACK } from '../src/packs/ihm2Laravel'
+import { NODE_JSON_PACK } from '../src/packs/nodeJsonLines'
+import { PYTHON_LOGGING_PACK } from '../src/packs/pythonLogging'
 
 /** 可选接入声明：按 `--pack` 选择被观测系统。 */
-const PACKS = { dsedt: DSEDT_PACK, ihm2: IHM2_PACK } as const
+const PACKS = {
+  dsedt: DSEDT_PACK,
+  ihm2: IHM2_PACK,
+  python: PYTHON_LOGGING_PACK,
+  json: NODE_JSON_PACK,
+} as const
 
 /** 命令行参数。 */
 const args = process.argv.slice(2)

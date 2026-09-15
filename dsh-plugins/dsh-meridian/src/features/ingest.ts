@@ -133,15 +133,31 @@ function selectFormat(
 function buildRecords(
   lines: string[],
   format: CompiledFormat | null,
-): { records: LineRecord[]; recordLines: number; continuationLines: number; orphans: Array<{ line: number; text: string }> } {
+  fallbacks: CompiledFormat[] = [],
+): { records: LineRecord[]; recordLines: number; continuationLines: number; orphans: Array<{ line: number; text: string }>; fallbackLines: number } {
+  /** 依次尝试主格式与回退格式。 */
+  const parseWithFallback = (raw: string, lineNo: number): ReturnType<typeof parseLogLine> => {
+    if (format !== null) {
+      const primary = parseLogLine(raw, format, lineNo)
+      if (primary !== null) return primary
+    }
+    for (const candidate of fallbacks) {
+      const parsed = parseLogLine(raw, candidate, lineNo)
+      if (parsed !== null) return parsed
+    }
+    return null
+  }
   const records: LineRecord[] = []
   let recordLines = 0
   let continuationLines = 0
+  let fallbackLines = 0
   const orphans: Array<{ line: number; text: string }> = []
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i]
     if (raw.trim().length === 0) continue
-    const parsed = format === null ? null : parseLogLine(raw, format, i + 1)
+    const primaryParsed = format === null ? null : parseLogLine(raw, format, i + 1)
+    const parsed = primaryParsed ?? parseWithFallback(raw, i + 1)
+    if (parsed !== null && primaryParsed === null) fallbackLines += 1
     if (parsed !== null) {
       recordLines += 1
       records.push({ parsed, text: parsed.message, lineCount: 1 })
@@ -158,7 +174,7 @@ function buildRecords(
       orphans.push({ line: i + 1, text: clipSnippet(raw, 160) })
     }
   }
-  return { records, recordLines, continuationLines, orphans }
+  return { records, recordLines, continuationLines, orphans, fallbackLines }
 }
 
 /**
@@ -242,7 +258,10 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
   const compiled = compileRulePack(options.pack)
   const lines = text.split(/\r?\n/)
   const { format, attempts } = selectFormat(lines, compiled.formats, options.formatName)
-  const { records, recordLines, continuationLines, orphans } = buildRecords(lines, format)
+  // 回退候选：除主格式外的其它声明格式。真实日志常混用多种格式（配置变更/多组件），
+  // 只认一种会让另一部分静默变成「漏网」——实测 Python 日志因此丢了 110/497 行。
+  const fallbacks = compiled.formats.filter((item) => item !== format)
+  const { records, recordLines, continuationLines, orphans, fallbackLines } = buildRecords(lines, format, fallbacks)
 
   const warnings: string[] = []
   const stack: string[] = []
@@ -265,7 +284,8 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
       logger: parsed.logger,
       thread: parsed.thread,
       caseId,
-      objectId: outcome.objectId ?? '',
+      // 业务对象标识：规则抽取优先；JSON Lines 可能已直接给出（如 pino 的 app_no）
+      objectId: outcome.objectId ?? parsed.objectId ?? '',
       phase: outcome.phase,
       from: outcome.from,
       to: outcome.to,
@@ -301,6 +321,13 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
     )
   } else if (verdict === 'degraded') {
     warnings.push(`部分行未识别（${coverage.orphanLines} 行），存在格式漂移或非日志输出。`)
+  }
+  if (fallbackLines > 0) {
+    warnings.push(
+      `本文件混用了多种日志格式：${fallbackLines} 行由回退格式解析（候选命中：${attempts
+        .map((item) => `${item.format}=${item.hits}`)
+        .join(', ')}）。建议在接入声明中补齐全部格式变体。`,
+    )
   }
   if (missingCase > 0) {
     warnings.push(

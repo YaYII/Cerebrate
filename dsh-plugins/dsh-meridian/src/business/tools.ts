@@ -22,6 +22,8 @@ import type { RulePack } from '../features/rulePack'
 import { DSEDT_INTENTS } from '../packs/dsedtIntent'
 import { DSEDT_PACK } from '../packs/dsedtJavaLogback'
 import { IHM2_PACK } from '../packs/ihm2Laravel'
+import { NODE_JSON_PACK } from '../packs/nodeJsonLines'
+import { PYTHON_LOGGING_PACK } from '../packs/pythonLogging'
 
 /**
  * 校验并规范化外部传入的接入声明。
@@ -99,6 +101,8 @@ export function toJsonResult(payload: unknown): Record<string, JsonLike> {
 const BUILTIN_PACKS: Record<string, RulePack> = {
   dsedt: DSEDT_PACK,
   ihm2: IHM2_PACK,
+  python: PYTHON_LOGGING_PACK,
+  json: NODE_JSON_PACK,
 }
 
 /** 内置意图登记表（仅 DSEDT 目前有成文意图）。 */

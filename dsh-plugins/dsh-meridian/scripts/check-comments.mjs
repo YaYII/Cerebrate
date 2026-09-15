@@ -19,6 +19,20 @@ const ALLOWED = new Set([
 ])
 const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
 
+/**
+ * 英文虚词表 —— 判断「是否为英文散文」的关键特征。
+ *
+ * 动因：专有名词/库名列表（如 `zap / logrus（Go）、logstash-encoder（Java）`）没有虚词，
+ * 不应被判为英文注释；而真正的英文句子几乎必然含虚词。用虚词而非词数做判据，
+ * 可以避免为每个新出现的库名维护白名单。
+ */
+const FUNCTION_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of', 'in', 'on', 'for',
+  'with', 'without', 'and', 'or', 'not', 'no', 'this', 'that', 'these', 'those', 'it', 'its',
+  'when', 'where', 'which', 'while', 'if', 'then', 'than', 'as', 'at', 'by', 'from', 'into',
+  'should', 'must', 'can', 'could', 'will', 'would', 'may', 'might', 'do', 'does', 'did',
+])
+
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
@@ -44,7 +58,11 @@ for (const file of walk(join(ROOT, 'src'))) {
     if (/^\s*\[?\d{4}-\d{2}-\d{2}/.test(text) || text.includes('{"')) return
     if (text.trim() === '' || CJK.test(text)) return
     const words = text.split(/[^A-Za-z]+/).filter((w) => w.length > 1 && !ALLOWED.has(w))
-    if (words.length >= 2) {
+    const hasFunctionWord = words.some((w) => FUNCTION_WORDS.has(w.toLowerCase()))
+    // 判据：含英文虚词（真散文的特征），或英文串长达 8 个词以上（整句英文的兜底）。
+    // 阈值取 8 而非更小：像「pino / bunyan / structlog / zap / logrus」这类库名枚举
+    // 常在 5~7 个词之间，若阈值太低会把技术枚举误判为英文注释。
+    if (hasFunctionWord || words.length >= 8) {
       process.stderr.write(`✗ 疑似英文注释 ${file.replace(ROOT + '/', '')}:${index + 1} → ${text.trim().slice(0, 70)}\n`)
       bad += 1
     }

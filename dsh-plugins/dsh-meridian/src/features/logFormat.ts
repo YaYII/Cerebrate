@@ -30,22 +30,66 @@ export interface ParsedRecord {
   thread: string
   /** 链路标识（未声明或为空则为空串）。 */
   traceId: string
+  /** 业务对象标识（JSON Lines 可直接给出；文本格式由规则层抽取）。 */
+  objectId: string
 }
 
-/** 编译后的格式：正则 + 字段可见性。 */
+/** 结构化日志（JSON Lines）的字段映射；未声明时按常见别名自动识别。 */
+export interface JsonFieldMap {
+  time?: string
+  level?: string
+  message?: string
+  logger?: string
+  caseId?: string
+  objectId?: string
+}
+
+/** 格式声明的两种形态。 */
+export type FormatSpec =
+  | { name: string; declaration: string }
+  | { name: string; kind: 'json'; fields?: JsonFieldMap }
+
+/** 编译后的格式：行格式或结构化（JSON Lines）。 */
 export interface CompiledFormat {
   /** 格式名（用于报错与产物标注）。 */
   readonly name: string
-  /** 原始格式声明文本（原样保留，供人核对与版本比对）。 */
+  /** 格式种类：`pattern`（logback/Monolog 文本）或 `json`（JSON Lines）。 */
+  readonly kind: 'pattern' | 'json'
+  /** 原始声明文本（pattern 形态保留原文；json 形态为可读描述）。 */
   readonly declaration: string
-  /** 编译所得正则，具名捕获组。 */
+  /** 行格式正则（kind=pattern 时有效）。 */
   readonly regex: RegExp
+  /** 结构化字段映射（kind=json 时有效）。 */
+  readonly fields: JsonFieldMap
+}
+
+/**
+ * JSON Lines 的常见字段别名。
+ *
+ * 动因：**结构化日志是跨语言的公共形态**——pino/bunyan(Node)、structlog(Python)、
+ * zap/logrus(Go)、logstash-encoder(Java) 都产出单行 JSON，只是键名各不相同。
+ * 与其为每个库写一份声明，不如给一张别名表，让「一份声明覆盖多个生态」。
+ */
+const JSON_ALIASES: Readonly<Record<keyof JsonFieldMap, readonly string[]>> = {
+  time: ['time', 'at', 'timestamp', 'ts', '@timestamp', 'date', 'datetime'],
+  level: ['level', 'lvl', 'severity', 'level_name', 'levelname'],
+  message: ['message', 'msg', 'event', 'text'],
+  logger: ['logger', 'name', 'category', 'module', 'component', 'service'],
+  caseId: ['trace_id', 'traceId', 'request_id', 'requestId', 'correlation_id', 'x_trace_id'],
+  objectId: ['app_no', 'order_no', 'orderNo', 'biz_id', 'object_id', 'doc_no'],
+}
+
+/** pino/bunyan 的数字级别 → 名称（Node 生态常见）。 */
+const NUMERIC_LEVELS: Readonly<Record<number, string>> = {
+  10: 'TRACE', 20: 'DEBUG', 30: 'INFO', 40: 'WARN', 50: 'ERROR', 60: 'FATAL',
 }
 
 /** logback 日期格式 → 正则片段的映射（只覆盖工程上真实出现的几种）。 */
 const DATE_PATTERNS: ReadonlyArray<readonly [string, string]> = [
   ['yyyy-MM-dd HH:mm:ss.SSS', '\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}'],
   ['yyyy-MM-dd HH:mm:ss', '\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}'],
+  // Python logging 的 asctime 用逗号分隔毫秒，与 Java/PHP 的点号不同（实测差异）
+  ['yyyy-MM-dd HH:mm:ss,SSS', '\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d{3}'],
   ['HH:mm:ss.SSS', '\\d{2}:\\d{2}:\\d{2}\\.\\d{3}'],
   ['HH:mm:ss', '\\d{2}:\\d{2}:\\d{2}'],
 ]
@@ -166,7 +210,94 @@ export function compileLogFormat(name: string, declaration: string): CompiledFor
   if (!hasMessage) {
     throw new Error(`日志格式声明缺少消息体转换词（%msg/%m）：${declaration}`)
   }
-  return { name, declaration, regex: new RegExp(`^${parts.join('')}$`) }
+  return { name, kind: 'pattern', declaration, regex: new RegExp(`^${parts.join('')}$`), fields: {} }
+}
+
+/**
+ * 编译 JSON Lines 格式声明。
+ *
+ * @param name - 格式名。
+ * @param fields - 字段映射；未声明的字段按别名表自动识别。
+ * @returns 编译后的格式对象。
+ */
+export function compileJsonFormat(name: string, fields: JsonFieldMap = {}): CompiledFormat {
+  return {
+    name,
+    kind: 'json',
+    declaration: `JSON Lines（字段映射：${Object.keys(fields).length > 0 ? JSON.stringify(fields) : '自动别名'}}`,
+    regex: /^\{.*\}$/,
+    fields,
+  }
+}
+
+/**
+ * 按声明编译格式（自动分派 pattern / json 两种形态）。
+ *
+ * @param spec - 格式声明。
+ * @returns 编译后的格式对象。
+ */
+export function compileFormat(spec: FormatSpec): CompiledFormat {
+  return 'kind' in spec && spec.kind === 'json'
+    ? compileJsonFormat(spec.name, spec.fields ?? {})
+    : compileLogFormat(spec.name, (spec as { declaration: string }).declaration)
+}
+
+/** 按别名表取第一个命中的键值。 */
+function pick(obj: Record<string, unknown>, keys: readonly string[]): unknown {
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null) return obj[key]
+  }
+  return undefined
+}
+
+/** 把任意值转成稳定的字符串（数字/布尔/对象统一处理）。 */
+function stringify(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (value === undefined || value === null) return ''
+  return JSON.stringify(value)
+}
+
+/**
+ * 解析一行 JSON Lines 日志。
+ *
+ * @param line - 原始行。
+ * @param format - 已编译的 JSON 格式。
+ * @param lineNo - 行号（证据锚点）。
+ * @returns 解析结果；不是 JSON 对象或缺消息体时返回 null（计入漏网，由覆盖度告警）。
+ */
+function parseJsonLine(line: string, format: CompiledFormat, lineNo: number): ParsedRecord | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const obj = parsed as Record<string, unknown>
+  const map = format.fields
+  const message = stringify(pick(obj, map.message === undefined ? JSON_ALIASES.message : [map.message]))
+  if (message === '') return null
+  const rawLevel = pick(obj, map.level === undefined ? JSON_ALIASES.level : [map.level])
+  const level = typeof rawLevel === 'number'
+    ? (NUMERIC_LEVELS[rawLevel] ?? String(rawLevel))
+    : stringify(rawLevel).toUpperCase()
+  const rawTime = pick(obj, map.time === undefined ? JSON_ALIASES.time : [map.time])
+  const time = typeof rawTime === 'number' ? new Date(rawTime).toISOString() : stringify(rawTime)
+  const traceId = stringify(pick(obj, map.caseId === undefined ? JSON_ALIASES.caseId : [map.caseId]))
+  const objectId = stringify(pick(obj, map.objectId === undefined ? JSON_ALIASES.objectId : [map.objectId]))
+  const logger = stringify(pick(obj, map.logger === undefined ? JSON_ALIASES.logger : [map.logger]))
+  return {
+    line: lineNo,
+    raw: line,
+    time,
+    level,
+    logger,
+    message,
+    thread: '',
+    traceId,
+    objectId,
+  }
 }
 
 /**
@@ -178,6 +309,7 @@ export function compileLogFormat(name: string, declaration: string): CompiledFor
  * @returns 解析结果；格式不匹配时返回 `null`（由上层计入未解析，不抛异常）。
  */
 export function parseLogLine(line: string, format: CompiledFormat, lineNo: number): ParsedRecord | null {
+  if (format.kind === 'json') return parseJsonLine(line, format, lineNo)
   const matched = format.regex.exec(line)
   if (matched === null) return null
   const groups = matched.groups ?? {}
@@ -190,5 +322,6 @@ export function parseLogLine(line: string, format: CompiledFormat, lineNo: numbe
     message: (groups.message ?? '').trim(),
     thread: (groups.thread ?? '').trim(),
     traceId: (groups.traceId ?? '').trim(),
+    objectId: '',
   }
 }

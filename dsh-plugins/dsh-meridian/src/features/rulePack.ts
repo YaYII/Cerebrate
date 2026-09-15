@@ -12,7 +12,7 @@
  */
 
 import type { EventPhase } from './eventModel'
-import { compileLogFormat, type CompiledFormat } from './logFormat'
+import { compileFormat, type CompiledFormat, type FormatSpec } from './logFormat'
 
 /** 单条消息规则：命中即产出一条事件。 */
 export interface MessageRule {
@@ -58,8 +58,12 @@ export interface MessageRule {
 export interface RulePack {
   /** 接入名（如 `dsedt-java-logback`）。 */
   name: string
-  /** 该系统的日志格式候选（可多种运行态并存，如生产态与测试态）。 */
-  formats: Array<{ name: string; declaration: string }>
+  /**
+   * 该系统的日志格式候选（可多种运行态并存，如生产态与测试态、文本与结构化）。
+   *
+   * 支持两种形态：文本 pattern（logback/Monolog）与结构化 JSON Lines（pino/structlog/zap 等）。
+   */
+  formats: FormatSpec[]
   /** 消息规则（按声明顺序匹配，先命中先产出）。 */
   rules: MessageRule[]
 }
@@ -88,7 +92,7 @@ export interface CompiledRulePack {
  * @throws 当格式声明非法（缺消息体转换词）或规则正则非法时抛错——**接入声明的错误必须立刻暴露**。
  */
 export function compileRulePack(pack: RulePack): CompiledRulePack {
-  const formats = pack.formats.map((item) => compileLogFormat(item.name, item.declaration))
+  const formats = pack.formats.map((item) => compileFormat(item))
   const rules = pack.rules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern) }))
   return { pack, formats, rules }
 }
