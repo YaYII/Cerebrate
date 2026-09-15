@@ -25,7 +25,7 @@ function main() {
   const steps = [
     ['注释语言检查', 'node', [join(ROOT, 'scripts', 'check-comments.mjs')]],
     ['类型检查', resolve('tsc'), ['--noEmit']],
-    ['单元测试', 'node', ['--import', 'tsx', '--test', 'tests/ingest.spec.ts', 'tests/ruler.spec.ts']],
+    ['单元测试', 'node', ['--import', 'tsx', '--test', 'tests/ingest.spec.ts', 'tests/ruler.spec.ts', 'tests/crossLanguage.spec.ts']],
   ]
   for (const [name, cmd, args] of steps) {
     process.stdout.write(`[${name}] ${cmd}\n`)

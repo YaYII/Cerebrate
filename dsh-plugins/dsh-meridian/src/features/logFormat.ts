@@ -50,8 +50,14 @@ const DATE_PATTERNS: ReadonlyArray<readonly [string, string]> = [
   ['HH:mm:ss', '\\d{2}:\\d{2}:\\d{2}'],
 ]
 
-/** 日志级别候选（顺序无关，正则用交替匹配）。 */
-const LEVEL_PATTERN = 'TRACE|DEBUG|INFO|WARN|ERROR|FATAL'
+/**
+ * 日志级别候选（顺序无关，正则用交替匹配）。
+ *
+ * 刻意同时收录两套生态的写法：logback 用 `WARN`，Monolog(PHP) 用 `WARNING`，
+ * 另有 `NOTICE/CRITICAL/ALERT/EMERGENCY`。少一个就会让整批日志静默解析失败——
+ * 实测踩过：113 条慢查询日志因 `WARNING` 未收录而全部漏解析。
+ */
+const LEVEL_PATTERN = 'TRACE|DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|CRITICAL|ALERT|EMERGENCY|FATAL'
 
 /** 转义正则元字符，用于把格式声明里的字面量安全嵌入正则。 */
 function escapeRegExp(text: string): string {
@@ -77,19 +83,45 @@ function dateToRegExp(dateFormat: string): string {
 }
 
 /**
+ * 把 Monolog（PHP/Laravel）风格的格式声明翻译为内部通用写法。
+ *
+ * 动因：**运行时态是跨语言的，格式声明也必须跨生态**。
+ * logback 用 `%d{...}`/`%msg`，Monolog 用 `%datetime%`/`%message%`，
+ * 二者只是书写差异，语义完全对应；解析器不该为生态分叉。
+ *
+ * `%context%` 与 `%extra%` 会被安全地忽略：Monolog 把上下文**追加在消息之后**，
+ * 由 `%message%` 一并捕获，随后交由规则层从消息里抽取结构化字段（含 trace_id）。
+ *
+ * @param declaration - 原始格式声明。
+ * @returns 通用写法声明。
+ */
+export function translateMonolog(declaration: string): string {
+  const map: ReadonlyArray<readonly [RegExp, string]> = [
+    [/%datetime%|%datetime\{[^}]*\}%/g, '%d{yyyy-MM-dd HH:mm:ss}'],
+    [/%channel%/g, '%logger'],
+    [/%level_name%/g, '%level'],
+    [/%message%/g, '%msg'],
+  ]
+  let result = declaration
+  for (const [pattern, replacement] of map) result = result.replace(pattern, replacement)
+  // 上下文与额外字段交由消息体承载
+  result = result.replace(/%context%|%extra%/g, '')
+  return result.replace(/\s+$/, '')
+}
+
+/**
  * 编译一段日志格式声明。
  *
- * 支持 logback 常用转换词：`%d{...}` / `%thread`(`%t`) / `%X{key}`(`%mdc`) /
- * `%level`(`%p`、可带 `-5.` 等修饰) / `%logger{N}`(`%c`、可带 `{36}`) / `%msg`(`%m`) / `%n`。
- * 其余转换词（如 `%clr(...)`、`%highlight(...)`、`%ex`）按「可有可无」处理，不参与字段提取。
+ * 支持两种生态的书写：logback（`%d{...}` / `%thread` / `%X{key}` / `%-5level` / `%logger{36}` / `%msg`）
+ * 与 Monolog（`%datetime%` / `%channel%` / `%level_name%` / `%message%`）。
  *
- * @param name - 格式名，用于产物标注（如 `dsedt-spring-test`）。
- * @param declaration - 格式声明原文（logback pattern）。
+ * @param name - 格式名，用于产物标注（如 `ihm2-laravel`）。
+ * @param declaration - 格式声明原文。
  * @returns 编译后的格式对象。
  * @throws 当声明中缺少消息体转换词时抛错——没有消息体的日志无法建立事实。
  */
 export function compileLogFormat(name: string, declaration: string): CompiledFormat {
-  const rest = declaration
+  const rest = translateMonolog(declaration)
   const parts: string[] = []
   let hasMessage = false
   // 逐个转换词扫描：%[修饰符]{参数}?转换字符
@@ -102,7 +134,10 @@ export function compileLogFormat(name: string, declaration: string): CompiledFor
     const arg = match[2] ?? ''
     // 形如 [%thread] / [%X{traceId}]：方括号在声明里是字面量，但字段组需要它们来定界。
     // 做法：从字面量里摘掉方括号，改由字段组产出——否则会出现 \[\[ 双括号（实测踩过）。
-    const wrapped = literal.endsWith('[') && rest[conversion.lastIndex] === ']'
+    // ⚠️ 仅对「自己产出方括号」的转换词成立；像 [%datetime%] 这种由字面量提供括号的场景，
+    //    若也剥离就会出现缺括号（实测踩过第二次），故用白名单限定。
+    const bracketWord = word === 't' || word === 'thread' || word === 'X' || word === 'mdc'
+    const wrapped = bracketWord && literal.endsWith('[') && rest[conversion.lastIndex] === ']'
     if (wrapped) {
       literal = literal.slice(0, -1)
       conversion.lastIndex += 1

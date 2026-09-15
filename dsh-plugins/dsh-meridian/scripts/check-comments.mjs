@@ -38,6 +38,10 @@ for (const file of walk(join(ROOT, 'src'))) {
     // JSDoc 标签行（@module/@param/@returns 等）属结构标记，其后的描述另有中文要求，
     // 此处不作为「英文散文注释」判据，避免误报。
     if (text.trimStart().startsWith('@')) return
+    // 引用性内容不判为英文散文：反引号包裹的示例、以及原文引用的日志行/JSON 片段。
+    // 这些是**证据**，删掉它们反而会降低文档可信度。
+    if (text.includes('`')) return
+    if (/^\s*\[?\d{4}-\d{2}-\d{2}/.test(text) || text.includes('{"')) return
     if (text.trim() === '' || CJK.test(text)) return
     const words = text.split(/[^A-Za-z]+/).filter((w) => w.length > 1 && !ALLOWED.has(w))
     if (words.length >= 2) {

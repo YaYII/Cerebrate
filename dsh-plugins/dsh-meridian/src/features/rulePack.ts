@@ -34,6 +34,20 @@ export interface MessageRule {
   okEquals?: string
   /** 参与者归属：`logger` = 取 logger 简名；`stack` = 取调用栈顶。 */
   actor?: 'logger' | 'stack'
+  /**
+   * 案例标识来源字段名：命中规则的具名捕获组名，其值将作为事件 `caseId`。
+   *
+   * **为什么需要它**：与语言相关。Java/logback 把 traceId 放在**行首的 MDC 段**
+   * （`[%X{traceId}]`），可从格式里直接取；而 PHP/Laravel 把它放在**消息体的 JSON 上下文里**
+   * （`API Request {"trace_id":"..."}`），只能由规则从消息中抽取。
+   * 没有这个字段，「按案例聚合」在 PHP 生态里就不成立。
+   */
+  caseIdField?: string
+  /**
+   * 业务对象标识来源字段名（具名捕获组）：如单据号 `app_no`。
+   * 用于把「技术案例」与「业务案例」分开建模（见 RuntimeEvent.objectId 的说明）。
+   */
+  objectIdField?: string
   /** 命中时是否为调用栈压栈。 */
   stackPush?: boolean
   /** 命中时是否为调用栈弹栈。 */

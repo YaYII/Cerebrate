@@ -22,6 +22,8 @@ export type EventPhase =
   | 'step'
   | 'step-end'
   | 'audit'
+  /** 性能异常事实（如慢查询）：属第二战场（线上排查）的证据来源。 */
+  | 'slow'
   | 'log'
 
 /** 证据锚点：任何事实都必须能凭它回跳到原始日志。 */
@@ -52,6 +54,15 @@ export interface RuntimeEvent {
   thread: string
   /** 案例标识（如 traceId）；缺失时为空串，由上层决定是否可用。 */
   caseId: string
+  /**
+   * 业务对象标识（如单据号 app_no）；缺失时为空串。
+   *
+   * **它与 caseId 的区别是本产品的核心概念之一**：caseId 是技术案例（一次请求），
+   * objectId 才是业务案例（一张单据）。两者是**多对多**关系——
+   * 一张单据可能跨多次请求，一次请求也可能碰多张单据。
+   * 真实语料实证：IHM2 的同一条业务日志里同时有 `trace_id` 与 `app_no`。
+   */
+  objectId: string
   /** 语义相位。 */
   phase: EventPhase
   /** 调用方（由栈重建得出）；无则 null。 */

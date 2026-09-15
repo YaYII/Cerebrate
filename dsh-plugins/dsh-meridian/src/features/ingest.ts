@@ -20,6 +20,7 @@ import {
   type RuntimeEvent,
 } from './eventModel'
 import { parseLogLine, type CompiledFormat, type ParsedRecord } from './logFormat'
+import { redactLine } from './redact'
 import { compileRulePack, renderTemplate, type CompiledRulePack, type RulePack } from './rulePack'
 
 /** 无链路标识时的占位案例名。 */
@@ -65,8 +66,15 @@ export interface IngestResult {
   events: RuntimeEvent[]
   /** 案例数。 */
   caseCount: number
-  /** 按案例聚合的事实。 */
+  /** 按**技术案例**（traceId）聚合的事实。 */
   cases: CaseFacts[]
+  /**
+   * 按**业务对象**（单据号等）聚合的事实 —— 「一张单据的一生」。
+   *
+   * 与 `cases` 并列存在而非二选一，因为二者是多对多关系：
+   * 真实语料里 179 个技术案例只对应 15 个业务对象。
+   */
+  objectCases: CaseFacts[]
   /** 告警（不阻断，但必须回显给消费者）。 */
   warnings: string[]
 }
@@ -140,7 +148,9 @@ function buildRecords(
       continue
     }
     const last = records[records.length - 1]
-    if (last !== undefined) {
+    // 关键区分：**形似日志头却未匹配**的行是「格式漂移导致的漏解析」，必须计为漏网；
+    // 否则它会被当成上一条的续行静默吞掉，覆盖率虚高——静默失效换了个形式又回来了（实测踩过）。
+    if (last !== undefined && !looksLikeLogHeader(raw)) {
       continuationLines += 1
       last.text = `${last.text}\n${raw}`
       last.lineCount += 1
@@ -149,6 +159,18 @@ function buildRecords(
     }
   }
   return { records, recordLines, continuationLines, orphans }
+}
+
+/**
+ * 判断一行是否「形似日志头」——形似却未匹配，说明声明的格式与真实日志已经漂移。
+ *
+ * 判据取常见的两种时间开头：`[2026-09-15 10:24:59]` 与 `[10:24:59.123]` / `14:48:34.653`。
+ *
+ * @param line - 原始行。
+ * @returns 是否形似日志头。
+ */
+function looksLikeLogHeader(line: string): boolean {
+  return /^\[?\d{4}-\d{2}-\d{2}[ T]/.test(line) || /^\[?\d{2}:\d{2}:\d{2}[.,]/.test(line)
 }
 
 /** 取 logger 的类简名。 */
@@ -162,7 +184,7 @@ function classify(
   record: LineRecord,
   rules: CompiledRulePack['rules'],
   stack: string[],
-): { rule: string; phase: RuntimeEvent['phase']; label: string; detail: string; durationMs: number | null; ok: boolean | null; from: string | null; to: string | null; actor: string } {
+): { rule: string; phase: RuntimeEvent['phase']; label: string; detail: string; durationMs: number | null; ok: boolean | null; from: string | null; to: string | null; actor: string; caseId: string | null; objectId: string | null } {
   const { parsed, text } = record
   for (const rule of rules) {
     const matched = rule.regex.exec(text)
@@ -173,6 +195,11 @@ function classify(
     const durationMs = durationRaw === undefined || durationRaw === '' ? null : Number.parseInt(durationRaw, 10)
     const okRaw = rule.okField === undefined ? undefined : groups[rule.okField]
     const ok = okRaw === undefined || rule.okEquals === undefined ? null : okRaw === rule.okEquals
+    // 案例标识既可来自行首（Java/MDC），也可来自消息体（PHP/JSON 上下文）
+    const caseIdRaw = rule.caseIdField === undefined ? undefined : groups[rule.caseIdField]
+    const caseId = caseIdRaw !== undefined && caseIdRaw !== '' ? caseIdRaw : null
+    const objectIdRaw = rule.objectIdField === undefined ? undefined : groups[rule.objectIdField]
+    const objectId = objectIdRaw !== undefined && objectIdRaw !== '' ? objectIdRaw : null
     const from = rule.stackPop === true ? stack[stack.length - 2] ?? null : stack[stack.length - 1] ?? null
     return {
       rule: rule.name,
@@ -184,6 +211,8 @@ function classify(
       from,
       to: rule.phase === 'return' || rule.phase === 'exception' ? from : actor,
       actor,
+      caseId,
+      objectId,
     }
   }
   const actor = simpleName(parsed.logger)
@@ -197,6 +226,8 @@ function classify(
     from: stack[stack.length - 1] ?? null,
     to: null,
     actor,
+    caseId: null,
+    objectId: null,
   }
 }
 
@@ -220,8 +251,10 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
 
   for (const record of records) {
     const { parsed } = record
-    if (parsed.traceId === '') missingCase += 1
     const outcome = classify(record, compiled.rules, stack)
+    // 有效案例标识：优先行首 traceId（Java/MDC），其次规则从消息抽取（PHP/JSON）
+    const caseId = parsed.traceId !== '' ? parsed.traceId : (outcome.caseId ?? '')
+    if (caseId === '') missingCase += 1
     if (outcome.phase === 'call') stack.push(outcome.actor)
     if (outcome.phase === 'return' || outcome.phase === 'exception') stack.pop()
     events.push({
@@ -231,19 +264,20 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
       level: parsed.level,
       logger: parsed.logger,
       thread: parsed.thread,
-      caseId: parsed.traceId,
+      caseId,
+      objectId: outcome.objectId ?? '',
       phase: outcome.phase,
       from: outcome.from,
       to: outcome.to,
-      label: outcome.label,
-      detail: clipSnippet(outcome.detail, 400),
+      label: clipSnippet(redactLine(outcome.label), 120),
+      detail: clipSnippet(redactLine(outcome.detail), 400),
       durationMs: outcome.durationMs,
       ok: outcome.ok,
       evidence: {
         source: options.source,
         line: parsed.line,
         lineCount: record.lineCount,
-        snippet: clipSnippet(record.text, 200),
+        snippet: clipSnippet(redactLine(record.text), 200),
       },
     })
   }
@@ -285,8 +319,42 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
     events,
     caseCount: new Set(events.map((event) => event.caseId === '' ? NO_CASE : event.caseId)).size,
     cases: groupCases(events),
+    objectCases: groupByObject(events),
     warnings,
   }
+}
+
+/**
+ * 把事件按**业务对象**聚合（单据视角），只保留有对象标识的事件。
+ *
+ * @param events - 事件序列。
+ * @returns 按业务对象聚合的事实列表。
+ */
+function groupByObject(events: RuntimeEvent[]): CaseFacts[] {
+  const map = new Map<string, RuntimeEvent[]>()
+  for (const event of events) {
+    if (event.objectId === '') continue
+    const list = map.get(event.objectId)
+    if (list === undefined) map.set(event.objectId, [event])
+    else list.push(event)
+  }
+  const result: CaseFacts[] = []
+  for (const [objectId, list] of map) {
+    result.push({ caseId: objectId, events: list, callCount: 0, exceptionCount: 0, totalMs: sumDuration(list) })
+  }
+  return result.sort((a, b) => b.events.length - a.events.length)
+}
+
+/** 累加一组事件里可归因的耗时（终态与步骤事件）。 */
+function sumDuration(events: RuntimeEvent[]): number {
+  let total = 0
+  for (const event of events) {
+    if (event.durationMs === null) continue
+    if (event.phase === 'return' || event.phase === 'request-out' || event.phase === 'step' || event.phase === 'step-end') {
+      total += event.durationMs
+    }
+  }
+  return total
 }
 
 /** 把事件按案例聚合，并统计调用数、异常数、可累加耗时。 */
@@ -300,17 +368,13 @@ function groupCases(events: RuntimeEvent[]): CaseFacts[] {
   }
   const result: CaseFacts[] = []
   for (const [caseId, list] of map) {
-    let totalMs = 0
     let callCount = 0
     let exceptionCount = 0
     for (const event of list) {
       if (event.phase === 'call') callCount += 1
       if (event.phase === 'exception') exceptionCount += 1
-      if (event.durationMs !== null && (event.phase === 'return' || event.phase === 'request-out' || event.phase === 'step' || event.phase === 'step-end')) {
-        totalMs += event.durationMs
-      }
     }
-    result.push({ caseId, events: list, callCount, exceptionCount, totalMs })
+    result.push({ caseId, events: list, callCount, exceptionCount, totalMs: sumDuration(list) })
   }
   return result
 }
