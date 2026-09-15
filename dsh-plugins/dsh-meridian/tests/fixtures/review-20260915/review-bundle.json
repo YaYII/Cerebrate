@@ -380,9 +380,9 @@
     },
     {
      "seq": 9,
-     "phase": "log",
+     "phase": "slow",
      "level": "INFO",
-     "label": "confirm分段(慢): 抢占+载入=1ms 核验(含白名单+码+签名)=6ms 落库(主档+缓冲)=24ms 响应+缓存+审计=2ms 终态发布=0ms 合计=33ms",
+     "label": "核验确认-分段耗时",
      "line": 9
     },
     {
@@ -744,9 +744,9 @@
     },
     {
      "seq": 9,
-     "phase": "log",
+     "phase": "slow",
      "level": "INFO",
-     "label": "confirm分段(慢): 抢占+载入=1ms 核验(含白名单+码+签名)=6ms 落库(主档+缓冲)=24ms 响应+缓存+审计=2ms 终态发布=0ms 合计=33ms",
+     "label": "核验确认-分段耗时",
      "line": 9
     },
     {

@@ -132,6 +132,40 @@ export const DSEDT_PACK: RulePack = {
       actor: 'logger',
     },
     {
+      // 真实日志：`核验完成: orderNo=…, verified=true, bindResult=SUCCESS, 核验耗时=5ms, 状态持有耗时=7ms`
+      // 主耗时取「核验耗时」，另一项进详情（一行只产出一条事件，故取主耗时）
+      // ⚠️ 刻意**不设置 label/detail**：改写标签会丢掉 `verified=true` 这类子串，
+      //    而意图匹配正是按标签子串进行的——实测导致既有意图全部失配（回归测试当场抓到）。
+      //    只捕获耗时、保留原文标签，既拿到耗时又不破坏语义匹配。
+      // ⚠️ 相位刻意保持 `log`（而非 step）：改为 step 会让它参与「行为路径」判定，
+      //    在多场景日志里产生噪音式「额外路径」误报（实测 8 条）。耗时捕获与相位无关，
+      //    因此按最小修改原则只补数据、不动语义。
+      name: 'verify-completed-duration',
+      phase: 'log',
+      pattern: '^核验完成: .*核验耗时=(?<cost>[\\d.]+)ms.*$',
+      durationField: 'cost',
+      actor: 'logger',
+    },
+    {
+      // 真实日志：`confirm分段(慢): 抢占+载入=1ms 核验(含白名单+码+签名)=6ms 落库(主档+缓冲)=24ms
+      //   响应+缓存+审计=2ms 终态发布=0ms 合计=33ms`
+      // 分段抽取让「落库=24ms」这类热点**无需改动被观测系统**即可归因
+      name: 'confirm-stage-breakdown',
+      phase: 'slow',
+      pattern: '^confirm分段.*合计=(?<total>\\d+)ms$',
+      label: '核验确认-分段耗时',
+      detail: '{0}',
+      durationField: 'total',
+      segments: {
+        pattern: '(?<name>[^\\s=]+)= (?<ms>\\d+)ms|(?<name2>[^\\s=]+)=(?<ms2>\\d+)ms',
+        nameGroup: 'name2',
+        valueGroup: 'ms2',
+        // 「合计」是汇总行不是阶段，混入热点排行会误导优化方向
+        ignore: ['合计'],
+      },
+      actor: 'logger',
+    },
+    {
       name: 'aspect-enter-with-args',
       phase: 'call',
       pattern: `^→ (?<cls>${IDENT})\\.(?<method>${IDENT}) \\| (?<args>[\\s\\S]*)$`,

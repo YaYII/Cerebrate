@@ -189,6 +189,35 @@ function looksLikeLogHeader(line: string): boolean {
   return /^\[?\d{4}-\d{2}-\d{2}[ T]/.test(line) || /^\[?\d{2}:\d{2}:\d{2}[.,]/.test(line)
 }
 
+/**
+ * 按声明抽取分段耗时。
+ *
+ * @param text - 消息体。
+ * @param spec - 分段抽取声明。
+ * @returns 分段列表（最多 20 段，防止异常日志把事实撑爆）。
+ */
+function extractSegments(
+  text: string,
+  spec: { pattern: string; nameGroup: string; valueGroup: string; ignore?: string[] } | undefined,
+): Array<{ name: string; ms: number }> {
+  if (spec === undefined) return []
+  const regex = new RegExp(spec.pattern, 'g')
+  const result: Array<{ name: string; ms: number }> = []
+  let matched = regex.exec(text)
+  while (matched !== null && result.length < 20) {
+    const name = matched.groups?.[spec.nameGroup]
+    const value = matched.groups?.[spec.valueGroup]
+    if (name !== undefined && value !== undefined) {
+      const ms = Number.parseFloat(value)
+      const trimmed = name.trim()
+      const ignored = (spec.ignore ?? []).some((item) => trimmed.includes(item))
+      if (!Number.isNaN(ms) && !ignored) result.push({ name: trimmed, ms })
+    }
+    matched = regex.exec(text)
+  }
+  return result
+}
+
 /** 取 logger 的类简名。 */
 function simpleName(logger: string): string {
   const idx = logger.lastIndexOf('.')
@@ -200,7 +229,7 @@ function classify(
   record: LineRecord,
   rules: CompiledRulePack['rules'],
   stack: string[],
-): { rule: string; phase: RuntimeEvent['phase']; label: string; detail: string; durationMs: number | null; ok: boolean | null; from: string | null; to: string | null; actor: string; caseId: string | null; objectId: string | null } {
+): { rule: string; phase: RuntimeEvent['phase']; label: string; detail: string; durationMs: number | null; ok: boolean | null; from: string | null; to: string | null; actor: string; caseId: string | null; objectId: string | null; segments: Array<{ name: string; ms: number }> } {
   const { parsed, text } = record
   for (const rule of rules) {
     const matched = rule.regex.exec(text)
@@ -208,7 +237,9 @@ function classify(
     const groups: Record<string, string | undefined> = { ...(matched.groups ?? {}) }
     const actor = rule.actor === 'logger' ? simpleName(parsed.logger) : stack[stack.length - 1] ?? simpleName(parsed.logger)
     const durationRaw = rule.durationField === undefined ? undefined : groups[rule.durationField]
-    const durationMs = durationRaw === undefined || durationRaw === '' ? null : Number.parseInt(durationRaw, 10)
+    // 用 parseFloat 而非 parseInt：真实日志存在亚毫秒精度（如 IHM2 的 duration_ms=58.57），
+    // 截断会丢失源数据精度——证据应当忠实于原始值，四舍五入留给展示层。
+    const durationMs = durationRaw === undefined || durationRaw === '' ? null : Number.parseFloat(durationRaw)
     const okRaw = rule.okField === undefined ? undefined : groups[rule.okField]
     const ok = okRaw === undefined || rule.okEquals === undefined ? null : okRaw === rule.okEquals
     // 案例标识既可来自行首（Java/MDC），也可来自消息体（PHP/JSON 上下文）
@@ -229,6 +260,7 @@ function classify(
       actor,
       caseId,
       objectId,
+      segments: extractSegments(text, rule.segments),
     }
   }
   const actor = simpleName(parsed.logger)
@@ -244,6 +276,7 @@ function classify(
     actor,
     caseId: null,
     objectId: null,
+    segments: [],
   }
 }
 
@@ -286,6 +319,7 @@ export function ingestLogText(text: string, options: IngestOptions): IngestResul
       caseId,
       // 业务对象标识：规则抽取优先；JSON Lines 可能已直接给出（如 pino 的 app_no）
       objectId: outcome.objectId ?? parsed.objectId ?? '',
+      segments: outcome.segments,
       phase: outcome.phase,
       from: outcome.from,
       to: outcome.to,

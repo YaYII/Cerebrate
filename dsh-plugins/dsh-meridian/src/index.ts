@@ -20,7 +20,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { merBaseline, merFacts, merVerdict, parseIntents, parsePackDefinition } from './business/tools'
+import { merBaseline, merFacts, merHotspots, merVerdict, parseIntents, parsePackDefinition } from './business/tools'
 import type { RulePack } from './features/rulePack'
 
 /** 插件标识与依赖注入。 */
@@ -84,6 +84,12 @@ interface VerdictArgsShape extends RawPackArgs {
 interface BaselineArgsShape extends RawPackArgs {
   log?: string
   baseline?: string
+}
+
+/** 热点工具入参形态。 */
+interface HotspotsArgsShape extends RawPackArgs {
+  log?: string
+  top?: number
 }
 
 /** 断言必填参数存在；缺失时抛可读错误（而不是返回空结果）。 */
@@ -193,6 +199,24 @@ export function apply(ctx: Context, config: MeridianConfig): void {
         log: requireArg(args.log, 'log'),
         baseline: requireArg(args.baseline, 'baseline'),
         ...packArgs(args, defaultPack),
+      }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'mer_hotspots',
+    description:
+      '【热点归因】把带耗时的运行时事实聚合成可定位的优化证据：按活动给出 count/total/p50/p95/max 与采样证据行号，并单独统计事件内的**分段耗时**（回答「慢在哪一段」）。用于第二战场：用聚合证据替代经验猜测。',
+    parameters: {
+      log: { type: 'string', description: '日志文件路径（必填）' },
+      ...packParameters,
+      top: { type: 'number', description: '每张榜的条数（默认 10，上限 50）' },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+    execute: async (args: HotspotsArgsShape) =>
+      merHotspots({
+        log: requireArg(args.log, 'log'),
+        ...packArgs(args, defaultPack),
+        ...(args.top === undefined ? {} : { top: args.top }),
       }),
   }))
 

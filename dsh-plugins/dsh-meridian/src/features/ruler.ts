@@ -246,7 +246,10 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
       recordHit(repeatedStep.name)
       continue
     }
-    if (event.phase === 'log') continue // 普通日志不作为行为路径判定对象
+    // 非行为路径的相位不参与「额外路径」判定：
+    // `log` = 普通日志行；`slow` = 性能事实（慢查询/分段耗时）。
+    // 它们回答「多快/多慢」，不回答「流程走到哪一步」——混入路径判定会产生噪音式误报。
+    if (event.phase === 'log' || event.phase === 'slow') continue
     findings.push({
       kind: 'move-on-log',
       severity: 'medium',

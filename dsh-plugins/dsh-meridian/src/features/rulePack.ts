@@ -28,6 +28,22 @@ export interface MessageRule {
   detail?: string
   /** 耗时字段名（毫秒）。 */
   durationField?: string
+  /**
+   * 分段耗时抽取声明（可选）：对消息体做**全局**匹配，逐段抽出名称与毫秒值。
+   *
+   * 用于把既有日志里的「分段耗时」文本（如 `落库(主档+缓冲)=24ms`）直接变成可归因证据，
+   * 无需改动被观测系统的采集端。
+   */
+  segments?: {
+    /** 全局正则（须带 g 语义：由实现以 exec 循环消费）。 */
+    pattern: string
+    /** 段名所在的具名捕获组。 */
+    nameGroup: string
+    /** 毫秒值所在的具名捕获组。 */
+    valueGroup: string
+    /** 需要忽略的段名（如汇总行「合计」——它不是阶段，混进来会污染热点排行）。 */
+    ignore?: string[]
+  }
   /** 成功判定字段名；与 `okEquals` 比较。 */
   okField?: string
   /** 成功判定期望值。 */

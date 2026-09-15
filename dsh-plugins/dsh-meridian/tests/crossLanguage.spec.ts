@@ -56,7 +56,7 @@ describe('案例视角：技术案例与业务对象必须分开建模', () => {
     const event = result.events[0]
     assert.equal(event.caseId, '42b809c8-23af-4838-88ea-bb85dd043689')
     assert.equal(event.phase, 'request-out')
-    assert.equal(event.durationMs, 58)
+    assert.equal(event.durationMs, 58.57) // 保留源精度，不截断
   })
 
   it('单据号 app_no 进入业务对象维度，且与 trace_id 相互独立', () => {
@@ -73,7 +73,7 @@ describe('案例视角：技术案例与业务对象必须分开建模', () => {
       ['新增維修資金申請', '修改維修資金申請'],
     )
     // 耗时被累加，可归因
-    assert.equal(result.objectCases[0].totalMs, 37)
+    assert.equal(result.objectCases[0].totalMs, 37.7) // 32.2 + 5.5
   })
 
   it('多对多：一次 trace 可跨多张单据，一张单据可跨多次 trace', () => {

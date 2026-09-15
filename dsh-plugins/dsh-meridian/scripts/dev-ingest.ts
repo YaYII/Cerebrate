@@ -12,6 +12,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
+import { computeHotspots } from '../src/features/hotspots'
 import { ingestLogText } from '../src/features/ingest'
 import { DSEDT_PACK } from '../src/packs/dsedtJavaLogback'
 import { IHM2_PACK } from '../src/packs/ihm2Laravel'
@@ -97,7 +98,22 @@ for (const event of list.slice(0, 25)) {
   )
 }
 
-title('⑥ 告警（不阻断，但必须回显）')
+title('⑥ 热点归因（第二战场：时间花在哪、慢在哪一段）')
+const hotspots = computeHotspots(result.events, { top: 5 })
+process.stdout.write(
+  `  耗时样本 ${hotspots.timedEvents} 个 ｜ 事件合计 ${hotspots.totalMs}ms ｜ 分段合计 ${hotspots.segmentTotalMs}ms\n`,
+)
+for (const item of hotspots.byTotal) {
+  const denominator = hotspots.totalMs + hotspots.segmentTotalMs
+  const share = denominator === 0 ? 0 : (item.totalMs / denominator) * 100
+  process.stdout.write(
+    `  ▸ ${item.key.slice(0, 46).padEnd(46)} 次数 ${String(item.count).padStart(3)} ｜ 累计 ${String(item.totalMs).padStart(6)}ms（${share.toFixed(1)}%）｜ p50 ${item.p50Ms} ｜ p95 ${item.p95Ms} ｜ max ${item.maxMs}\n`,
+  )
+  const sample = item.evidence[0]
+  if (sample !== undefined) process.stdout.write(`      证据 ${sample.source}:${sample.line}\n`)
+}
+
+title('⑦ 告警（不阻断，但必须回显）')
 if (result.warnings.length === 0) process.stdout.write('  （无）\n')
 for (const warning of result.warnings) process.stdout.write(`  ⚠ ${warning}\n`)
 

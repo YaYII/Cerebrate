@@ -15,6 +15,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { buildFingerprint, compareFingerprints } from '../features/fingerprint'
+import { computeHotspots } from '../features/hotspots'
 import { ingestLogText, NO_CASE, type IngestResult } from '../features/ingest'
 import type { Coverage } from '../features/eventModel'
 import { judgeCase, type Intent, type Verdict } from '../features/ruler'
@@ -146,6 +147,14 @@ export interface VerdictArgs extends PackArgs {
    * 按单次请求判会产生大量 out-of-scope 噪音。
    */
   view?: 'case' | 'object'
+}
+
+/** 热点归因入参。 */
+export interface HotspotsArgs extends PackArgs {
+  /** 日志文件路径。 */
+  log: string
+  /** 每张榜的条数（默认 10）。 */
+  top?: number
 }
 
 /** 基线对比入参。 */
@@ -308,6 +317,32 @@ export function merVerdict(args: VerdictArgs): Record<string, JsonLike> {
         evidence: finding.evidence.map((ev) => `${ev.source}:${ev.line} → ${ev.snippet}`),
       })),
     })),
+  })
+}
+
+/**
+ * 热点归因：回答「时间主要花在哪、最差的那批有多差、证据在哪几行」。
+ *
+ * 这是第二战场（线上排查）的直接抓手：**用聚合证据替代经验猜测**。
+ *
+ * @param args - 入参（日志路径 + 接入声明 + 榜单长度）。
+ * @returns 热点报告（含口径说明）。
+ */
+export function merHotspots(args: HotspotsArgs): Record<string, JsonLike> {
+  const pack = resolvePack(args)
+  const result = ingestLogText(readLog(args.log), { source: args.log, pack })
+  const report = computeHotspots(result.events, { top: Math.min(args.top ?? 10, 50) })
+  return toJsonResult({
+    log: args.log,
+    pack: pack.name,
+    coverageNote: coverageSummary(result.coverage, result.verdict),
+    verdict: result.verdict,
+    timedEvents: report.timedEvents,
+    totalMs: report.totalMs,
+    segmentTotalMs: report.segmentTotalMs,
+    byTotal: report.byTotal,
+    byTail: report.byTail,
+    note: report.note,
   })
 }
 

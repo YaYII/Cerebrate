@@ -77,6 +77,13 @@ export interface RuntimeEvent {
   durationMs: number | null
   /** 成功与否；无法判断时为 null（未知不等于成功）。 */
   ok: boolean | null
+  /**
+   * 分段耗时（一次事件内部的阶段拆分），如「抢占+载入=1ms / 核验=6ms / 落库=24ms」。
+   *
+   * 它的价值：单条事件的**总耗时**只能说明"慢"，分段才能说明"**慢在哪一段**"——
+   * 这是第二战场（定位可优化空间）最直接的证据形态。
+   */
+  segments: Array<{ name: string; ms: number }>
   /** 证据锚点。 */
   evidence: Evidence
 }
