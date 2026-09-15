@@ -12,14 +12,22 @@
 
 import { apply } from '../lib/index.js'
 
-/** 模拟注册上下文，收集注册进来的工具。 */
+/** 模拟注册上下文，收集注册进来的工具与事件监听。 */
 const registered = []
-const ctx = { tools: { register: (tool) => registered.push(tool) } }
+const listeners = []
+const ctx = {
+  tools: { register: (tool) => registered.push(tool) },
+  on: (event, handler) => listeners.push({ event, handler }),
+}
 
-apply(ctx, { defaultPack: 'dsedt' })
+apply(ctx, { defaultPack: 'dsedt', injectGuidance: true })
 
 console.log(`✅ 插件装配成功，注册工具 ${registered.length} 个：`)
 for (const tool of registered) console.log(`   · ${tool.name ?? '(无 name)'}`)
+console.log(`✅ 事件监听 ${listeners.length} 个：${listeners.map((item) => item.event).join(', ')}`)
+if (!listeners.some((item) => item.event === 'agent/pre-step')) {
+  throw new Error('未注册 agent/pre-step 监听：使用指引不会注入')
+}
 
 const DSEDT_A = '/tmp/meridian-raw/case-A.log'
 const DSEDT_B = '/tmp/meridian-raw/case-B.log'

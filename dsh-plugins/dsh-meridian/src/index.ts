@@ -20,6 +20,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { merBaseline, merFacts, merHotspots, merVerdict, parseIntents, parsePackDefinition } from './business/tools'
 import type { RulePack } from './features/rulePack'
 
@@ -29,13 +30,16 @@ export const inject = ['tools']
 
 /** 插件配置。 */
 export interface MeridianConfig {
-  /** 默认接入名（`dsedt` / `ihm2`）；缺省 `dsedt`。 */
+  /** 默认接入名（`dsedt` / `ihm2` / `python` / `json`）；缺省 `dsedt`。 */
   defaultPack: string
+  /** 是否在会话首步注入一次使用指引（让 AI 自己想起来用运行期事实校验）。 */
+  injectGuidance: boolean
 }
 
 /** 配置 schema：字段带默认值，未配置时也能装配。 */
 export const Config: z<MeridianConfig> = z.object({
   defaultPack: z.string().default('dsedt'),
+  injectGuidance: z.boolean().default(true),
 })
 
 /** 工具返回渲染：统一输出格式化 JSON，便于 AI 与人工核对。 */
@@ -125,7 +129,27 @@ const MER_GUIDANCE = `经络 Meridian 是「运行时态接口 + 自校验标尺
    无需改被观测项目一行代码。`
 
 /**
- * 插件装配：注册四个工具。
+ * 注入给 AI 的一次性使用指引。
+ *
+ * 与 `mer_guide` 的分工：`mer_guide` 是「主动查询时的说明书」；
+ * 本常量是「会话首步的提醒」——解决一个真实问题：
+ * **能力存在 ≠ 会被使用**。AI 在惯性下会直接读代码推断行为，
+ * 而不是去拿运行期事实；一次提醒足以把它拉回正确的工作方式。
+ */
+const MERIDIAN_GUIDANCE = [
+  '【运行时态自校验 · 经络 Meridian】本会话可在**运行期事实**上校验改动，不必只靠读代码推断：',
+  '· 改完代码后：跑一次（测试或服务）→ 用 mer_baseline 对比改动前后的日志。',
+  '  它会区分 identical（行为没变）/ relabeled（只是改名，低置信）/ length-changed（多做或少做步骤，高置信）/',
+  '  structure-changed（结构变化，高置信），并给出首个分歧位置与两侧证据行号。',
+  '· 要判断「是否符合预期」：用 mer_verdict 声明期望步骤（expect + expectEnd + allow），',
+  '  它按五类偏离给判定；事实不可信时它会拒绝判定（inconclusive），场景不匹配时跳过（out-of-scope）——这是保护，不是失败。',
+  '· 要定位优化空间：用 mer_hotspots 看「时间花在哪、慢在哪一段」（含分段耗时与证据行号），而不是凭经验挑。',
+  '· 任何事实结果都先看 coverageNote：verdict=failed 表示日志格式与接入声明已漂移，',
+  '  此时「0 条事实」**不等于**「系统没问题」——必须先修 declaration 再下结论。',
+].join('\n')
+
+/**
+ * 插件装配：注册五个工具 + 注入一次使用指引。
  *
  * @param ctx - Cordis 上下文。
  * @param config - 插件配置（含默认接入名）。
@@ -219,6 +243,30 @@ export function apply(ctx: Context, config: MeridianConfig): void {
         ...(args.top === undefined ? {} : { top: args.top }),
       }),
   }))
+
+  // 会话首步注入一次使用指引（同插件只注入一次，避免每步刷屏）
+  if (config.injectGuidance !== false) {
+    ctx.on('agent/pre-step', async ({ agent, messages, step, signal }, next) => {
+      const decision = await next()
+      if (decision.kind === 'reject' || (step === 1 && decision.messages.length === 0)) return decision
+      const alreadyInjected = agent.session.surface.nodes.some((seq) => {
+        const event = agent.session.eventAt(seq)
+        return (
+          event?.type === 'user/message' &&
+          event.data.source.kind === 'plugin' &&
+          event.data.source.plugin === name
+        )
+      })
+      if (alreadyInjected) return decision
+      signal.throwIfAborted()
+      const guidance = createUserMessage({
+        content: [{ type: 'text' as const, text: MERIDIAN_GUIDANCE }],
+        source: { kind: 'plugin' as const, plugin: name, form: 'instructions' as const },
+      })
+      const lastClaimedIndex = decision.messages.findLastIndex((message) => messages.includes(message))
+      return { kind: 'enter' as const, messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
+    })
+  }
 
   ctx.tools.register(defineTool({
     name: 'mer_guide',
