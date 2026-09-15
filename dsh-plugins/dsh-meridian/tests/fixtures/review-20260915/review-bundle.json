@@ -1,0 +1,1420 @@
+{
+ "intents": [
+  {
+   "name": "核验成功-主档收敛",
+   "appliesWhen": {
+    "labelContains": "verified=true"
+   },
+   "expect": [
+    {
+     "name": "核验完成(成功)",
+     "match": {
+      "labelContains": "verified=true"
+     },
+     "mustSucceed": true
+    },
+    {
+     "name": "主档落库(收敛或INSERT兜底)",
+     "match": {
+      "labelContains": "主档"
+     }
+    }
+   ],
+   "expectEnd": {
+    "labelContains": "主档"
+   },
+   "allow": [
+    {
+     "labelContains": "异步落库入队失败"
+    },
+    {
+     "labelContains": "待归档移除失败"
+    },
+    {
+     "labelContains": "待归档登记失败"
+    },
+    {
+     "labelContains": "confirm分段"
+    },
+    {
+     "labelContains": "核验抢占失败-单据在读取后被并发改写"
+    },
+    {
+     "labelContains": "核验抢占未成功-单据状态"
+    }
+   ]
+  },
+  {
+   "name": "核验拒绝-refId与单据不一致",
+   "appliesWhen": {
+    "labelContains": "核验拒绝-refId与单据不一致"
+   },
+   "expect": [
+    {
+     "name": "核验完成(未通过)",
+     "match": {
+      "labelContains": "verified=false"
+     },
+     "mustSucceed": true
+    }
+   ],
+   "expectEnd": {
+    "labelContains": "verified=false"
+   },
+   "allow": [
+    {
+     "labelContains": "异步落库入队失败"
+    },
+    {
+     "labelContains": "待归档移除失败"
+    },
+    {
+     "labelContains": "待归档登记失败"
+    },
+    {
+     "labelContains": "confirm分段"
+    },
+    {
+     "labelContains": "核验抢占失败-单据在读取后被并发改写"
+    },
+    {
+     "labelContains": "核验抢占未成功-单据状态"
+    }
+   ]
+  },
+  {
+   "name": "并发核验-幂等返回成功",
+   "appliesWhen": {
+    "labelContains": "核验已完成-幂等返回成功"
+   },
+   "expect": [
+    {
+     "name": "幂等返回成功",
+     "match": {
+      "labelContains": "核验已完成-幂等返回成功"
+     },
+     "mustSucceed": true
+    }
+   ],
+   "expectEnd": {
+    "labelContains": "幂等返回成功"
+   },
+   "allow": [
+    {
+     "labelContains": "异步落库入队失败"
+    },
+    {
+     "labelContains": "待归档移除失败"
+    },
+    {
+     "labelContains": "待归档登记失败"
+    },
+    {
+     "labelContains": "confirm分段"
+    },
+    {
+     "labelContains": "核验抢占失败-单据在读取后被并发改写"
+    },
+    {
+     "labelContains": "核验抢占未成功-单据状态"
+    }
+   ]
+  },
+  {
+   "name": "维修资金申请-新增后应有后续操作",
+   "appliesWhen": {
+    "labelContains": "新增維修資金申請"
+   },
+   "expect": [
+    {
+     "name": "新增申请",
+     "match": {
+      "labelContains": "新增維修資金申請"
+     },
+     "mustSucceed": true
+    },
+    {
+     "name": "后续修改",
+     "match": {
+      "labelContains": "修改維修資金申請"
+     }
+    }
+   ],
+   "expectEnd": {
+    "labelContains": "修改維修資金申請"
+   },
+   "allow": []
+  },
+  {
+   "name": "维修资金申请-创建步骤成功",
+   "appliesWhen": {
+    "labelContains": "維修資金申請"
+   },
+   "expect": [
+    {
+     "name": "新增申请",
+     "match": {
+      "labelContains": "新增維修資金申請"
+     },
+     "mustSucceed": true
+    }
+   ],
+   "expectEnd": {
+    "labelContains": "新增維修資金申請"
+   },
+   "allow": [
+    {
+     "labelContains": "修改維修資金申請"
+    }
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "case": "dsedt:co-SS810GU7FCQ2M.dsedt.verification.service.business.impl.VerificationServiceImplTest$Crea",
+   "source": "/tmp/meridian-raw/run2/co-SS810GU7FCQ2M.dsedt.verification.service.business.impl.VerificationServiceImplTest$Crea.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档登记失败(忽略，依赖 confirm/手工兜底): orderNo=ORD-057054455b2f40e68aa5294023eef0c0, err=java.lang.NullPointerException: Cannot in…(截断)",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验单据已创建: orderNo=ORD-057054455b2f40e68aa5294023eef0c0, 商户=M001, 产品=ACT-001",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "INFO",
+     "label": "建单已落库(UNVERIFIED): orderNo=ORD-057054455b2f40e68aa5294023eef0c0",
+     "line": 3
+    }
+   ]
+  },
+  {
+   "case": "dsedt:com.ds-V3JC8E3D91T1U.verification.service.business.impl.VerificationServiceImplTest$QueryV",
+   "source": "/tmp/meridian-raw/run2/com.ds-V3JC8E3D91T1U.verification.service.business.impl.VerificationServiceImplTest$QueryV.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "INFO",
+     "label": "状态查询 结果: 商户=M001, 产品=ACT-001, 用户ID=11731e8ea6b2b1a173b5d979d4c1b192, 已验证=true, 回执号=RCPT-DB",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "INFO",
+     "label": "状态查询 结果: 商户=M001, 产品=ACT-001, 用户ID=11731e8ea6b2b1a173b5d979d4c1b192, 已验证=true, 回执号=RCPT-WL",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "INFO",
+     "label": "状态查询 结果: 商户=M001, 产品=ACT-001, 用户ID=11731e8ea6b2b1a173b5d979d4c1b192, 已验证=false, 回执号=",
+     "line": 3
+    }
+   ]
+  },
+  {
+   "case": "dsedt:controller.H5ControllerTest$ActivityValidity",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.controller.H5ControllerTest$ActivityValidity.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "H5入口 活动无效: eventId=EVT-2026-001, result=INVALID_ACTIVITY",
+     "line": 1
+    }
+   ]
+  },
+  {
+   "case": "dsedt:controller.H5ControllerTest$IpWhitelist",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.controller.H5ControllerTest$IpWhitelist.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "H5入口 IP不在白名單: merchantId=mPass, ip=203.0.113.10",
+     "line": 1
+    }
+   ]
+  },
+  {
+   "case": "dsedt:controller.H5ControllerTest$RefIdDedup",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.controller.H5ControllerTest$RefIdDedup.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "H5入口 refId 重複: refId=REF-20260721-001",
+     "line": 1
+    }
+   ]
+  },
+  {
+   "case": "dsedt:controller.MpayControllerTest$MerchantQueryDeliveryTests",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.controller.MpayControllerTest$MerchantQueryDeliveryTests.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "MQL 缓冲失败(降级直写 DB): refId=REF-3, err=java.lang.NullPointerException: Cannot invoke \"tools.jackson.databind.ObjectMapper.w…(截断)",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "WARN",
+     "label": "MQL 缓冲失败(降级直写 DB): refId=REF-1, err=java.lang.NullPointerException: Cannot invoke \"tools.jackson.databind.ObjectMapper.w…(截断)",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "WARN",
+     "label": "MQL 缓冲失败(降级直写 DB): refId=REF-2, err=java.lang.NullPointerException: Cannot invoke \"tools.jackson.databind.ObjectMapper.w…(截断)",
+     "line": 3
+    }
+   ]
+  },
+  {
+   "case": "dsedt:controller.MpayControllerTest$QueryResultMerchantIsolation",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.controller.MpayControllerTest$QueryResultMerchantIsolation.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "MQL 缓冲失败(降级直写 DB): refId=REF-2, err=java.lang.NullPointerException: Cannot invoke \"tools.jackson.databind.ObjectMapper.w…(截断)",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "WARN",
+     "label": "MQL 缓冲失败(降级直写 DB): refId=REF-1, err=java.lang.NullPointerException: Cannot invoke \"tools.jackson.databind.ObjectMapper.w…(截断)",
+     "line": 2
+    }
+   ]
+  },
+  {
+   "case": "dsedt:service.business.impl.VerificationServiceImplTest$ConfirmVerifyTest",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.service.business.impl.VerificationServiceImplTest$ConfirmVerifyTest.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=1/3",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=2/3",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=3/3",
+     "line": 3
+    },
+    {
+     "seq": 4,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占未成功-单据状态: orderNo=ORD-CONFIRM001, status=VIEWED",
+     "line": 4
+    },
+    {
+     "seq": 5,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=5ms, 状态持有耗时=7ms",
+     "line": 5
+    },
+    {
+     "seq": 6,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档收敛为 SUCCESS(定向UPDATE): orderNo=ORD-CONFIRM001",
+     "line": 6
+    },
+    {
+     "seq": 7,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 7
+    },
+    {
+     "seq": 8,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 8
+    },
+    {
+     "seq": 9,
+     "phase": "log",
+     "level": "INFO",
+     "label": "confirm分段(慢): 抢占+载入=1ms 核验(含白名单+码+签名)=6ms 落库(主档+缓冲)=24ms 响应+缓存+审计=2ms 终态发布=0ms 合计=33ms",
+     "line": 9
+    },
+    {
+     "seq": 10,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验拒绝-refId与单据不一致: orderNo=ORD-CONFIRM001, sessionRefId=SESSION-REF-001, reqRefId=OTHER-REF-999",
+     "line": 10
+    },
+    {
+     "seq": 11,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=4ms",
+     "line": 11
+    },
+    {
+     "seq": 12,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 12
+    },
+    {
+     "seq": 13,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=3ms, 状态持有耗时=17ms",
+     "line": 13
+    },
+    {
+     "seq": 14,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档落库为 SUCCESS(INSERT 兜底-历史单): orderNo=ORD-CONFIRM001",
+     "line": 14
+    },
+    {
+     "seq": 15,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 15
+    },
+    {
+     "seq": 16,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 16
+    },
+    {
+     "seq": 17,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败-单据不存在: orderNo=ORD-CONFIRM001",
+     "line": 17
+    },
+    {
+     "seq": 18,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=2ms",
+     "line": 18
+    },
+    {
+     "seq": 19,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 19
+    },
+    {
+     "seq": 20,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验命中结果缓存: verified=true",
+     "line": 20
+    },
+    {
+     "seq": 21,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 21
+    },
+    {
+     "seq": 22,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 单据已是终态但结果不可复原(缓存与主档均无成功行): orderNo=ORD-CONFIRM001, refId=ref-001 —— 需对账",
+     "line": 22
+    },
+    {
+     "seq": 23,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败-单据不存在: orderNo=ORD-CONFIRM001",
+     "line": 23
+    },
+    {
+     "seq": 24,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=2ms",
+     "line": 24
+    },
+    {
+     "seq": 25,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 25
+    },
+    {
+     "seq": 26,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败但单据已成功（并发核验先完成）——保持终态 COMPLETED: sessionKey=mpay:order:ORD-CONFIRM001",
+     "line": 26
+    },
+    {
+     "seq": 27,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验进行中-并发请求: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 27
+    },
+    {
+     "seq": 28,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 28
+    },
+    {
+     "seq": 29,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 单据已是终态但结果不可复原(缓存与主档均无成功行): orderNo=ORD-CONFIRM001, refId=ref-001 —— 需对账",
+     "line": 29
+    },
+    {
+     "seq": 30,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=1ms, 状态持有耗时=4ms",
+     "line": 30
+    },
+    {
+     "seq": 31,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档收敛为 SUCCESS(定向UPDATE): orderNo=ORD-CONFIRM001",
+     "line": 31
+    },
+    {
+     "seq": 32,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 32
+    },
+    {
+     "seq": 33,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 33
+    },
+    {
+     "seq": 34,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=3ms, 状态持有耗时=4ms",
+     "line": 34
+    },
+    {
+     "seq": 35,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档收敛为 SUCCESS(定向UPDATE): orderNo=ORD-CONFIRM001",
+     "line": 35
+    },
+    {
+     "seq": 36,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 36
+    },
+    {
+     "seq": 37,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 37
+    },
+    {
+     "seq": 38,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 38
+    },
+    {
+     "seq": 39,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验命中DB兜底(session已过期): orderNo=ORD-CONFIRM001, receiptId=REC-DONE",
+     "line": 39
+    }
+   ]
+  },
+  {
+   "case": "dsedt:service.business.impl.VerificationServiceImplTest$CreateOrderTests",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.service.business.impl.VerificationServiceImplTest$CreateOrderTests.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档登记失败(忽略，依赖 confirm/手工兜底): orderNo=ORD-cfdd902ea2404493b481d98c7b5cf7c6, err=java.lang.NullPointerException: Cannot in…(截断)",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验单据已创建: orderNo=ORD-cfdd902ea2404493b481d98c7b5cf7c6, 商户=M001, 产品=ACT-001",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "INFO",
+     "label": "建单已落库(UNVERIFIED): orderNo=ORD-cfdd902ea2404493b481d98c7b5cf7c6",
+     "line": 3
+    },
+    {
+     "seq": 4,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档登记失败(忽略，依赖 confirm/手工兜底): orderNo=ORD-e7269adc09024a91ac237444283f838c, err=java.lang.NullPointerException: Cannot in…(截断)",
+     "line": 4
+    },
+    {
+     "seq": 5,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验单据已创建: orderNo=ORD-e7269adc09024a91ac237444283f838c, 商户=M001, 产品=ACT-001",
+     "line": 5
+    },
+    {
+     "seq": 6,
+     "phase": "log",
+     "level": "INFO",
+     "label": "建单已落库(UNVERIFIED): orderNo=ORD-e7269adc09024a91ac237444283f838c",
+     "line": 6
+    }
+   ]
+  },
+  {
+   "case": "dsedt:service.business.impl.VerificationServiceImplTest$GetOrderDetailTes",
+   "source": "/tmp/meridian-raw/run2/com.dsedt.verification.service.business.impl.VerificationServiceImplTest$GetOrderDetailTes.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "INFO",
+     "label": "单据已消费(VIEWED): orderNo=ORD-ABC123456789",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "WARN",
+     "label": "单据无法消费-状态非PENDING: orderNo=ORD-ABC123456789, status=COMPLETED",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "WARN",
+     "label": "单据无法消费-状态非PENDING: orderNo=ORD-ABC123456789, status=VIEWED",
+     "line": 3
+    },
+    {
+     "seq": 4,
+     "phase": "log",
+     "level": "WARN",
+     "label": "单据不存在或已过期: orderNo=ORD-ABC123456789",
+     "line": 4
+    }
+   ]
+  },
+  {
+   "case": "dsedt:ConfirmVerify-full",
+   "source": "/tmp/meridian-raw/case-A.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=1/3",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=2/3",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=3/3",
+     "line": 3
+    },
+    {
+     "seq": 4,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占未成功-单据状态: orderNo=ORD-CONFIRM001, status=VIEWED",
+     "line": 4
+    },
+    {
+     "seq": 5,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=5ms, 状态持有耗时=7ms",
+     "line": 5
+    },
+    {
+     "seq": 6,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档收敛为 SUCCESS(定向UPDATE): orderNo=ORD-CONFIRM001",
+     "line": 6
+    },
+    {
+     "seq": 7,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 7
+    },
+    {
+     "seq": 8,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 8
+    },
+    {
+     "seq": 9,
+     "phase": "log",
+     "level": "INFO",
+     "label": "confirm分段(慢): 抢占+载入=1ms 核验(含白名单+码+签名)=6ms 落库(主档+缓冲)=24ms 响应+缓存+审计=2ms 终态发布=0ms 合计=33ms",
+     "line": 9
+    },
+    {
+     "seq": 10,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验拒绝-refId与单据不一致: orderNo=ORD-CONFIRM001, sessionRefId=SESSION-REF-001, reqRefId=OTHER-REF-999",
+     "line": 10
+    },
+    {
+     "seq": 11,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=4ms",
+     "line": 11
+    },
+    {
+     "seq": 12,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 12
+    },
+    {
+     "seq": 13,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=3ms, 状态持有耗时=17ms",
+     "line": 13
+    },
+    {
+     "seq": 14,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档落库为 SUCCESS(INSERT 兜底-历史单): orderNo=ORD-CONFIRM001",
+     "line": 14
+    },
+    {
+     "seq": 15,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 15
+    },
+    {
+     "seq": 16,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 16
+    },
+    {
+     "seq": 17,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败-单据不存在: orderNo=ORD-CONFIRM001",
+     "line": 17
+    },
+    {
+     "seq": 18,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=2ms",
+     "line": 18
+    },
+    {
+     "seq": 19,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 19
+    },
+    {
+     "seq": 20,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验命中结果缓存: verified=true",
+     "line": 20
+    },
+    {
+     "seq": 21,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 21
+    },
+    {
+     "seq": 22,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 单据已是终态但结果不可复原(缓存与主档均无成功行): orderNo=ORD-CONFIRM001, refId=ref-001 —— 需对账",
+     "line": 22
+    },
+    {
+     "seq": 23,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败-单据不存在: orderNo=ORD-CONFIRM001",
+     "line": 23
+    },
+    {
+     "seq": 24,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=2ms",
+     "line": 24
+    },
+    {
+     "seq": 25,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 25
+    },
+    {
+     "seq": 26,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败但单据已成功（并发核验先完成）——保持终态 COMPLETED: sessionKey=mpay:order:ORD-CONFIRM001",
+     "line": 26
+    },
+    {
+     "seq": 27,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验进行中-并发请求: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 27
+    },
+    {
+     "seq": 28,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 28
+    },
+    {
+     "seq": 29,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 单据已是终态但结果不可复原(缓存与主档均无成功行): orderNo=ORD-CONFIRM001, refId=ref-001 —— 需对账",
+     "line": 29
+    },
+    {
+     "seq": 30,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=1ms, 状态持有耗时=4ms",
+     "line": 30
+    },
+    {
+     "seq": 31,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档收敛为 SUCCESS(定向UPDATE): orderNo=ORD-CONFIRM001",
+     "line": 31
+    },
+    {
+     "seq": 32,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 32
+    },
+    {
+     "seq": 33,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 33
+    },
+    {
+     "seq": 34,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=3ms, 状态持有耗时=4ms",
+     "line": 34
+    },
+    {
+     "seq": 35,
+     "phase": "log",
+     "level": "INFO",
+     "label": "主档收敛为 SUCCESS(定向UPDATE): orderNo=ORD-CONFIRM001",
+     "line": 35
+    },
+    {
+     "seq": 36,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 36
+    },
+    {
+     "seq": 37,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 37
+    },
+    {
+     "seq": 38,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 38
+    },
+    {
+     "seq": 39,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验命中DB兜底(session已过期): orderNo=ORD-CONFIRM001, receiptId=REC-DONE",
+     "line": 39
+    }
+   ]
+  },
+  {
+   "case": "dsedt:ConfirmVerify-missing-persist",
+   "source": "/tmp/meridian-raw/case-B.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=1/3",
+     "line": 1
+    },
+    {
+     "seq": 2,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=2/3",
+     "line": 2
+    },
+    {
+     "seq": 3,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占失败-单据在读取后被并发改写: orderNo=ORD-CONFIRM001, attempt=3/3",
+     "line": 3
+    },
+    {
+     "seq": 4,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验抢占未成功-单据状态: orderNo=ORD-CONFIRM001, status=VIEWED",
+     "line": 4
+    },
+    {
+     "seq": 5,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=5ms, 状态持有耗时=7ms",
+     "line": 5
+    },
+    {
+     "seq": 6,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 6
+    },
+    {
+     "seq": 7,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 7
+    },
+    {
+     "seq": 8,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验拒绝-refId与单据不一致: orderNo=ORD-CONFIRM001, sessionRefId=SESSION-REF-001, reqRefId=OTHER-REF-999",
+     "line": 8
+    },
+    {
+     "seq": 9,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=4ms",
+     "line": 9
+    },
+    {
+     "seq": 10,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 10
+    },
+    {
+     "seq": 11,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=3ms, 状态持有耗时=17ms",
+     "line": 11
+    },
+    {
+     "seq": 12,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 12
+    },
+    {
+     "seq": 13,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 13
+    },
+    {
+     "seq": 14,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败-单据不存在: orderNo=ORD-CONFIRM001",
+     "line": 14
+    },
+    {
+     "seq": 15,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=2ms",
+     "line": 15
+    },
+    {
+     "seq": 16,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 16
+    },
+    {
+     "seq": 17,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验命中结果缓存: verified=true",
+     "line": 17
+    },
+    {
+     "seq": 18,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 18
+    },
+    {
+     "seq": 19,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败-单据不存在: orderNo=ORD-CONFIRM001",
+     "line": 19
+    },
+    {
+     "seq": 20,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=false, bindResult=INVALID_CERT, 核验耗时=1ms, 状态持有耗时=2ms",
+     "line": 20
+    },
+    {
+     "seq": 21,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 21
+    },
+    {
+     "seq": 22,
+     "phase": "log",
+     "level": "WARN",
+     "label": "核验失败但单据已成功（并发核验先完成）——保持终态 COMPLETED: sessionKey=mpay:order:ORD-CONFIRM001",
+     "line": 22
+    },
+    {
+     "seq": 23,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验进行中-并发请求: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 23
+    },
+    {
+     "seq": 24,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 24
+    },
+    {
+     "seq": 25,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=1ms, 状态持有耗时=4ms",
+     "line": 25
+    },
+    {
+     "seq": 26,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 26
+    },
+    {
+     "seq": 27,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 27
+    },
+    {
+     "seq": 28,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验完成: orderNo=ORD-CONFIRM001, refId=ref-001, verified=true, bindResult=SUCCESS, 核验耗时=3ms, 状态持有耗时=4ms",
+     "line": 28
+    },
+    {
+     "seq": 29,
+     "phase": "log",
+     "level": "ERROR",
+     "label": "⚠️ 异步落库入队失败(降级同步落库): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data…(截断)",
+     "line": 29
+    },
+    {
+     "seq": 30,
+     "phase": "log",
+     "level": "WARN",
+     "label": "待归档移除失败(忽略): orderNo=ORD-CONFIRM001, err=java.lang.NullPointerException: Cannot invoke \"org.springframework.data.redis.c…(截断)",
+     "line": 30
+    },
+    {
+     "seq": 31,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验已完成-幂等返回成功: orderNo=ORD-CONFIRM001, refId=ref-001",
+     "line": 31
+    },
+    {
+     "seq": 32,
+     "phase": "log",
+     "level": "INFO",
+     "label": "核验命中DB兜底(session已过期): orderNo=ORD-CONFIRM001, receiptId=REC-DONE",
+     "line": 32
+    }
+   ]
+  },
+  {
+   "case": "ihm2:MS-ACC-UPD-1789439525",
+   "source": "/home/as-workstation01/ihm2_workspace/src/ihm-backend/storage/logs/11ea28bb7ffd-laravel-2026-09-15.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 334,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 334
+    },
+    {
+     "seq": 337,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 337
+    },
+    {
+     "seq": 340,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 340
+    },
+    {
+     "seq": 344,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 344
+    },
+    {
+     "seq": 347,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 347
+    },
+    {
+     "seq": 350,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 350
+    }
+   ]
+  },
+  {
+   "case": "ihm2:MS-2026-0001",
+   "source": "/home/as-workstation01/ihm2_workspace/src/ihm-backend/storage/logs/11ea28bb7ffd-laravel-2026-09-15.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 942,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 1827
+    },
+    {
+     "seq": 943,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 1828
+    },
+    {
+     "seq": 971,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 1870
+    },
+    {
+     "seq": 981,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 1885
+    },
+    {
+     "seq": 993,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 1897
+    },
+    {
+     "seq": 1617,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 3056
+    }
+   ]
+  },
+  {
+   "case": "ihm2:MS-ACC-UPD-1789439405",
+   "source": "/home/as-workstation01/ihm2_workspace/src/ihm-backend/storage/logs/11ea28bb7ffd-laravel-2026-09-15.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 199,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 199
+    },
+    {
+     "seq": 206,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 206
+    },
+    {
+     "seq": 211,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 211
+    },
+    {
+     "seq": 215,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 215
+    },
+    {
+     "seq": 219,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 219
+    }
+   ]
+  },
+  {
+   "case": "ihm2:MS-ACC-REDUCE-1789439418",
+   "source": "/home/as-workstation01/ihm2_workspace/src/ihm-backend/storage/logs/11ea28bb7ffd-laravel-2026-09-15.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 252,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 252
+    },
+    {
+     "seq": 262,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 262
+    },
+    {
+     "seq": 265,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 265
+    }
+   ]
+  },
+  {
+   "case": "ihm2:MS-ACC-REDUCE-1789439530",
+   "source": "/home/as-workstation01/ihm2_workspace/src/ihm-backend/storage/logs/11ea28bb7ffd-laravel-2026-09-15.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 377,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 377
+    },
+    {
+     "seq": 386,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 386
+    },
+    {
+     "seq": 389,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 389
+    }
+   ]
+  },
+  {
+   "case": "ihm2:MS-API-afcae6515e",
+   "source": "/home/as-workstation01/ihm2_workspace/src/ihm-backend/storage/logs/11ea28bb7ffd-laravel-2026-09-15.log",
+   "coverageVerdict": "ok",
+   "facts": [
+    {
+     "seq": 1917,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "新增維修資金申請",
+     "line": 3430
+    },
+    {
+     "seq": 1918,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 3431
+    },
+    {
+     "seq": 1919,
+     "phase": "step",
+     "level": "DEBUG",
+     "label": "修改維修資金申請",
+     "line": 3432
+    }
+   ]
+  }
+ ]
+}

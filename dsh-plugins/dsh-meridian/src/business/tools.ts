@@ -135,6 +135,13 @@ export interface VerdictArgs extends PackArgs {
   log: string
   /** 自定义意图声明；缺省用内置意图。 */
   intents?: Intent[]
+  /**
+   * 判定粒度：`case` = 按技术案例（一次请求）逐条判；`object` = 按业务对象（一张单据）判。
+   *
+   * 两者不可混用：业务流转的期望步骤（如「新增后应有修改」）只在**单据视角**下才成立，
+   * 按单次请求判会产生大量 out-of-scope 噪音。
+   */
+  view?: 'case' | 'object'
 }
 
 /** 基线对比入参。 */
@@ -260,7 +267,8 @@ export function merVerdict(args: VerdictArgs): Record<string, JsonLike> {
     })
   }
   const verdicts: Verdict[] = []
-  for (const facts of result.cases) {
+  const subjects = args.view === 'object' ? result.objectCases : result.cases
+  for (const facts of subjects) {
     for (const intent of intents) {
       verdicts.push(judgeCase(intent, facts, result.verdict))
     }
@@ -272,7 +280,8 @@ export function merVerdict(args: VerdictArgs): Record<string, JsonLike> {
     coverageNote: coverageSummary(result.coverage, result.verdict),
     verdict: result.verdict,
     intentCount: intents.length,
-    caseCount: result.cases.length,
+    caseCount: subjects.length,
+    judgedView: args.view ?? 'case',
     summary: {
       pass: judged.filter((item) => item.status === 'pass').length,
       deviated: judged.filter((item) => item.status === 'deviated').length,

@@ -118,6 +118,21 @@ describe('标尺判定：抓漏做、且不误报', () => {
     assert.equal(verdict.findings.length, 0)
   })
 
+  it('期望活动的重复出现不算额外路径，且重复次数被单列（实测踩过的误报）', () => {
+    const repeated = [
+      REAL.split('\n')[0],
+      REAL.split('\n')[1],
+      REAL.split('\n')[1].replace('主档收敛为 SUCCESS(定向UPDATE)', '主档收敛为 SUCCESS(定向UPDATE) 第2次'),
+      REAL.split('\n')[1].replace('主档收敛为 SUCCESS(定向UPDATE)', '主档收敛为 SUCCESS(定向UPDATE) 第3次'),
+    ].join('\n')
+    const { result, facts } = factsOf(repeated)
+    const verdict = judgeCase(INTENT, facts, result.verdict)
+    // 同一活动出现 3 次：只把首次计入命中，其余既不是偏离、也不丢信息
+    assert.equal(verdict.status, 'pass')
+    assert.equal(verdict.findings.length, 0)
+    assert.deepEqual(verdict.repeats, [{ step: '主档落库', count: 3 }])
+  })
+
   it('期望成功的环节实际失败时报 failed-step', () => {
     const broken = REAL.split('\n')
       .map((line) => (line.includes('主档收敛') ? line.replace('INFO', 'ERROR').replace('主档收敛为 SUCCESS', '✗ VerificationServiceImpl.persist | 12ms | SQLException: deadlock') : line))

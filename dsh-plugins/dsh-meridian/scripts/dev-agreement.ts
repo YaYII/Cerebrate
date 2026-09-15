@@ -31,31 +31,51 @@ interface MineVerdict {
   missing: string[]
 }
 interface MineFile {
-  source: string
-  verdicts: MineVerdict[]
+  source?: string
+  verdicts?: MineVerdict[]
+  /** 证据包形态：{ judgments: [{case,intent,status,missing}] }。 */
+  judgments?: Array<{ case: string; intent: string; status: string; missing: string[] }>
 }
 
 const reviewers = (JSON.parse(readFileSync(reviewerPath, 'utf8')) as { judgments: ReviewerJudgment[] }).judgments
 const mineFiles = minePaths.split(',').map((path) => JSON.parse(readFileSync(path, 'utf8')) as MineFile)
+
+/**
+ * 把两种输入形态统一成 (case, intent, status, missing) 列表。
+ *
+ * `dev-verdict.ts --json` 产出 `{ source, verdicts[] }`；证据包比对产出 `{ judgments[] }`。
+ * 统一在这里做，避免比对逻辑分叉。
+ */
+function flatten(file: MineFile): Array<{ case: string; intent: string; status: string; missing: string[] }> {
+  if (file.judgments !== undefined) return file.judgments
+  return (file.verdicts ?? []).map((verdict) => ({
+    case: file.source ?? '',
+    intent: verdict.intent,
+    status: verdict.status,
+    missing: verdict.missing,
+  }))
+}
 
 let total = 0
 let statusAgree = 0
 let missingAgree = 0
 const rows: string[] = []
 for (const file of mineFiles) {
-  for (const verdict of file.verdicts) {
-    const reviewer = reviewers.find((item) => item.intent === verdict.intent && item.case === file.source)
+  for (const verdict of flatten(file)) {
+    const reviewer = reviewers.find((item) => item.intent === verdict.intent && item.case === verdict.case)
     if (reviewer === undefined) continue
     total += 1
     const sameStatus = reviewer.status === verdict.status
+    // 规范化：复核方可能把 stuck 等派生标记并入 missing；比对前剥离，避免把表示差异当成判定差异。
+    const reviewerMissing = reviewer.missing.filter((item) => item !== 'stuck')
     const sameMissing =
-      reviewer.missing.length === verdict.missing.length && reviewer.missing.every((m) => verdict.missing.includes(m))
+      reviewerMissing.length === verdict.missing.length && reviewerMissing.every((m) => verdict.missing.includes(m))
     if (sameStatus) statusAgree += 1
     if (sameMissing) missingAgree += 1
     rows.push(
-      `  ${sameStatus && sameMissing ? '✅' : '❌'} ${file.source} × ${verdict.intent}\n` +
+      `  ${sameStatus && sameMissing ? '✅' : '❌'} ${verdict.case} × ${verdict.intent}\n` +
         `      我方=${verdict.status}${verdict.missing.length > 0 ? ` 缺失=[${verdict.missing.join(', ')}]` : ''}\n` +
-        `      复核=${reviewer.status}${reviewer.missing.length > 0 ? ` 缺失=[${reviewer.missing.join(', ')}]` : ''}`,
+        `      复核=${reviewer.status}${reviewerMissing.length > 0 ? ` 缺失=[${reviewerMissing.join(', ')}]` : ''}`,
     )
   }
 }

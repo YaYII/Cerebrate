@@ -77,6 +77,7 @@ interface FactsArgsShape extends RawPackArgs {
 interface VerdictArgsShape extends RawPackArgs {
   log?: string
   intents?: Record<string, unknown>[]
+  view?: string
 }
 
 /** 基线工具入参形态。 */
@@ -165,6 +166,7 @@ export function apply(ctx: Context, config: MeridianConfig): void {
         description:
           '意图声明数组（缺省用内置意图）：[{ name, appliesWhen?, expect:[{name,match:{labelContains?,phase?,level?},optional?,mustSucceed?}], expectEnd?, allow? }]',
       },
+      view: { type: 'string' as const, description: '判定粒度：case（技术案例，默认）/ object（业务对象=一张单据）' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
     execute: async (args: VerdictArgsShape) =>
@@ -172,6 +174,7 @@ export function apply(ctx: Context, config: MeridianConfig): void {
         log: requireArg(args.log, 'log'),
         ...packArgs(args, defaultPack),
         ...(args.intents === undefined ? {} : { intents: parseIntents(args.intents) }),
+        ...(args.view === 'object' ? { view: 'object' as const } : {}),
       }),
   }))
 

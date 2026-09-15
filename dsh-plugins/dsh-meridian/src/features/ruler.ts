@@ -93,6 +93,14 @@ export interface Verdict {
   matched: string[]
   /** 未命中的期望步骤名。 */
   missing: string[]
+  /**
+   * 期望活动的重复次数（>1 才列出）。
+   *
+   * **为什么单列**：重复执行业务活动是常态（一张单据被改 5 次），既不是偏离也不该被丢弃——
+   * 它是有效的业务信号（改得多说明在反复调整）。早期实现把重复当成「额外路径」误报，
+   * 这正是"善意缺失的规则会产生告警疲劳"的又一例。
+   */
+  repeats: Array<{ step: string; count: number }>
   /** 判定依据说明（含事实可信度）。 */
   basis: string
 }
@@ -133,6 +141,7 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
       findings: [],
       matched: [],
       missing: intent.expect.map((step) => step.name),
+      repeats: [],
       basis: '事实不可信（摄取覆盖度判定为 failed）：**拒绝判定**，请先修复日志格式声明或采集链路。',
     }
   }
@@ -144,6 +153,7 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
       findings: [],
       matched: [],
       missing: [],
+      repeats: [],
       basis: `本案例不满足该意图的适用前提（${describeMatcher(intent.appliesWhen)}）：跳过判定，不做任何结论。`,
     }
   }
@@ -152,6 +162,11 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
   const matched: string[] = []
   const missing: string[] = []
   const usedIndexes = new Set<number>()
+  /** 每条期望步骤的实际命中次数（用于重复计数）。 */
+  const hitCounts = new Map<string, number>()
+  const recordHit = (name: string): void => {
+    hitCounts.set(name, (hitCounts.get(name) ?? 0) + 1)
+  }
   let cursor = 0
   let lastMatchedAt = -1
 
@@ -177,6 +192,7 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
         })
         matched.push(step.name)
         usedIndexes.add(anywhere)
+        recordHit(step.name)
         continue
       }
       if (step.optional === true) continue
@@ -201,6 +217,7 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
     }
     matched.push(step.name)
     usedIndexes.add(found)
+    recordHit(step.name)
     cursor = found + 1
     lastMatchedAt = found
     const event = facts.events[found]
@@ -221,6 +238,14 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
     if (usedIndexes.has(i)) continue
     const event = facts.events[i]
     if (allowed.some((matcher) => matches(event, matcher))) continue
+    // 期望活动的**重复出现**：既不算额外路径，也不能丢——重复次数是有效业务信号。
+    // ⚠️ 本判断必须先于「phase === 'log' 跳过」：业务活动日志常落在 log 相位，
+    //    若放在其后，重复计数会被相位过滤挡掉（实测踩过，回归测试当场抓到）。
+    const repeatedStep = intent.expect.find((step) => matches(event, step.match))
+    if (repeatedStep !== undefined) {
+      recordHit(repeatedStep.name)
+      continue
+    }
     if (event.phase === 'log') continue // 普通日志不作为行为路径判定对象
     findings.push({
       kind: 'move-on-log',
@@ -246,6 +271,11 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
     }
   }
 
+  const repeats: Array<{ step: string; count: number }> = []
+  for (const [step, count] of hitCounts) {
+    if (count > 1) repeats.push({ step, count })
+  }
+
   const hasHigh = findings.some((item) => item.severity === 'high')
   const status: Verdict['status'] = findings.length === 0 ? 'pass' : hasHigh ? 'failed' : 'deviated'
   const coverageNote = coverageVerdict === 'degraded' ? '（注意：事实存在少量未识别行，结论为部分可信）' : ''
@@ -255,6 +285,7 @@ export function judgeCase(intent: Intent, facts: CaseFacts, coverageVerdict: Cov
     findings,
     matched,
     missing,
+    repeats,
     basis:
       findings.length === 0
         ? `全部 ${matched.length} 个期望步骤按序命中，且未发现额外路径与失败步骤。${coverageNote}`
