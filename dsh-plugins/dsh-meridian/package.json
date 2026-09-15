@@ -1,0 +1,14 @@
+{
+  "name": "@deepseek-ai/dsh-meridian",
+  "description": "经络 Meridian：AI 运行时态接口 + 自校验标尺（日志→带证据的运行时事实→标尺判定）",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.spec.ts",
+    "check": "node scripts/check-all.mjs"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
