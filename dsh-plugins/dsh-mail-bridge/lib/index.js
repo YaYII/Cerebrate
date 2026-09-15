@@ -87271,6 +87271,7 @@ function createRuntime(ctx, config) {
 	const agents = ctx.get("agents");
 	const presets = ctx.get("agentPresets");
 	const llm = ctx.get("llm");
+	const workspaces = ctx.get("workspaceRegistry");
 	const imap = {
 		host: config.imapHost,
 		port: config.imapPort,
@@ -87442,8 +87443,9 @@ function createRuntime(ctx, config) {
 			updatedAt: now()
 		};
 		const agentOptions = resolveAgentOptions(ctx, config);
+		const cwd = config.followerCwd.length > 0 ? config.followerCwd : process.cwd();
 		const meta = {
-			cwd: config.followerCwd.length > 0 ? config.followerCwd : process.cwd(),
+			cwd,
 			mailThreadTag: tag,
 			mailPeer: mail.fromAddress
 		};
@@ -87475,6 +87477,12 @@ function createRuntime(ctx, config) {
 					form: "instructions"
 				}
 			}));
+			if (workspaces !== void 0) try {
+				const workspace = await workspaces.resolveByPath(cwd);
+				if (workspace !== void 0) await workspace.attachSession(sessionId);
+			} catch (error) {
+				log(`分身归属工作区失败（不阻断本次处理）：${error instanceof Error ? error.message : String(error)}`);
+			}
 			log(`已新建分身 session=${sessionId} 绑定线程 [#${tag}] 对端 ${mail.fromAddress}`);
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);

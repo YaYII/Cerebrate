@@ -172,6 +172,11 @@ interface AgentsLike {
   }): Promise<{ agent: MailAgent }>
 }
 
+/** 宿主工作区服务（把分身挂到工作区，侧边栏才看得见）。 */
+interface WorkspaceLike {
+  resolveByPath(path: string): Promise<{ attachSession(sessionId: string): Promise<void> } | undefined>
+}
+
 /** 宿主 agentPresets 服务。 */
 interface PresetsLike {
   resolve(id: string): Promise<unknown>
@@ -268,6 +273,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
   const agents = ctx.get('agents') as AgentsLike | undefined
   const presets = ctx.get('agentPresets') as PresetsLike | undefined
   const llm = ctx.get('llm') as LlmRuntime | undefined
+  const workspaces = ctx.get('workspaceRegistry') as WorkspaceLike | undefined
 
   const imap: ImapConfig = {
     host: config.imapHost,
@@ -463,6 +469,16 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
         content: [{ type: 'text', text: mailPrompt(mail, tag, role) }],
         source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
       }))
+      // 挂到工作区，否则分身虽然建好了，却在侧边栏里完全看不见——
+      // 用户会以为「发邮件没任何反应」，而实际分身正在后台干活（实测踩过）。
+      if (workspaces !== undefined) {
+        try {
+          const workspace = await workspaces.resolveByPath(cwd)
+          if (workspace !== undefined) await workspace.attachSession(sessionId)
+        } catch (error) {
+          log(`分身归属工作区失败（不阻断本次处理）：${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
       log(`已新建分身 session=${sessionId} 绑定线程 [#${tag}] 对端 ${mail.fromAddress}`)
     } catch (error) {
       // 抛出而不是吞掉：交给收信循环按 MAX_DELIVERY_ATTEMPTS 重试，
