@@ -37,7 +37,8 @@
         # 全局默认模型被改动后数字员工整体不可用）
         followerProvider: ''
         followerModel: ''
-        # 单轮步数上限：超过后每 10 步强制注入「收尾并汇报」（0=关闭）
+        # 每 15 步主动汇报一次进度；单轮超过 40 步则强制收尾汇报（0=关闭）
+        progressReportEverySteps: 15
         maxStepsPerTurn: 40
         reportStrangers: true
         classifyStrangers: true

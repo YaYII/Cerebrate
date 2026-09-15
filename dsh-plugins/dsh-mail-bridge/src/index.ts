@@ -114,6 +114,8 @@ export interface Config {
   classifyStrangers: boolean
   /** 状态文件路径。 */
   statePath: string
+  /** 邮件分身每多少步主动汇报一次进度（0=关闭）。主人不在电脑前时，这是他掌握进展的唯一渠道。 */
+  progressReportEverySteps: number
   /** 邮件分身单轮最大步数：超过即强制收尾并汇报，防止原地空转烧 token。 */
   maxStepsPerTurn: number
   /** 是否在首个 step 注入邮件桥引导。 */
@@ -146,6 +148,7 @@ export const Config: z<Config> = z.object({
   reportStrangers: z.boolean().default(true),
   classifyStrangers: z.boolean().default(true),
   statePath: z.string().default(join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'storages', 'dsh-mail-bridge', 'state.json')),
+  progressReportEverySteps: z.number().default(15),
   maxStepsPerTurn: z.number().default(40),
   injectGuidance: z.boolean().default(true),
 })
@@ -235,6 +238,20 @@ function resolveAgentOptions(ctx: Context, config: Config): Record<string, strin
   }
 }
 
+const REPORT_FORMAT = [
+  '【汇报格式】每次回信请按此结构，让主人一眼看懂：',
+  '  · 进度：已完成 X/Y，或百分比',
+  '  · 做了什么：关键动作与结果（带证据：命令、数字、文件路径）',
+  '  · 下一步：打算做什么',
+  '  · 需要你决策：没有则写「无」',
+  '【必须先用 mail_ask 请示、不得擅自决定的场景】',
+  '  · 要动生产环境、线上数据库、部署发布',
+  '  · 要删除文件、大范围重构、或改动他人负责的模块',
+  '  · 需求有歧义、有多种合理解法且优劣不明',
+  '  · 操作不可逆，或可能造成数据/资金/对外影响',
+  '  · 缺少权限、凭据或必要信息',
+].join('\n')
+
 /**
  * 第一封指令的作业准则：**两阶段工作制**。
  *
@@ -252,7 +269,18 @@ const PLAN_RULES = [
   '4. 发完这封回信就**立即结束本轮，不要开始执行**。',
   '5. 主人回复确认后你会再次被唤醒，那时才真正动手。',
   '6. 无论本轮成功、失败还是卡住，**结束前必须用 mail_reply 汇报**；卡住也要说清卡在哪。',
+  '',
+  ...REPORT_FORMAT,
 ].join('\n')
+
+/**
+ * 汇报格式规范与「必须主动请示」的场景。
+ *
+ * 为什么单列：主人是领导，人可能不在电脑前，邮件是他掌握工作的唯一渠道。
+ * 汇报要让他一眼看懂「进度到哪、要不要拍板」；而需要他决策的事必须先问再动，
+ * 不能自己替领导做主——尤其是不可逆、动生产、需求有歧义这几类。
+ */
+
 
 /**
  * 后续轮次的作业准则：主人已看过方案，按批准结果决定执行或再请示。
@@ -262,8 +290,12 @@ const EXECUTE_RULES = [
   '处置要求：',
   '1. 这是主人对方案的回应：主人批准 → 开始执行；要求修改 → 调整方案后再用 mail_reply 请示，不要擅自执行。',
   '2. 执行前先复述你要做什么，避免误解。',
-  '3. 如果发现自己在原地打转（同类操作反复无效），立即停止并汇报卡点，不要硬撑。',
-  '4. 无论成功、失败还是卡住，**结束前必须用 mail_reply 汇报结果**：做了什么、结果如何、有无遗留。',
+  '3. 每完成一个阶段就**主动**用 mail_reply 汇报一次进度，不要等主人来问。',
+  '4. 遇到需要主人拍板的事（见下方场景），用 mail_ask 请示并**结束本轮等回复**，不要自己替他决定。',
+  '5. 如果发现自己在原地打转（同类操作反复无效），立即停止并汇报卡点，不要硬撑。',
+  '6. 无论成功、失败还是卡住，**结束前必须用 mail_reply 汇报结果**：做了什么、结果如何、有无遗留。',
+  '',
+  ...REPORT_FORMAT,
 ].join('\n')
 
 /** 组装喂给分身的邮件正文提示词。 */
@@ -864,11 +896,24 @@ function stepLimitNotice(step: number, limit: number): string {
   ].join('\n')
 }
 
+/**
+ * 进度汇报提示词：执行中途按间隔注入，让分身主动汇报而不是等主人来问。
+ * 主人是领导、人可能不在电脑前，按间隔汇报是他掌握工作的唯一渠道。
+ */
+function progressNotice(step: number): string {
+  return [
+    `【主动汇报】你已执行 ${step} 步。请立即用 mail_reply 发一封**进度汇报**给主人，然后继续干活。`,
+    '汇报按这个结构写：进度（已完成 X/Y）、做了什么（带证据）、下一步、需要决策（没有写「无」）。',
+    '汇报不是结束——发完信继续推进；只有真的需要主人拍板时才用 mail_ask 并停下来等。',
+  ].join('\n')
+}
+
 /** 折叠进首个 agent step 的邮件桥引导。 */
 function buildGuidance(): string {
   return [
     '【邮件桥】本会话可能绑定了邮件对话线程（dsh-mail-bridge）：',
-    '- mail_reply(body, attachments?)：**以回复方式**回信，自动接在同一邮件线程（同一主题 + 线程头 + [#会话标签]），对方点回复就能回到你这个分身。',
+    '- mail_reply(body, attachments?)：**以回复方式**回信（含进度汇报），自动接在同一邮件线程，对方点回复就能回到你这个分身。',
+    '- mail_ask(question, options?)：遇到需要主人拍板的事（动生产/删数据/需求有歧义/不可逆操作）主动发邮件请示，**发完结束本轮等回复**。',
     '- mail_threads()：查看当前所有邮件线程与 DSH 会话的绑定关系。',
     '- mail_status()：查看收信连接与增量水位状态。',
     '回信一律用 mail_reply；只有需要主动联系一个还没有邮件线程的新对象时才用 email_send。',
@@ -928,6 +973,40 @@ export function apply(ctx: Context, config: Config): void {
         return runtime.reply(sessionId, readOptionalString(args.body) ?? '', readStringArray(args.attachments))
       },
       presentCall: args => presentCall('Reply by email', args),
+    }),
+    ask: defineTool({
+      name: 'mail_ask',
+      description: '遇到需要主人决策的问题时，主动发邮件请示并结束本轮，等主人邮件回复后继续。'
+        + '用于：动生产环境/线上数据库/部署、删除或大范围改代码、需求有歧义、不可逆操作、缺权限。'
+        + '调用后请立即结束本轮，不要自己替主人做决定。',
+      parameters: {
+        question: { type: 'string', description: '要请示的问题：说清背景、你的倾向、为什么需要他定', required: true },
+        options: { type: 'string', description: '可选项列表（可选，一行一个）' },
+      },
+      output: { schema: { type: 'object', additionalProperties: true }, render: renderJson },
+      execute: async (args, exec) => {
+        const runtime = runtimeHolder
+        if (runtime === undefined) return { ok: false, error: '邮件桥尚未就绪（等待 agents 服务）' }
+        const sessionId = exec.agent?.session?.id
+        if (sessionId === undefined) return { ok: false, error: '无法确定当前会话，不能在无会话上下文中请示' }
+        const question = (readOptionalString(args.question) ?? '').trim()
+        if (question.length === 0) return { ok: false, error: '请示内容不能为空' }
+        const options = (readOptionalString(args.options) ?? '').trim()
+        const text = [
+          '【需要你确认】',
+          question,
+          ...(options.length > 0 ? ['', '可选项：', options] : []),
+          '',
+          '（我会暂停本轮，收到你的回复后继续。）',
+        ].join('\n')
+        const result = await runtime.reply(sessionId, text, [])
+        if (result.ok !== true) return result
+        return {
+          ...result,
+          next: '请示邮件已发出。请立即结束本轮，等主人回复后再继续——不要自行决定。',
+        }
+      },
+      presentCall: args => presentCall('Ask owner by email', args),
     }),
     threads: defineTool({
       name: 'mail_threads',
@@ -989,12 +1068,18 @@ export function apply(ctx: Context, config: Config): void {
     if (decision.kind === 'reject') return decision
     const runtime = runtimeHolder
     if (runtime === undefined) return decision
-    const limit = config.maxStepsPerTurn
-    if (limit <= 0 || step < limit || (step - limit) % 10 !== 0) return decision
     if (!runtime.isFollower(agent.session.id)) return decision
+    const limit = config.maxStepsPerTurn
+    const every = config.progressReportEverySteps
+    const overLimit = limit > 0 && step >= limit && (step - limit) % 10 === 0
+    const dueReport = every > 0 && step > 0 && step % every === 0 && (limit <= 0 || step < limit)
+    if (!overLimit && !dueReport) return decision
     signal.throwIfAborted()
     const notice = createUserMessage({
-      content: [{ type: 'text', text: stepLimitNotice(step, limit) }],
+      content: [{
+        type: 'text',
+        text: overLimit ? stepLimitNotice(step, limit) : progressNotice(step),
+      }],
       source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
     })
     return { kind: 'enter', messages: [...decision.messages, notice] }
