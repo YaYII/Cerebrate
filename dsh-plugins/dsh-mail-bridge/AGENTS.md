@@ -42,6 +42,14 @@
 6. **`N:*` 语义**：即使没有新邮件也至少返回最后一封，必须按 `uid > sinceUid` 过滤。
 7. **Session 类型未公开历史事件访问器**：引导注入的幂等只能靠进程内
    `WeakSet`（宿主重启后重复注入一次是无害的）。
+8. **禁止在插件上下文访问 `ctx.agent`**：Cordis 会抛
+   `cannot get property "agent" without inject`——而且收信回调本就没有调用方 agent。
+   新建/续接分身的模型路由**只能**取自
+   `ctx.get('agentDefaultModel')?.currentSelection()`（官方配方，见 webhook/session.ts）。
+9. **失败不立即丢弃**：收信循环只在**成功后**推进水位；失败按
+   `MAX_DELIVERY_ATTEMPTS` 重试，超限才放弃并推进，避免瞬时故障丢信或毒邮件阻塞。
+10. **调试插件请查 `/tmp/dsh-web.log`**：dsh web 由 dsh-public.sh 以
+    `setsid nohup ... > /tmp/dsh-web.log 2>&1` 启动，插件日志**不在 journalctl**。
 
 ## 完成门禁（每次代码修改后必须全过）
 

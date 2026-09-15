@@ -37,11 +37,14 @@ import { sendReply } from './features/outbox'
 import type { SmtpSettings } from './features/outbox'
 import {
   addContact,
+  clearFailure,
   emptyState,
   indexMessage,
   isProcessed,
   loadState,
   markProcessed,
+  MAX_DELIVERY_ATTEMPTS,
+  recordFailure,
   saveState,
   upsertThread,
 } from './features/store'
@@ -179,23 +182,32 @@ function now(): string {
   return new Date().toISOString()
 }
 
-/** 从调用方上下文继承模型配置，避免新会话报「无 provider/model」。 */
-function inheritModelOptions(ctx: Context): Record<string, string> {
-  const caller = (ctx as {
-    agent?: {
-      options?: { provider?: string; model?: string; reasoningEffort?: string }
-      session?: { requestHeader?(): { config?: { provider?: string; model?: string; reasoningEffort?: string } } | undefined }
+/** 宿主默认模型服务：为新建/续接的分身提供 provider/model。 */
+interface DefaultModelLike {
+  currentSelection(): { provider: string; model: string; reasoningEffort?: unknown }
+}
+
+/**
+ * 解析新建/续接分身要用的模型路由。
+ *
+ * 为什么不能读 `ctx.agent`：Cordis 禁止访问未在 `inject` 里声明的属性，直接读会抛
+ * `cannot get property "agent" without inject`——而且收信回调属于后台上下文，
+ * 本就没有「调用方 agent」。正确来源是宿主的 agentDefaultModel 服务；
+ * 用 ctx.get 惰性读取（取不到就返回空，交由宿主自身默认处理）。
+ */
+function resolveAgentOptions(ctx: Context): Record<string, string> {
+  const service = ctx.get('agentDefaultModel') as DefaultModelLike | undefined
+  if (service === undefined) return {}
+  try {
+    const selected = service.currentSelection()
+    const out: Record<string, string> = { provider: selected.provider, model: selected.model }
+    if (selected.reasoningEffort !== undefined) {
+      out.reasoningEffort = ReasoningEffortId(String(selected.reasoningEffort))
     }
-  }).agent
-  const header = caller?.session?.requestHeader?.()?.config
-  const out: Record<string, string> = {}
-  const provider = header?.provider ?? caller?.options?.provider
-  const model = header?.model ?? caller?.options?.model
-  const effort = header?.reasoningEffort ?? caller?.options?.reasoningEffort
-  if (provider !== undefined && provider.length > 0) out.provider = provider
-  if (model !== undefined && model.length > 0) out.model = model
-  if (effort !== undefined && effort.length > 0) out.reasoningEffort = ReasoningEffortId(effort)
-  return out
+    return out
+  } catch {
+    return {}
+  }
 }
 
 /** 组装喂给分身的邮件正文提示词。 */
@@ -382,7 +394,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
     try {
       const resumed = await agents.resume({
         resumeSessionId: sessionId,
-        agentOptions: inheritModelOptions(ctx),
+        agentOptions: resolveAgentOptions(ctx),
         ...(config.followerPreset.length > 0
           ? { setup: async (agentCtx: unknown) => { await presets?.mount(agentCtx, config.followerPreset) } }
           : {}),
@@ -417,7 +429,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
     indexMessage(state, mail.messageId, tag)
     persist()
 
-    const agentOptions = inheritModelOptions(ctx)
+    const agentOptions = resolveAgentOptions(ctx)
     const cwd = config.followerCwd.length > 0 ? config.followerCwd : process.cwd()
     const meta: Record<string, string> = { cwd, mailThreadTag: tag, mailPeer: mail.fromAddress }
     try {
@@ -573,11 +585,19 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
           if (isProcessed(state, raw.uid)) continue
           try {
             await handleMessage(raw.uid, raw.source)
+            clearFailure(state, raw.uid)
+            markProcessed(state, raw.uid)
           } catch (error) {
-            log(`处理 UID ${raw.uid} 失败：${error instanceof Error ? error.message : String(error)}`)
+            // 失败不立即丢弃：先重试，避免瞬时故障（服务未就绪/网络抖动）丢信
+            const attempts = recordFailure(state, raw.uid)
+            const detail = error instanceof Error ? error.message : String(error)
+            if (attempts >= MAX_DELIVERY_ATTEMPTS) {
+              log(`处理 UID ${raw.uid} 连续失败 ${attempts} 次，放弃并推进水位（避免阻塞收信）：${detail}`)
+              markProcessed(state, raw.uid)
+            } else {
+              log(`处理 UID ${raw.uid} 失败（第 ${attempts}/${MAX_DELIVERY_ATTEMPTS} 次，下轮重试）：${detail}`)
+            }
           }
-          // 无论成功失败都推进水位：否则一封坏邮件会永久卡住整个收信循环
-          markProcessed(state, raw.uid)
           persist()
         }
       } while (rescan && !stopped)

@@ -86958,6 +86958,7 @@ function emptyState() {
 		contacts: [],
 		lastUid: 0,
 		processedUids: [],
+		failedAttempts: {},
 		sentLastUid: 0
 	};
 }
@@ -86988,6 +86989,21 @@ function markProcessed(state, uid) {
 	state.processedUids.push(uid);
 	if (state.processedUids.length > 500) state.processedUids = state.processedUids.slice(-500);
 }
+/**
+* 记一次处理失败并返回累计次数。
+* 为什么需要重试：瞬时故障（服务未就绪、网络抖动）不该把邮件直接丢掉——
+* 但也不能无限重试，否则一封毒邮件会永久卡住整个收信循环。
+*/
+function recordFailure(state, uid) {
+	const key = String(uid);
+	const attempts = (state.failedAttempts[key] ?? 0) + 1;
+	state.failedAttempts[key] = attempts;
+	return attempts;
+}
+/** 处理成功后清除失败记录。 */
+function clearFailure(state, uid) {
+	delete state.failedAttempts[String(uid)];
+}
 /** 该 UID 是否已处理过（IMAP 重连后可能重复推送）。 */
 function isProcessed(state, uid) {
 	return state.processedUids.includes(uid);
@@ -87004,6 +87020,7 @@ function loadState(path) {
 			contacts: raw.contacts ?? [],
 			lastUid: typeof raw.lastUid === "number" ? raw.lastUid : 0,
 			processedUids: raw.processedUids ?? [],
+			failedAttempts: raw.failedAttempts ?? {},
 			sentLastUid: typeof raw.sentLastUid === "number" ? raw.sentLastUid : 0
 		};
 	} catch {
@@ -87192,18 +87209,28 @@ function log(message) {
 function now() {
 	return (/* @__PURE__ */ new Date()).toISOString();
 }
-/** 从调用方上下文继承模型配置，避免新会话报「无 provider/model」。 */
-function inheritModelOptions(ctx) {
-	const caller = ctx.agent;
-	const header = caller?.session?.requestHeader?.()?.config;
-	const out = {};
-	const provider = header?.provider ?? caller?.options?.provider;
-	const model = header?.model ?? caller?.options?.model;
-	const effort = header?.reasoningEffort ?? caller?.options?.reasoningEffort;
-	if (provider !== void 0 && provider.length > 0) out.provider = provider;
-	if (model !== void 0 && model.length > 0) out.model = model;
-	if (effort !== void 0 && effort.length > 0) out.reasoningEffort = ReasoningEffortId(effort);
-	return out;
+/**
+* 解析新建/续接分身要用的模型路由。
+*
+* 为什么不能读 `ctx.agent`：Cordis 禁止访问未在 `inject` 里声明的属性，直接读会抛
+* `cannot get property "agent" without inject`——而且收信回调属于后台上下文，
+* 本就没有「调用方 agent」。正确来源是宿主的 agentDefaultModel 服务；
+* 用 ctx.get 惰性读取（取不到就返回空，交由宿主自身默认处理）。
+*/
+function resolveAgentOptions(ctx) {
+	const service = ctx.get("agentDefaultModel");
+	if (service === void 0) return {};
+	try {
+		const selected = service.currentSelection();
+		const out = {
+			provider: selected.provider,
+			model: selected.model
+		};
+		if (selected.reasoningEffort !== void 0) out.reasoningEffort = ReasoningEffortId(String(selected.reasoningEffort));
+		return out;
+	} catch {
+		return {};
+	}
 }
 /** 组装喂给分身的邮件正文提示词。 */
 function mailPrompt(mail, tag, role) {
@@ -87374,7 +87401,7 @@ function createRuntime(ctx, config) {
 		try {
 			(await agents.resume({
 				resumeSessionId: sessionId,
-				agentOptions: inheritModelOptions(ctx),
+				agentOptions: resolveAgentOptions(ctx),
 				...config.followerPreset.length > 0 ? { setup: async (agentCtx) => {
 					await presets?.mount(agentCtx, config.followerPreset);
 				} } : {}
@@ -87405,7 +87432,7 @@ function createRuntime(ctx, config) {
 		});
 		indexMessage(state, mail.messageId, tag);
 		persist();
-		const agentOptions = inheritModelOptions(ctx);
+		const agentOptions = resolveAgentOptions(ctx);
 		const meta = {
 			cwd: config.followerCwd.length > 0 ? config.followerCwd : process.cwd(),
 			mailThreadTag: tag,
@@ -87558,10 +87585,16 @@ function createRuntime(ctx, config) {
 					if (isProcessed(state, raw.uid)) continue;
 					try {
 						await handleMessage(raw.uid, raw.source);
+						clearFailure(state, raw.uid);
+						markProcessed(state, raw.uid);
 					} catch (error) {
-						log(`处理 UID ${raw.uid} 失败：${error instanceof Error ? error.message : String(error)}`);
+						const attempts = recordFailure(state, raw.uid);
+						const detail = error instanceof Error ? error.message : String(error);
+						if (attempts >= 3) {
+							log(`处理 UID ${raw.uid} 连续失败 ${attempts} 次，放弃并推进水位（避免阻塞收信）：${detail}`);
+							markProcessed(state, raw.uid);
+						} else log(`处理 UID ${raw.uid} 失败（第 ${attempts}/3 次，下轮重试）：${detail}`);
 					}
-					markProcessed(state, raw.uid);
 					persist();
 				}
 			} while (rescan && !stopped);

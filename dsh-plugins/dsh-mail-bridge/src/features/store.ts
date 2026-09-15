@@ -32,13 +32,15 @@ export interface BridgeState {
   lastUid: number
   /** 最近处理过的 UID（去重，防 IMAP 重复推送）。 */
   processedUids: number[]
+  /** UID → 连续失败次数：失败不立即丢弃，重试若干次后才放弃。 */
+  failedAttempts: Record<string, number>
   /** 已回读到的「已发送」最大 UID（出站信任与线程末梢的同步水位）。 */
   sentLastUid: number
 }
 
 /** 空状态。 */
 export function emptyState(): BridgeState {
-  return { version: 1, threads: {}, messageIndex: {}, contacts: [], lastUid: 0, processedUids: [], sentLastUid: 0 }
+  return { version: 1, threads: {}, messageIndex: {}, contacts: [], lastUid: 0, processedUids: [], failedAttempts: {}, sentLastUid: 0 }
 }
 
 /** 写入或更新一条线程绑定。 */
@@ -74,6 +76,26 @@ export function markProcessed(state: BridgeState, uid: number): void {
   }
 }
 
+/** 单封邮件的最大投递尝试次数：超过即放弃并推进水位，避免坏邮件永久阻塞收信。 */
+export const MAX_DELIVERY_ATTEMPTS = 3
+
+/**
+ * 记一次处理失败并返回累计次数。
+ * 为什么需要重试：瞬时故障（服务未就绪、网络抖动）不该把邮件直接丢掉——
+ * 但也不能无限重试，否则一封毒邮件会永久卡住整个收信循环。
+ */
+export function recordFailure(state: BridgeState, uid: number): number {
+  const key = String(uid)
+  const attempts = (state.failedAttempts[key] ?? 0) + 1
+  state.failedAttempts[key] = attempts
+  return attempts
+}
+
+/** 处理成功后清除失败记录。 */
+export function clearFailure(state: BridgeState, uid: number): void {
+  delete state.failedAttempts[String(uid)]
+}
+
 /** 该 UID 是否已处理过（IMAP 重连后可能重复推送）。 */
 export function isProcessed(state: BridgeState, uid: number): boolean {
   return state.processedUids.includes(uid)
@@ -91,6 +113,7 @@ export function loadState(path: string): BridgeState {
       contacts: raw.contacts ?? [],
       lastUid: typeof raw.lastUid === 'number' ? raw.lastUid : 0,
       processedUids: raw.processedUids ?? [],
+      failedAttempts: raw.failedAttempts ?? {},
       sentLastUid: typeof raw.sentLastUid === 'number' ? raw.sentLastUid : 0,
     }
   } catch {

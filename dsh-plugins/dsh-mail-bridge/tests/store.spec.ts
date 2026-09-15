@@ -7,11 +7,14 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   addContact,
+  clearFailure,
   emptyState,
   indexMessage,
   isProcessed,
   loadState,
   markProcessed,
+  MAX_DELIVERY_ATTEMPTS,
+  recordFailure,
   saveState,
   upsertThread,
 } from '../src/features/store'
@@ -98,5 +101,28 @@ describe('磁盘往返', () => {
     const path = join(dir, 'state.json')
     writeFileSync(path, '{ 这不是合法 JSON', 'utf8')
     expect(loadState(path).lastUid).toBe(0)
+  })
+})
+
+describe('失败重试记录', () => {
+  it('累计失败次数，达到上限后由调用方决定放弃', () => {
+    const state = emptyState()
+    expect(recordFailure(state, 42)).toBe(1)
+    expect(recordFailure(state, 42)).toBe(2)
+    expect(recordFailure(state, 42)).toBe(MAX_DELIVERY_ATTEMPTS)
+  })
+
+  it('处理成功后清除失败记录', () => {
+    const state = emptyState()
+    recordFailure(state, 42)
+    clearFailure(state, 42)
+    expect(recordFailure(state, 42)).toBe(1)
+  })
+
+  it('不同 UID 的失败记录互不影响', () => {
+    const state = emptyState()
+    recordFailure(state, 1)
+    recordFailure(state, 1)
+    expect(recordFailure(state, 2)).toBe(1)
   })
 })
