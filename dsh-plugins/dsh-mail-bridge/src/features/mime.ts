@@ -45,6 +45,8 @@ export interface ParsedMail {
   text: string
   /** 附件概要。 */
   attachments: MailAttachment[]
+  /** 是否为自动回复/自动生成信件（RFC 3834 Auto-Submitted != no）。 */
+  autoSubmitted: boolean
 }
 
 /** 把 mailparser 的地址字段（可能是单个对象或数组）拍平成地址列表。 */
@@ -77,6 +79,11 @@ export async function parseMail(uid: number, source: Buffer | string): Promise<P
   const senders = flattenAddresses(parsed.from)
   const primary = senders[0]
   const recipients = flattenAddresses(parsed.to).map(item => item.address)
+  // RFC 3834：自动回复方必须置 Auto-Submitted: auto-replied，接收方不得再自动回复它。
+  // 我们据此识别「自动回复」，避免自动回信再触发自动回信形成无限环路（见 AGENTS.md）。
+  const autoSubmittedRaw = parsed.headers.get('auto-submitted')
+  const autoSubmitted = typeof autoSubmittedRaw === 'string'
+    && autoSubmittedRaw.trim().toLowerCase() !== 'no'
   const text = (parsed.text ?? '').trim()
   return {
     uid,
@@ -90,6 +97,7 @@ export async function parseMail(uid: number, source: Buffer | string): Promise<P
     date: parsed.date === undefined ? undefined : parsed.date.toISOString(),
     // 只有 HTML 时退化为去标签文本，保证模型一定能读到内容
     text: text.length > 0 ? text : htmlFallback(parsed.html),
+    autoSubmitted,
     attachments: (parsed.attachments ?? []).map(item => ({
       filename: item.filename ?? '(未命名)',
       size: item.size ?? 0,

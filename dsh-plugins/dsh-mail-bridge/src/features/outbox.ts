@@ -114,6 +114,9 @@ export async function sendReply(settings: SmtpSettings, reply: OutgoingReply): P
       to: [...reply.to],
       subject: reply.subject,
       text: reply.text,
+      // RFC 3834：声明这是自动回复。对端若是另一个自动应答系统，就不会再回给我们，
+      // 从协议层阻断「自动回信 ↔ 自动回信」的无限环路。
+      headers: { 'Auto-Submitted': 'auto-replied' },
       // 线程语义：In-Reply-To 指向被回复的那封，References 累积整条链，
       // 这两项是邮件客户端把往来并成一条对话线程的依据。
       ...(reply.inReplyTo !== undefined && reply.inReplyTo.length > 0 ? { inReplyTo: reply.inReplyTo } : {}),

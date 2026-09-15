@@ -94,3 +94,22 @@ describe('htmlFallback 降级', () => {
     expect(htmlFallback(undefined)).toBe('')
   })
 })
+
+describe('RFC 3834 自动回复识别（防自回环）', () => {
+  /** 构造一封带指定头的极简邮件。 */
+  function withHeader(extra: string): string {
+    return ['From: a@b.com', 'To: c@d.com', 'Subject: 自动回复', extra, '', 'body'].join('\r\n')
+  }
+
+  it('Auto-Submitted: auto-replied 判定为自动回复', async () => {
+    expect((await parseMail(1, withHeader('Auto-Submitted: auto-replied'))).autoSubmitted).toBe(true)
+  })
+
+  it('Auto-Submitted: no 是人工邮件，不判为自动回复', async () => {
+    expect((await parseMail(2, withHeader('Auto-Submitted: no'))).autoSubmitted).toBe(false)
+  })
+
+  it('没有该头即为人工邮件', async () => {
+    expect((await parseMail(3, withHeader('X-Other: 1'))).autoSubmitted).toBe(false)
+  })
+})

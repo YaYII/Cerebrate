@@ -50,6 +50,10 @@
    `MAX_DELIVERY_ATTEMPTS` 重试，超限才放弃并推进，避免瞬时故障丢信或毒邮件阻塞。
 10. **调试插件请查 `/tmp/dsh-web.log`**：dsh web 由 dsh-public.sh 以
     `setsid nohup ... > /tmp/dsh-web.log 2>&1` 启动，插件日志**不在 journalctl**。
+11. **自动回复必须带 `Auto-Submitted: auto-replied`（RFC 3834）并识别它**：
+    否则「分身回信 → 落回本邮箱 → 被当作对端回复 → 再唤醒分身 → 再回信」会形成
+    无限自回环（把回信地址设为自身时必然发生）。outbox 发送时置该头，
+    index 收到该头即忽略，从协议层阻断环路。
 
 ## 完成门禁（每次代码修改后必须全过）
 

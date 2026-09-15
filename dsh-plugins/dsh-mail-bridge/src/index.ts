@@ -528,6 +528,12 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       log(`UID ${uid} 无法解析发件人，跳过`)
       return
     }
+    // 自动回复不再触发新动作：否则「分身回信 → 落回自己邮箱 → 再唤醒分身 → 再回信」
+    // 会形成无限自回环（实测把回信地址设为自身时必然发生）。
+    if (mail.autoSubmitted) {
+      log(`UID ${uid} 是自动回复（RFC 3834 Auto-Submitted），忽略以避免环路`)
+      return
+    }
     const trust = classifyTrust(mail.fromAddress, {
       owner: config.owner,
       allowedSenders: config.allowedSenders,

@@ -76253,6 +76253,8 @@ async function parseMail(uid, source) {
 	const parsed = await (0, import_mailparser.simpleParser)(source);
 	const primary = flattenAddresses(parsed.from)[0];
 	const recipients = flattenAddresses(parsed.to).map((item) => item.address);
+	const autoSubmittedRaw = parsed.headers.get("auto-submitted");
+	const autoSubmitted = typeof autoSubmittedRaw === "string" && autoSubmittedRaw.trim().toLowerCase() !== "no";
 	const text = (parsed.text ?? "").trim();
 	return {
 		uid,
@@ -76265,6 +76267,7 @@ async function parseMail(uid, source) {
 		subject: (parsed.subject ?? "").trim(),
 		date: parsed.date === void 0 ? void 0 : parsed.date.toISOString(),
 		text: text.length > 0 ? text : htmlFallback(parsed.html),
+		autoSubmitted,
 		attachments: (parsed.attachments ?? []).map((item) => ({
 			filename: item.filename ?? "(未命名)",
 			size: item.size ?? 0,
@@ -86931,6 +86934,7 @@ async function sendReply(settings, reply) {
 			to: [...reply.to],
 			subject: reply.subject,
 			text: reply.text,
+			headers: { "Auto-Submitted": "auto-replied" },
 			...reply.inReplyTo !== void 0 && reply.inReplyTo.length > 0 ? { inReplyTo: reply.inReplyTo } : {},
 			...reply.references.length > 0 ? { references: [...reply.references] } : {},
 			...reply.attachments !== void 0 && reply.attachments.length > 0 ? { attachments: reply.attachments.map((path) => ({ path })) } : {}
@@ -87527,6 +87531,10 @@ function createRuntime(ctx, config) {
 		const mail = await parseMail(uid, source);
 		if (mail.fromAddress.length === 0) {
 			log(`UID ${uid} 无法解析发件人，跳过`);
+			return;
+		}
+		if (mail.autoSubmitted) {
+			log(`UID ${uid} 是自动回复（RFC 3834 Auto-Submitted），忽略以避免环路`);
 			return;
 		}
 		const trust = classifyTrust(mail.fromAddress, {
