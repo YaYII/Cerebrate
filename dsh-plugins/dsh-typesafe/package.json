@@ -1,0 +1,51 @@
+{
+  "name": "@deepseek-ai/dsh-typesafe",
+  "description": "TypeSafe System One（Jev）原生工具：把「可编程常识」变成代码可组合的判定原语（Choice/Noul/Score），用于路由、排序、抽取、校验等语义判断场景。Plugin-only, no MCP.",
+  "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "dsh-plugins/dsh-typesafe"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "node scripts/check-all.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^",
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

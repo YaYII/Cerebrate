@@ -1,0 +1,18 @@
+# dsh-typesafe 装配示例：加入 DSH host 的 cordis 配置
+# 复制到 DSH 部署的 cordis.yml 或 patch 文件即可加载插件。
+#
+# 注意：apiKey 是真实凭证，仓库内一律不写；推荐用单一来源密钥文件：
+#   ~/.credentials/typesafe-api-key （600），或环境变量 TYPESAFE_API_KEY。
+# 密钥获取：https://console.typesafe.ai/keys
+- insert:
+    - id: dsh-typesafe
+      name: '@deepseek-ai/dsh-typesafe'
+      config:
+        model: 'jev-latest'
+        # apiKey: '<TypeSafe API Key>'
+        apiKeyEnv: 'TYPESAFE_API_KEY'
+        apiKeyFile: '~/.credentials/typesafe-api-key'
+        endpoint: 'https://api.typesafe.ai/v1/systemone'
+        timeoutMs: 30000
+        maxAttempts: 3
+        injectGuidance: true
