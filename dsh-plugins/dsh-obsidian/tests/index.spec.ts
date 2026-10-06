@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 
@@ -49,6 +49,7 @@ async function setup(config?: Record<string, unknown>) {
     user: 'yangying',
     agentId: 'dsh',
     injectGuidance: true,
+    knowledgePolicy: '', // 测试只校验基础引导，策略文案另行由配置注入
     autoStart: false, // 测试环境不真实拉 Obsidian
     obsidianBin: '/nonexistent/obsidian',
     launchTimeoutMs: 100,
@@ -60,7 +61,7 @@ async function setup(config?: Record<string, unknown>) {
 function execute(ctx: Context, toolName: string, args: unknown, callId = 1) {
   return ctx.tools.execute({
     signal: testSignal,
-    callId: CallId(`call-${callId}`),
+    callId: ToolCallId(`call-${callId}`),
     name: toolName,
     arguments: args,
   })

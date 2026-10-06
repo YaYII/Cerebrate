@@ -56,6 +56,7 @@ function baseConfig(port: number): Config {
     user: 'tester',
     agentId: 'test-agent',
     injectGuidance: false,
+    knowledgePolicy: '',
     autoStart: false,
     obsidianBin: '/nonexistent/bin',
     launchTimeoutMs: 100,
@@ -85,11 +86,11 @@ describe('apply 注册与 obsidian_* 工具 execute', () => {
     const ok = await startServer(() => ({ status: 200, body: 'ok' }))
     servers.push(ok)
     const okTools = captureTools(baseConfig(ok.port))
-    expect((await okTools.obsidian_status.execute({})).ok).toBe(true)
+    expect((await okTools.obsidian_status!.execute({})).ok).toBe(true)
     const bad = await startServer(() => ({ status: 500, body: 'down' }))
     servers.push(bad)
     const badTools = captureTools(baseConfig(bad.port))
-    expect((await badTools.obsidian_status.execute({})).ok).toBe(false)
+    expect((await badTools.obsidian_status!.execute({})).ok).toBe(false)
   })
 
   it('obsidian_list 根目录与子目录', async () => {
@@ -100,9 +101,9 @@ describe('apply 注册与 obsidian_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const root = await tools.obsidian_list.execute({})
+    const root = await tools.obsidian_list!.execute({})
     expect(root.ok).toBe(true)
-    const sub = await tools.obsidian_list.execute({ path: '团队知识库' })
+    const sub = await tools.obsidian_list!.execute({ path: '团队知识库' })
     expect(sub.ok).toBe(true)
   })
 
@@ -113,10 +114,10 @@ describe('apply 注册与 obsidian_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const ok = await tools.obsidian_read.execute({ path: 'readme.md' })
+    const ok = await tools.obsidian_read!.execute({ path: 'readme.md' })
     expect(ok.ok).toBe(true)
     expect(ok.content).toContain('# 标题')
-    const missing = await tools.obsidian_read.execute({ path: 'nope.md' })
+    const missing = await tools.obsidian_read!.execute({ path: 'nope.md' })
     expect(missing.ok).toBe(false)
   })
 
@@ -132,18 +133,18 @@ describe('apply 注册与 obsidian_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const write = await tools.obsidian_write.execute({ path: 'a.md', content: '# x' })
+    const write = await tools.obsidian_write!.execute({ path: 'a.md', content: '# x' })
     expect(write.ok).toBe(true)
-    const append = await tools.obsidian_append.execute({ path: 'a.md', content: '更多' })
+    const append = await tools.obsidian_append!.execute({ path: 'a.md', content: '更多' })
     expect(append.ok).toBe(true)
-    const search = await tools.obsidian_search.execute({ query: '知识' })
+    const search = await tools.obsidian_search!.execute({ query: '知识' })
     expect(search.ok).toBe(true)
     expect(search.query).toBe('知识')
-    const commands = await tools.obsidian_commands.execute({})
+    const commands = await tools.obsidian_commands!.execute({})
     expect(commands.ok).toBe(true)
-    const run = await tools.obsidian_command_run.execute({ commandId: 'app:open-vault' })
+    const run = await tools.obsidian_command_run!.execute({ commandId: 'app:open-vault' })
     expect(run.ok).toBe(true)
-    const open = await tools.obsidian_open.execute({ path: 'a.md' })
+    const open = await tools.obsidian_open!.execute({ path: 'a.md' })
     expect(open.ok).toBe(true)
   })
 
@@ -151,7 +152,7 @@ describe('apply 注册与 obsidian_* 工具 execute', () => {
     const s = await startServer(() => ({ status: 403, body: JSON.stringify({ message: '无权限' }) }))
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const r = await tools.obsidian_write.execute({ path: 'a.md', content: 'x' })
+    const r = await tools.obsidian_write!.execute({ path: 'a.md', content: 'x' })
     expect(r.ok).toBe(false)
     expect(r.error).toBe('无权限')
   })
@@ -166,7 +167,7 @@ describe('knowledge_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const r = await tools.knowledge_search.execute({ query: '架构', topic: 'dev' })
+    const r = await tools.knowledge_search!.execute({ query: '架构', topic: 'dev' })
     expect(r.status).toBe('ok')
   })
 
@@ -182,7 +183,7 @@ describe('knowledge_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const r = await tools.knowledge_store.execute({ title: '架构规范', content: '正文', topics: '架构,规范' })
+    const r = await tools.knowledge_store!.execute({ title: '架构规范', content: '正文', topics: '架构,规范' })
     expect(r.status).toBe('ok')
   })
 
@@ -193,7 +194,7 @@ describe('knowledge_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const r = await tools.knowledge_store.execute({ title: 't', content: 'c', is_policy: true })
+    const r = await tools.knowledge_store!.execute({ title: 't', content: 'c', is_policy: true })
     expect(r.status).toBe('ok')
   })
 
@@ -205,7 +206,7 @@ describe('knowledge_* 工具 execute', () => {
     })
     servers.push(s)
     const tools = captureTools(baseConfig(s.port))
-    const r = await tools.knowledge_search.execute({ query: 'q', project_id: 'wiki', scope: 'project' })
+    const r = await tools.knowledge_search!.execute({ query: 'q', project_id: 'wiki', scope: 'project' })
     expect(r.status).toBe('ok')
   })
 })

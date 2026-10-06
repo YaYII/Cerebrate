@@ -41,6 +41,8 @@ export const inject = ['tools']
 export interface Config extends ClientConfig {
   /** 是否在首个 step 注入知识优先引导。 */
   injectGuidance: boolean
+  /** 知识库归属策略文本：区分公司共享库与个人库，随引导注入每个会话首步。 */
+  knowledgePolicy: string
   /** REST API 不可达时自动拉起本地 Obsidian（自愈）。 */
   autoStart: boolean
   /** 自动启动使用的 Obsidian 可执行文件绝对路径。 */
@@ -48,6 +50,20 @@ export interface Config extends ClientConfig {
   /** 等待自动启动的 Obsidian 服务 API 的最长时间，ms。 */
   launchTimeoutMs: number
 }
+
+/**
+ * 知识库归属默认策略：区分「公司共享知识库」与「个人库」。
+ * 为什么内置默认值：归属判断错了会把公司内容写进个人库（或反之），
+ * 属于 AI 无法自行纠正的错误，必须在每个会话首步就讲清规则。
+ * 站点差异（公司库地址、个人库路径）由配置 knowledgePolicy 覆盖。
+ */
+const DEFAULT_KNOWLEDGE_POLICY = [
+  '【知识库归属：公司共享库 vs 个人库，必须分清】',
+  '- obsidian_* 工具连接的是【公司共享知识库】：全体同事共用同一份，写入即对所有人可见。',
+  '- 个人库是使用者私人笔记（默认 ~/Documents/team-kb）：禁止写入公司内容，也禁止把私人内容搬进公司库。',
+  '- 判定规则：面向同事/公司/项目/运维/制度的文档 → 写公司库；纯属使用者个人的笔记 → 不主动写入，须用户明确指示。',
+  '- 归属不确定时先问使用者，不要猜测；公司库内容必须准确（宁缺毋滥）。',
+].join('\n')
 
 /** Schemastery 配置模式。 */
 export const Config: z<Config> = z.object({
@@ -61,6 +77,7 @@ export const Config: z<Config> = z.object({
   user: z.string().default('yangying'),
   agentId: z.string().default('dsh'),
   injectGuidance: z.boolean().default(true),
+  knowledgePolicy: z.string().default(DEFAULT_KNOWLEDGE_POLICY),
   autoStart: z.boolean().default(true),
   obsidianBin: z.string().default(os.homedir() + '/bin/obsidian-deb/opt/Obsidian/obsidian'),
   launchTimeoutMs: z.number().default(45000),
@@ -78,16 +95,36 @@ const GUIDANCE = [
   '确属团队级权威知识再 knowledge_store 沉淀（策略/权威文档仅管理员可写）。',
 ].join('\n')
 
+/**
+ * 组装实际注入的引导文案：基础说明 + 可配置的知识库归属策略。
+ * 为什么拼接而非写死：归属规则随部署环境变化（公司库地址/个人库路径），
+ * 配置即可调整，无需为改一句话重新构建插件。
+ */
+function buildGuidance(config: Config): string {
+  const policy = config.knowledgePolicy.trim()
+  return policy.length > 0 ? `${GUIDANCE}\n\n${policy}` : GUIDANCE
+}
+
 /** 本包注入消息的来源插件标签。 */
-const PLUGIN_TAG = 'dsh-obsidian'
+const PRODUCER_KIND = 'dsh-obsidian'
+
+/** 本包注入消息的生产者 kind（producer-owned source）。 */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-obsidian': { kind: 'dsh-obsidian'; form?: 'instructions' }
+  }
+}
+
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${PRODUCER_KIND}`
 
 /** 引导消息是否已存在于会话可见面。 */
 function guidanceAlreadyInjected(agent: Agent): boolean {
   return agent.session.surface.nodes.some((seq) => {
     const event = agent.session.eventAt(seq)
-    return event?.type === 'user/message'
-      && event.data.source.kind === 'plugin'
-      && event.data.source.plugin === PLUGIN_TAG
+    if (event?.type !== 'user/message') return false
+    const kind: string = event.data.source.kind
+    return kind === PRODUCER_KIND || kind === MIGRATED_PRODUCER_KIND
   })
 }
 
@@ -311,8 +348,8 @@ export function apply(ctx: Context, config: Config): void {
       if (guidanceAlreadyInjected(agent)) return decision
       signal.throwIfAborted()
       const guidance = createUserMessage({
-        content: [{ type: 'text', text: GUIDANCE }],
-        source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+        content: [{ type: 'text', text: buildGuidance(config) }],
+        source: { kind: PRODUCER_KIND, form: 'instructions' },
       })
       const lastClaimedIndex = decision.messages.findLastIndex(message => messages.includes(message))
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }

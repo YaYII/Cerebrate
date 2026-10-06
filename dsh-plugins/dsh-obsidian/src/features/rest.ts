@@ -12,7 +12,7 @@ import os from 'node:os'
 import { readFile } from 'node:fs/promises'
 import http from 'node:http'
 import https from 'node:https'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /** 插件运行所需的连接配置（index.ts 的 Config 实现该形状）。 */
 export interface ClientConfig {
