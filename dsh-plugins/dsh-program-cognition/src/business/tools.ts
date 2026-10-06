@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { scanProject, type ScanResult } from '../features/scanner'
 import { generateLogPoints, type LogPoint } from '../features/templates'
 import { instrumentProject, revertProject } from '../features/instrument'

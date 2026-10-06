@@ -55,7 +55,7 @@ export function createTranslator(llm: LlmRuntime, options: TranslatorOptions = {
       model: prepared.config.model,
       messages: [createUserMessage({
         content: [{ type: 'text', text: prompt }],
-        source: { kind: 'plugin', plugin: 'dsh-program-cognition', form: 'instructions' },
+        source: { kind: 'dsh-program-cognition', form: 'instructions' },
       })],
       ...signal === undefined ? {} : { signal },
     }

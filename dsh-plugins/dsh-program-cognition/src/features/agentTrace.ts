@@ -16,6 +16,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-tool-todo'
 import { summarize } from './redact'
 
 /** AI 行为类型（对齐设计稿 §3.5 事件映射表）。 */

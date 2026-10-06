@@ -37,6 +37,15 @@ import { createTranslator } from './features/translate'
 
 /** 插件标识与依赖注入。 */
 export const name = 'dsh-program-cognition'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-program-cognition': { kind: 'dsh-program-cognition'; form?: 'instructions' }
+  }
+}
+
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${name}`
 export const inject = ['tools']
 
 /** 插件配置。 */
@@ -211,7 +220,7 @@ export function apply(ctx: Context, config: Config): void {
     if (traceBuffer.length >= config.bufferLimit) traceBuffer.flush(traceFile)
   }
 
-  ctx.on('agent/session-start', ({ agent, source }) => {
+  ctx.on('agent/created', ({ agent, source }) => {
     recordAgent(agent, { turn: 0, step: 0, kind: 'lifecycle', summary: `会话开始: ${source}`, failed: false })
   })
   ctx.on('agent/status', ({ agent, status }) => {
@@ -262,7 +271,7 @@ export function apply(ctx: Context, config: Config): void {
       signal.throwIfAborted()
       const guidance = createUserMessage({
         content: [{ type: 'text', text: COG_GUIDANCE }],
-        source: { kind: 'plugin', plugin: 'dsh-program-cognition', form: 'instructions' },
+        source: { kind: name, form: 'instructions' },
       })
       const lastClaimedIndex = decision.messages.findLastIndex(message => messages.includes(message))
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
