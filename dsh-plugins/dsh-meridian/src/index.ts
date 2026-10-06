@@ -26,6 +26,15 @@ import type { RulePack } from './features/rulePack'
 
 /** 插件标识与依赖注入。 */
 export const name = 'dsh-meridian'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-meridian': { kind: 'dsh-meridian'; form?: 'instructions' }
+  }
+}
+
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${name}`
 export const inject = ['tools']
 
 /** 插件配置。 */
@@ -251,17 +260,15 @@ export function apply(ctx: Context, config: MeridianConfig): void {
       if (decision.kind === 'reject' || (step === 1 && decision.messages.length === 0)) return decision
       const alreadyInjected = agent.session.surface.nodes.some((seq) => {
         const event = agent.session.eventAt(seq)
-        return (
-          event?.type === 'user/message' &&
-          event.data.source.kind === 'plugin' &&
-          event.data.source.plugin === name
-        )
+        if (event?.type !== 'user/message') return false
+        const kind: string = event.data.source.kind
+        return kind === name || kind === MIGRATED_PRODUCER_KIND
       })
       if (alreadyInjected) return decision
       signal.throwIfAborted()
       const guidance = createUserMessage({
         content: [{ type: 'text' as const, text: MERIDIAN_GUIDANCE }],
-        source: { kind: 'plugin' as const, plugin: name, form: 'instructions' as const },
+        source: { kind: name, form: 'instructions' },
       })
       const lastClaimedIndex = decision.messages.findLastIndex((message) => messages.includes(message))
       return { kind: 'enter' as const, messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
