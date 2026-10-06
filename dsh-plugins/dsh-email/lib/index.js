@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
 import { statSync } from "node:fs";
+import { resolve } from "node:path";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
@@ -36,6 +36,43 @@ function defineProperty(object, key, value) {
 		value,
 		enumerable: false
 	});
+}
+/** Shared config references used by schema validators and plugin runtimes. */
+const write = Symbol.for("cosmokit.volatile.write");
+function snapshot(value, ancestors = /* @__PURE__ */ new Set()) {
+	if (typeof value === "function") throw new TypeError("volatile config cannot contain functions");
+	if (value === null || typeof value !== "object") return value;
+	if (ancestors.has(value)) throw new TypeError("volatile config cannot contain cycles");
+	ancestors.add(value);
+	try {
+		if (Array.isArray(value)) return Object.freeze(value.map((item) => snapshot(item, ancestors)));
+		if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw new TypeError("volatile config objects must be plain objects or arrays");
+		return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshot(item, ancestors)])));
+	} finally {
+		ancestors.delete(value);
+	}
+}
+/**
+* Create a detached reference containing an immutable copy of the supplied data.
+* @param value - validated config data; class instances and functions are unsupported.
+* @returns a reference whose value is updated only by its owning runtime.
+*/
+function createVolatile(value) {
+	let current = snapshot(value);
+	return Object.freeze({
+		get: () => current,
+		[write]: (value) => {
+			current = value;
+		}
+	});
+}
+/**
+* Identify references across ESM/CJS copies of the shared library.
+* @param value - a parsed config value.
+* @returns whether the value implements the shared reference protocol.
+*/
+function isVolatile(value) {
+	return typeof value === "object" && value !== null && write in value;
 }
 /** Test values using `instanceof` with a `toStringTag` fallback. */
 function is(type, value) {
@@ -117,26 +154,47 @@ function clone(source, refs = /* @__PURE__ */ new Map()) {
 	}
 	return result;
 }
-/** Deeply compare arrays, dates, regexps, buffers, and plain object fields. */
+/**
+* Compare values recursively, treating two volatile references as equal regardless of value.
+* Strict comparison distinguishes null/undefined, treats opaque objects by identity,
+* compares URLs by normalized href, treats array holes as undefined, and considers distinct cyclic structures unequal.
+* @param a - first value.
+* @param b - second value.
+* @param strict - whether to require strict data equality outside volatile references.
+* @returns whether the values compare equal.
+*/
 function deepEqual(a, b, strict) {
-	if (a === b) return true;
-	if (!strict && isNullable(a) && isNullable(b)) return true;
-	if (typeof a !== typeof b) return false;
-	if (typeof a !== "object") return false;
-	if (!a || !b) return false;
-	function check(test, then) {
-		return test(a) ? test(b) ? then(a, b) : false : test(b) ? false : void 0;
+	const ancestors = /* @__PURE__ */ new Set();
+	function compare(a, b) {
+		if (a === b) return true;
+		if (isVolatile(a) || isVolatile(b)) return isVolatile(a) && isVolatile(b);
+		if (!strict && isNullable(a) && isNullable(b)) return true;
+		if (typeof a !== typeof b || typeof a !== "object" || !a || !b) return false;
+		if (ancestors.has(a)) return false;
+		function check(test, then) {
+			return test(a) ? test(b) ? then(a, b) : false : test(b) ? false : void 0;
+		}
+		ancestors.add(a);
+		try {
+			return check(Array.isArray, (a, b) => {
+				if (a.length !== b.length) return false;
+				for (let index = 0; index < a.length; index++) if (!compare(a[index], b[index])) return false;
+				return true;
+			}) ?? check(is("Date"), (a, b) => a.valueOf() === b.valueOf()) ?? check(is("URL"), (a, b) => a.href === b.href) ?? check(is("RegExp"), (a, b) => a.source === b.source && a.flags === b.flags) ?? check(isArrayBufferLike, (a, b) => {
+				if (a.byteLength !== b.byteLength) return false;
+				const viewA = new Uint8Array(a);
+				const viewB = new Uint8Array(b);
+				for (let i = 0; i < viewA.length; i++) if (viewA[i] !== viewB[i]) return false;
+				return true;
+			}) ?? ((!strict || [a, b].every((value) => Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) && Object.keys({
+				...a,
+				...b
+			}).every((key) => compare(a[key], b[key])));
+		} finally {
+			ancestors.delete(a);
+		}
 	}
-	return check(Array.isArray, (a, b) => a.length === b.length && a.every((item, index) => deepEqual(item, b[index]))) ?? check(is("Date"), (a, b) => a.valueOf() === b.valueOf()) ?? check(is("RegExp"), (a, b) => a.source === b.source && a.flags === b.flags) ?? check(isArrayBufferLike, (a, b) => {
-		if (a.byteLength !== b.byteLength) return false;
-		const viewA = new Uint8Array(a);
-		const viewB = new Uint8Array(b);
-		for (let i = 0; i < viewA.length; i++) if (viewA[i] !== viewB[i]) return false;
-		return true;
-	}) ?? Object.keys({
-		...a,
-		...b
-	}).every((key) => deepEqual(a[key], b[key], strict));
+	return compare(a, b);
 }
 function tokenize(source, delimiters, delimiter) {
 	const output = [];
@@ -416,6 +474,7 @@ Schema.prototype.pattern = function pattern(regexp) {
 	return schema;
 };
 Schema.prototype.simplify = function simplify(value) {
+	if (isVolatile(value)) value = value.get();
 	if (deepEqual(value, this.meta.default, this.type === "dict")) return null;
 	if (isNullable(value)) return value;
 	if (this.type === "object" || this.type === "dict") {
@@ -472,12 +531,49 @@ for (const key of [
 	};
 	return schema;
 } });
+Schema.prototype.volatile = function volatile() {
+	if (this.meta.volatile) throw new TypeError("volatile schema is already wrapped");
+	return this.extra("volatile", true);
+};
 const resolvers = {};
+const checkedVolatile = Symbol("checked-volatile-schema");
+function validateVolatileSchema(schema, path = [], blocked = false, seen = /* @__PURE__ */ new Map()) {
+	const states = seen.get(schema) ?? /* @__PURE__ */ new Set();
+	if (states.has(blocked)) return;
+	states.add(blocked);
+	seen.set(schema, states);
+	if (schema.meta?.volatile && blocked) throw new ValidationError$1("volatile fields require a fixed object path without an enclosing volatile field", { path });
+	const nested = blocked || !!schema.meta?.volatile;
+	if (schema.dict) for (const [key, child] of Object.entries(schema.dict)) validateVolatileSchema(child, [...path, key], nested, seen);
+	if (schema.sKey) validateVolatileSchema(schema.sKey, [...path, "<key>"], true, seen);
+	if (schema.inner && (schema.type !== "lazy" || schema.inner[kSchema])) validateVolatileSchema(schema.inner, [...path, "*"], true, seen);
+	if (schema.list) for (let index = 0; index < schema.list.length; index++) validateVolatileSchema(schema.list[index], [...path, String(index)], true, seen);
+}
 Schema.extend = function extend(type, resolve) {
 	resolvers[type] = resolve;
 };
 Schema.resolve = function resolve(data, schema, options = {}, strict = false) {
 	if (!schema) return [data];
+	if (!options[checkedVolatile]) {
+		validateVolatileSchema(schema, options.path);
+		options = {
+			...options,
+			[checkedVolatile]: true
+		};
+	}
+	if (schema.meta?.volatile) {
+		const inner = Schema(schema);
+		inner.meta = {
+			...schema.meta,
+			volatile: false
+		};
+		const [value, adapted] = Schema.resolve(data, inner, options, strict);
+		try {
+			return [createVolatile(value), adapted];
+		} catch (error) {
+			throw new ValidationError$1(error instanceof Error ? error.message : String(error), options);
+		}
+	}
 	if (options.ignore?.(data, schema)) return [data];
 	if (isNullable(data) && schema.type !== "lazy") {
 		if (schema.meta.required) throw new ValidationError$1(`missing required value`, options);
@@ -580,6 +676,7 @@ Schema.extend("lazy", (data, schema, options, strict) => {
 			...schema.meta,
 			...schema.inner.meta
 		};
+		validateVolatileSchema(schema.inner, options.path, true);
 	}
 	return Schema.resolve(data, schema.inner, options, strict);
 });
@@ -679,7 +776,7 @@ function property(data, key, schema, options) {
 	} catch (e) {
 		if (!options?.autofix) throw e;
 		delete data[key];
-		return schema.meta.default;
+		return schema.meta.volatile ? createVolatile(schema.meta.default) : schema.meta.default;
 	}
 }
 Schema.extend("array", (data, { inner, meta }, options) => {
@@ -1443,8 +1540,9 @@ var LoggerService = class LoggerService {
 	*/
 	exporter(exporter) {
 		return this.ctx.effect(() => {
-			this.exporters.set(++this._snExporter, exporter);
-			return () => this.exporters.delete(this._snExporter);
+			const id = ++this._snExporter;
+			this.exporters.set(id, exporter);
+			return () => this.exporters.delete(id);
 		}, "ctx.logger.exporter()");
 	}
 	_resolveConfig() {
@@ -2247,8 +2345,8 @@ var Fiber = class {
 	*
 	* @param config — the new raw config; validated before anything restarts.
 	* @param noSave — hint for persistence hooks not to write the change back.
-	* @returns the update waterfall result; the default restart returns a promise.
-	* @throws when validation, an update listener, or the restarted plugin fails.
+	* @returns nothing; the restart runs behind the `internal/update` waterfall.
+	* @throws {ValidationError} when the new config fails validation.
 	*/
 	update(config, noSave = false) {
 		this.assertActive();
@@ -2260,7 +2358,7 @@ var Fiber = class {
 			return;
 		}
 		config = this._resolveConfig(config);
-		return this.context.waterfall(this, "internal/update", config, noSave, () => {
+		this.context.waterfall(this, "internal/update", config, noSave, () => {
 			this.config = config;
 			this._error = void 0;
 			return this.restart();
@@ -2969,7 +3067,10 @@ function isTypertRemoteSegment(value) {
 }
 const REMOTE_METHOD_DESCRIPTOR = "@deepseek-ai/dsh-typert-protocol/remote-methods";
 /**
-* Bind one visible Service field to a Cordis key and Remote namespace.
+* Bind one visible Service field to a Cordis key and Remote namespace. A
+* service that owns a Cordis Context also gives its tree `ctx.invocation`,
+* `undefined` outside a Remote call, so no `TypertRemoteService` is needed for
+* a Host composition to read it.
 * @param service - owning Service instance, normally `this`.
 * @param serviceKey - exact Cordis service key.
 * @param options - optional distinct wire namespace.
@@ -2979,6 +3080,8 @@ function bindTypertRemote(service, serviceKey, options = {}) {
 	validateName("service key", serviceKey);
 	const namespace = options.namespace ?? serviceKey;
 	validateName("namespace", namespace);
+	const ctx = Reflect.get(service, "ctx");
+	if (ctx instanceof Context) provideInvocationAccessor(ctx);
 	return Object.freeze({
 		service,
 		serviceKey,
@@ -3000,6 +3103,16 @@ var TypertRemoteService = class extends Service {
 		this.typertRemote = bindTypertRemote(this, this.name, options);
 	}
 };
+/**
+* Make `ctx.invocation` read as `undefined` outside a Remote call instead of the
+* reflect service's "cannot get property" error; a call-derived Context shadows
+* the accessor with its own property. The first Remote Service constructed in a
+* tree registers it on the root, where it outlives any one Service.
+*/
+function provideInvocationAccessor(ctx) {
+	if (Object.hasOwn(ctx.root.reflect.props, "invocation")) return;
+	ctx.root.accessor("invocation", { get: () => void 0 });
+}
 function Remote(methodExportOrOptions, context) {
 	if (typeof methodExportOrOptions === "string") {
 		validateName("Remote export name", methodExportOrOptions);
@@ -3082,12 +3195,12 @@ function assertNever(value, context) {
 	const rendered = JSON.stringify(value) ?? String(value);
 	throw new Error(`unreachable variant${context ? ` in ${context}` : ""}: ${rendered}`);
 }
-/** Whether a realm-owned intrinsic prototype is backed by its native constructor. */
+/** Whether a realm-owned intrinsic prototype has a native constructor matching this engine's representation. */
 function hasIntrinsicConstructor$1(prototype, name) {
 	const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value;
 	if (typeof constructor !== "function") return false;
 	try {
-		return constructor.name === name && constructor.prototype === prototype && Function.prototype.toString.call(constructor) === `function ${name}() { [native code] }`;
+		return constructor.name === name && constructor.prototype === prototype && Function.prototype.toString.call(constructor) === Function.prototype.toString.call(name === "Array" ? Array : Object);
 	} catch {
 		return false;
 	}
@@ -3297,14 +3410,14 @@ function randomUUID() {
 //#endregion
 //#region ../../../deepseek-harness/packages/util/brand/lib/index.js
 /**
-* Duplicate-install-safe nominal string helpers.
+* Duplicate-install-safe nominal primitive helpers.
 *
-* A brand makes structurally-identical strings non-interchangeable at the type
-* level: a `SessionId` cannot be passed where a `ToolCallId` is expected, even
-* though both are plain strings at runtime. Comparison, logging, and
-* serialization all behave as ordinary strings.
+* A brand makes structurally identical strings or numbers non-interchangeable
+* at the type level: a `SessionId` cannot be passed where a `ToolCallId` is
+* expected, and an event sequence cannot be passed as a log offset. Comparison,
+* logging, and serialization retain the underlying primitive behavior.
 *
-* This package owns no concrete id and keeps no runtime identity or mutable
+* This package owns no concrete domain value and keeps no runtime identity or mutable
 * state, so independently installed copies produce interchangeable values.
 *
 * @module @deepseek-ai/dsh-brand
@@ -3337,10 +3450,10 @@ function freezeMessage(message) {
 * @returns an immutable message with a fresh stable identity.
 */
 function createMessage(input) {
-	return freezeMessage({
+	return deepFreeze(structuredClone({
 		...input,
 		id: brandString(randomUUID())
-	});
+	}));
 }
 /**
 * Create one identified user-role message and freeze it before publication.
@@ -3564,13 +3677,15 @@ function failureSnapshot(value) {
 		const status = candidate.status;
 		const providerRetryAfterMs = candidate.providerRetryAfterMs;
 		const requestId = candidate.requestId;
-		if (typeof message !== "string" || message.length === 0 || typeof code !== "string" || code.length === 0 || status !== void 0 && (!Number.isInteger(status) || status < 100 || status > 599) || providerRetryAfterMs !== void 0 && (!Number.isFinite(providerRetryAfterMs) || providerRetryAfterMs <= 0) || requestId !== void 0 && (typeof requestId !== "string" || requestId.length === 0)) return void 0;
+		const offloadImages = candidate.offloadImages;
+		if (typeof message !== "string" || message.length === 0 || typeof code !== "string" || code.length === 0 || status !== void 0 && (!Number.isInteger(status) || status < 100 || status > 599) || providerRetryAfterMs !== void 0 && (!Number.isFinite(providerRetryAfterMs) || providerRetryAfterMs <= 0) || requestId !== void 0 && (typeof requestId !== "string" || requestId.length === 0) || offloadImages !== void 0 && (!Number.isSafeInteger(offloadImages) || offloadImages <= 0)) return void 0;
 		return Object.freeze({
 			message,
 			code,
 			...status === void 0 ? {} : { status },
 			...providerRetryAfterMs === void 0 ? {} : { providerRetryAfterMs },
-			...requestId === void 0 ? {} : { requestId }
+			...requestId === void 0 ? {} : { requestId },
+			...offloadImages === void 0 ? {} : { offloadImages }
 		});
 	} catch (_sdkFailureGetter) {
 		return;
@@ -3588,6 +3703,9 @@ function errorMessage$1(error) {
 function harnessErrorCode(error) {
 	return error instanceof HarnessError ? error.code : "UNKNOWN";
 }
+function quoted(value) {
+	return JSON.stringify(value);
+}
 /**
 * Stable text shown to a model that cannot accept one durable image reference.
 * @param ref - durable normalized attachment omitted from the request.
@@ -3597,17 +3715,66 @@ function textOnlyImageText(ref) {
 	return `[image omitted because this model accepts text only; attachment sha256:${String(ref.attachmentId).slice(7, 15)}]`;
 }
 /**
-* True when typed model content contains an image block, walking nested
-* tool-result content. This is the one recursive image walk shared by every
-* image policy (capability gating, text-only serialization, compaction
-* survey), so a consumer cannot silently diverge on nesting depth.
+* True when typed model content contains an image block. This is the one image
+* walk shared by every image policy (capability gating, text-only
+* serialization, compaction survey), so a consumer cannot silently diverge.
 * @param content - typed model content blocks.
-* @returns whether any nested block is an image.
+* @returns whether any block is an image.
 */
 function contentHasImage(content) {
-	return content.some((block) => block.type === "image" || block.type === "tool-result" && contentHasImage(block.content));
+	return content.some((block) => block.type === "image");
 }
-/** Replace every image occurrence, including nested tool results, for a text-only model. */
+/**
+* True when typed model content contains a file block.
+* Reads current content on every call without retaining scan results.
+* @param content - typed model content blocks.
+* @returns whether any block is a file.
+*/
+function contentHasFile(content) {
+	for (const block of content) if (block.type === "file") return true;
+	return false;
+}
+/**
+* Stable model-facing handle for one durable file reference: the address of
+* the verbatim stored copy and the instruction to read it on demand. This is
+* the only representation a provider ever receives for a file.
+* @param ref - durable verbatim file reference.
+* @param readonlyPath - execution-world path of the stored copy, when resolvable.
+* @returns deterministic handle text naming the file, its size, and its address.
+*/
+function fileHandleText(ref, readonlyPath) {
+	const digest = String(ref.attachmentId).slice(7, 15);
+	const identity = `File ${quoted(ref.name)} (${ref.bytes} bytes, sha256:${digest})`;
+	if (readonlyPath === void 0) return `[${identity} was uploaded, but the current execution environment cannot access a readable path. Report that limitation if its contents are needed; do not claim to have read it.]`;
+	return `[${identity}: verbatim read-only copy saved at ${quoted(readonlyPath)}. Read that path with your file tools when its contents are needed; copy it to a writable location before modifying it. When delegating file work, include this saved path in the delegation prompt; only subagents sharing this execution environment can read it.]`;
+}
+/** Replace every file occurrence with handle text. */
+function replaceFilesWithHandles(blocks, resolvePath) {
+	let next;
+	for (const [index, block] of blocks.entries()) {
+		if (block.type === "file") {
+			next ??= blocks.slice(0, index);
+			next.push({
+				type: "text",
+				text: fileHandleText(block.attachment, resolvePath(block.attachment))
+			});
+			continue;
+		}
+		next?.push(block);
+	}
+	return next ?? blocks;
+}
+function projectFilesToText(messages, resolvePath) {
+	if (!messages.some((message) => contentHasFile(message.content))) return messages;
+	return messages.map((message) => {
+		const content = replaceFilesWithHandles(message.content, resolvePath);
+		return content === message.content ? message : {
+			...message,
+			content
+		};
+	});
+}
+/** Replace every image occurrence for a text-only model. */
 function replaceImagesForTextModel(blocks) {
 	let next;
 	for (const [index, block] of blocks.entries()) {
@@ -3619,26 +3786,10 @@ function replaceImagesForTextModel(blocks) {
 			});
 			continue;
 		}
-		if (block.type === "tool-result") {
-			const content = replaceImagesForTextModel(block.content);
-			if (content !== block.content) {
-				next ??= blocks.slice(0, index);
-				next.push({
-					...block,
-					content
-				});
-				continue;
-			}
-		}
 		next?.push(block);
 	}
 	return next ?? blocks;
 }
-/**
-* Project durable image history into deterministic text for an exact text-only model.
-* @param messages - complete request history.
-* @returns the original list without images, otherwise shallow message copies with stable placeholders.
-*/
 function projectImagesForTextModel(messages) {
 	if (!messages.some((message) => contentHasImage(message.content))) return messages;
 	return messages.map((message) => {
@@ -3648,6 +3799,89 @@ function projectImagesForTextModel(messages) {
 			content
 		};
 	});
+}
+function withoutDeveloperMessages(messages) {
+	const retained = messages.filter((message) => message.role !== "developer");
+	return retained.length === messages.length ? messages : retained;
+}
+function toolDeclarations(tools, mode, history) {
+	const declarations = new Map(history.tools.map((tool) => [tool.name, tool]));
+	for (const update of history.updates) for (const tool of update.additions) if (!declarations.has(tool.name)) declarations.set(tool.name, {
+		...tool,
+		deferLoading: true
+	});
+	switch (mode) {
+		case "in-history": return declarations;
+		case "addition-only": {
+			const activeNames = new Set(tools?.map((tool) => tool.name));
+			for (const name of declarations.keys()) if (!activeNames.has(name)) declarations.delete(name);
+			return declarations;
+		}
+		/* v8 ignore next 2 -- closed-union exhaustiveness guard */
+		default: return assertNever(mode);
+	}
+}
+/**
+* Construct provider declarations from session-folded history without changing logged active tools.
+* Unsupported routes and incomplete history use current declarations without developer updates.
+* Explicitly deferred baseline tools become available only after their first retained addition.
+* @param messages - complete request inputs, or the prefix selected for an auxiliary call.
+* @param tools - currently active tool schemas.
+* @param toolUpdate - the resolved route's update mode.
+* @param history - immutable state folded from committed headers and developer messages.
+* @returns provider declarations and the corresponding filtered history.
+*/
+function projectToolUpdates(messages, tools, toolUpdate, history) {
+	if (toolUpdate === void 0) {
+		let immediateTools = tools;
+		if (tools?.some((tool) => tool.deferLoading === true)) immediateTools = tools.map(({ deferLoading: _loading, ...tool }) => tool);
+		return {
+			messages: withoutDeveloperMessages(messages),
+			tools: immediateTools
+		};
+	}
+	if (history === void 0) return {
+		messages: withoutDeveloperMessages(messages),
+		tools
+	};
+	const messageIds = new Set(messages.flatMap((message) => message.role === "developer" ? [message.id] : []));
+	if (history.updates.some((update) => !messageIds.has(update.messageId))) return {
+		messages: withoutDeveloperMessages(messages),
+		tools
+	};
+	const declarations = toolDeclarations(tools, toolUpdate, history);
+	const updateIds = new Set(history.updates.map((update) => update.messageId));
+	const offered = new Set(history.tools.filter((tool) => !tool.deferLoading).map((tool) => tool.name));
+	const projectedMessages = [];
+	for (const message of messages) {
+		if (message.role !== "developer") {
+			projectedMessages.push(message);
+			continue;
+		}
+		if (!updateIds.has(message.id)) continue;
+		const content = message.content.filter((block) => {
+			switch (block.type) {
+				case "tool-addition":
+					if (!declarations.has(block.toolName) || offered.has(block.toolName)) return false;
+					offered.add(block.toolName);
+					return true;
+				case "tool-removal":
+					if (toolUpdate !== "in-history") return false;
+					return offered.delete(block.toolName);
+				default: return true;
+			}
+		});
+		if (content.length === 0) continue;
+		if (content.length === message.content.length) projectedMessages.push(message);
+		else projectedMessages.push({
+			...message,
+			content
+		});
+	}
+	return {
+		messages: projectedMessages.length === messages.length && projectedMessages.every((message, index) => message === messages[index]) ? messages : projectedMessages,
+		tools: [...declarations.values()]
+	};
 }
 /**
 * Centralize the non-secret product identity every provider request sends as `User-Agent`, keeping
@@ -3728,7 +3962,8 @@ var LlmError = class extends HarnessError {
 			code,
 			...options?.status === void 0 ? {} : { status: options.status },
 			...options?.providerRetryAfterMs === void 0 ? {} : { providerRetryAfterMs: options.providerRetryAfterMs },
-			...options?.requestId === void 0 ? {} : { requestId: options.requestId }
+			...options?.requestId === void 0 ? {} : { requestId: options.requestId },
+			...options?.offloadImages === void 0 ? {} : { offloadImages: options.offloadImages }
 		});
 	}
 };
@@ -3996,7 +4231,8 @@ var LlmError = class extends HarnessError {
 					id: model.id,
 					...model.name === void 0 ? {} : { name: model.name },
 					...model.contextWindow === void 0 ? {} : { contextWindow: model.contextWindow },
-					...model.maxTokens === void 0 ? {} : { maxTokens: model.maxTokens }
+					...model.maxTokens === void 0 ? {} : { maxTokens: model.maxTokens },
+					...model.inputModalities === void 0 ? {} : { inputModalities: [...model.inputModalities] }
 				});
 			}
 			return models;
@@ -4039,13 +4275,23 @@ var LlmError = class extends HarnessError {
 		imageRequestPricing(provider, model) {
 			return this.adapters.get(provider)?.adapter.imageRequestPricing(provider, model);
 		}
+		/**
+		* Resolve the exact text one durable file occurrence contributes to every
+		* provider request in the current execution environment.
+		* @param ref - durable verbatim file reference from model history.
+		* @returns the same deterministic handle text used at adapter dispatch.
+		*/
+		fileRequestText(ref) {
+			return fileHandleText(ref, this.fileReadPath(ref));
+		}
 		/** Detach typed adapter-owned modality metadata. */
 		detachedModalities(modalities) {
 			return modalities === void 0 ? void 0 : [...modalities];
 		}
 		/**
 		* Discover models advertised by one registered provider. Catalog membership
-		* is advisory and never changes routing or request validation.
+		* does not constrain core routing. Catalog-driven entry points may restrict
+		* selection and submission to the advertised models.
 		* @param provider - registered provider route to inspect.
 		* @returns detached model metadata in adapter-preferred order.
 		*/
@@ -4088,6 +4334,10 @@ var LlmError = class extends HarnessError {
 			const context = resolved.context;
 			if (context !== void 0 && (!Number.isInteger(context.contextWindow) || context.contextWindow <= 0)) throw new LlmError(`adapter returned invalid context metadata for provider "${provider}" model "${model}"`, "INVALID_MODEL_CONTEXT");
 			const inputModalities = this.detachedModalities(resolved.inputModalities);
+			const systemPromptUpdate = resolved.systemPromptUpdate;
+			if (systemPromptUpdate !== void 0 && systemPromptUpdate !== "in-history") throw new LlmError(`adapter returned invalid system prompt update mode for provider "${provider}" model "${model}"`, "INVALID_MODEL_INFO");
+			const toolUpdate = resolved.toolUpdate;
+			if (toolUpdate !== void 0 && toolUpdate !== "in-history" && toolUpdate !== "addition-only") throw new LlmError(`adapter returned invalid tool update mode for provider "${provider}" model "${model}"`, "INVALID_MODEL_INFO");
 			const defaultMaxTokens = resolved.defaultMaxTokens;
 			if (defaultMaxTokens !== void 0 && (!Number.isSafeInteger(defaultMaxTokens) || defaultMaxTokens <= 0)) throw new LlmError(`adapter returned invalid default maxTokens for provider "${provider}" model "${model}"`, "INVALID_MODEL_MAX_TOKENS");
 			const info = {
@@ -4097,7 +4347,9 @@ var LlmError = class extends HarnessError {
 				...resolved.description === void 0 ? {} : { description: resolved.description },
 				...inputModalities === void 0 ? {} : { inputModalities },
 				...context === void 0 ? {} : { context: { contextWindow: context.contextWindow } },
-				...defaultMaxTokens === void 0 ? {} : { defaultMaxTokens }
+				...defaultMaxTokens === void 0 ? {} : { defaultMaxTokens },
+				...resolved.systemPromptUpdate === void 0 ? {} : { systemPromptUpdate: resolved.systemPromptUpdate },
+				...resolved.toolUpdate === void 0 ? {} : { toolUpdate: resolved.toolUpdate }
 			};
 			const reasoning = resolved.reasoning;
 			if (reasoning === void 0) return info;
@@ -4191,6 +4443,8 @@ var LlmError = class extends HarnessError {
 				adapterDefaults,
 				...context === void 0 ? {} : { context },
 				...modelInfo.inputModalities === void 0 ? {} : { inputModalities: Object.freeze([...modelInfo.inputModalities]) },
+				...modelInfo.systemPromptUpdate === void 0 ? {} : { systemPromptUpdate: modelInfo.systemPromptUpdate },
+				...modelInfo.toolUpdate === void 0 ? {} : { toolUpdate: modelInfo.toolUpdate },
 				stream: (options) => {
 					if (dispatched) throw new LlmError("a prepared LLM call can only be dispatched once", "INVALID_PREPARED_CALL");
 					if (!callConfigEquals(options, resolvedConfig)) throw new LlmError("prepared LLM call config changed before adapter dispatch", "INVALID_PREPARED_CALL");
@@ -4212,8 +4466,9 @@ var LlmError = class extends HarnessError {
 		/** Remove replay state whose historical route is owned by another adapter. */
 		forAdapter(options, adapter) {
 			const messages = options.messages.map((message) => {
+				if (message.role !== "assistant") return message;
 				const source = message.source;
-				if (message.role !== "assistant" || source.kind !== "model" || source.replayState === void 0) return message;
+				if (source.replayState === void 0) return message;
 				if (this.adapters.get(source.provider)?.adapter === adapter) return message;
 				return freezeMessage({
 					...message,
@@ -4230,6 +4485,20 @@ var LlmError = class extends HarnessError {
 				messages
 			};
 			return Object.isFrozen(options) ? deepFreeze(filtered) : filtered;
+		}
+		/**
+		* Resolve the current execution-world read path of one durable file
+		* reference through the mounted attachment and filesystem providers.
+		*/
+		fileReadPath(ref) {
+			let hostPath;
+			try {
+				hostPath = this.ctx.get("attachments")?.fileHostPath(ref);
+			} catch {
+				return;
+			}
+			if (hostPath === void 0) return void 0;
+			return this.ctx.get("fs")?.processPathFromHostPath(hostPath);
 		}
 		/**
 		* Final adapter boundary. Adapter selection, dispatch, iterator construction,
@@ -4262,13 +4531,20 @@ var LlmError = class extends HarnessError {
 					...options,
 					...resolvedConfig
 				};
-				const projectedOptions = modelInfo.inputModalities !== void 0 && !modelInfo.inputModalities.includes("image") && resolvedOptions.messages.some((message) => contentHasImage(message.content)) ? Object.isFrozen(resolvedOptions) ? deepFreeze({
-					...resolvedOptions,
-					messages: projectImagesForTextModel(resolvedOptions.messages)
-				}) : {
-					...resolvedOptions,
-					messages: projectImagesForTextModel(resolvedOptions.messages)
-				} : resolvedOptions;
+				let projectedMessages = resolvedOptions.messages;
+				if (projectedMessages.some((message) => contentHasFile(message.content))) projectedMessages = projectFilesToText(projectedMessages, (ref) => this.fileReadPath(ref));
+				if (modelInfo.inputModalities !== void 0 && !modelInfo.inputModalities.includes("image") && projectedMessages.some((message) => contentHasImage(message.content))) projectedMessages = projectImagesForTextModel(projectedMessages);
+				const projectedTools = projectToolUpdates(projectedMessages, resolvedOptions.tools, modelInfo.toolUpdate, resolvedOptions.toolHistory);
+				projectedMessages = projectedTools.messages;
+				let projectedOptions = resolvedOptions;
+				if (projectedMessages !== resolvedOptions.messages || projectedTools.tools !== resolvedOptions.tools) {
+					projectedOptions = {
+						...resolvedOptions,
+						messages: projectedMessages,
+						...projectedTools.tools === void 0 ? {} : { tools: projectedTools.tools }
+					};
+					if (Object.isFrozen(resolvedOptions)) deepFreeze(projectedOptions);
+				}
 				iterator = dispatch(this.forAdapter(projectedOptions, adapter))[Symbol.asyncIterator]();
 			} catch (error) {
 				yield adapterFailureChunk(error, options.signal);
@@ -4334,6 +4610,92 @@ function adapterFailureChunk(error, signal) {
 			failure
 		}
 	};
+}
+//#endregion
+//#region ../../../deepseek-harness/packages/sandbox/sandbox/lib/index.js
+/**
+* The escalation vocabulary and choreography shared by every sandbox-enforcing
+* tool family (`@deepseek-ai/dsh-tool-bash`, `@deepseek-ai/dsh-tool-fs`): the
+* strictly-wider ladder, the argument-pairing validation, the model-facing
+* denial/hint markers, and {@link approveEscalation} — the ordered fail-closed
+* sequence that resolves a `sandbox_permissions` request through a
+* user-approval channel BEFORE anything executes. One home keeps the two
+* families' approval ordering and verbatim error texts from drifting apart.
+*
+* The channel is a minimal STRUCTURAL function shape ({@link EscalationAsk}),
+* not the approval service type: the tool layer — which owns the agent, the
+* call id, and the tool name — closes over `ctx.approval.request(...)` and
+* hands the closure down, so this package never depends on the approval or
+* agent packages.
+*
+* @module dsh-sandbox/escalation
+*/
+/**
+* The strictly-wider table: what a call whose effective mode is the key may
+* escalate TO. Checked at EXECUTION, never baked into a tool schema — the
+* schema's enum is {@link ESCALATION_TARGETS}, because schemas are
+* registry-global while the effective mode is per-call truth.
+*/
+const WIDER_MODES = {
+	"read-only": ["workspace-write", "danger-full-access"],
+	"workspace-write": ["danger-full-access"]
+};
+/**
+* The closed escalation-target vocabulary — every mode a call could ever
+* escalate TO (`read-only` is the floor; nothing escalates to it). Advertised
+* whenever the mounted capability confines: cutting the enum down to the modes
+* wider than the composition's DEFAULT would strand a session whose effective
+* mode sits below it (a `danger-full-access` default would advertise nothing
+* while a narrower-switched session stays confined with no lever).
+*/
+const ESCALATION_TARGETS = ["workspace-write", "danger-full-access"];
+/**
+* Validate the escalation argument pairing a tool schema cannot express:
+* `sandbox_permissions` and `justification` travel together — an approval
+* prompt without a reason, or a reason driving nothing, is a malformed ask —
+* and the justification must be a non-empty sentence.
+* @param sandboxPermissions - the raw `sandbox_permissions` argument, if given.
+* @param justification - the raw `justification` argument, if given.
+*/
+function validateEscalationArgs(sandboxPermissions, justification) {
+	if (sandboxPermissions !== void 0 && justification === void 0) throw new Error("invalid escalation: sandbox_permissions requires a justification");
+	if (justification !== void 0 && sandboxPermissions === void 0) throw new Error("invalid escalation: justification is only valid together with sandbox_permissions");
+	if (justification !== void 0 && justification.trim().length === 0) throw new Error("invalid justification: expected a non-empty sentence");
+}
+/**
+* Resolve a sandbox permission request before execution. Repeating the call's
+* effective mode returns it without approval. A strictly wider mode requires
+* approval and applies only to this call. Narrower or unsupported targets,
+* missing approval services or agents for widening, and non-grant outcomes
+* throw before execution.
+* @param request - the escalation to judge (see {@link EscalationRequest}).
+* @param approval - the approval ingredients the tool holds (see {@link EscalationApproval}).
+* @returns the granted mode, consumed by the one call that asked.
+*/
+async function approveEscalation(request, approval) {
+	const { requestedMode: mode, effectiveMode, justification, subject } = request;
+	if (mode === effectiveMode) return effectiveMode;
+	if (!(WIDER_MODES[effectiveMode] ?? []).includes(mode)) throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode`);
+	if (approval.approver === void 0) throw new Error(`sandbox escalation to "${mode}" requires approval, but no approval service is composed`);
+	if (approval.agent === void 0) throw new Error(`sandbox escalation to "${mode}" requires approval, but the call has no agent to route it through`);
+	const outcome = await approval.approver.request({
+		agent: approval.agent,
+		toolName: approval.toolName,
+		callId: approval.callId,
+		reason: `escalate sandbox to ${mode}: ${justification}`,
+		displayReason: {
+			en: `Allow this operation with ${mode} permissions: ${justification}`,
+			zh: `允许本次操作使用 ${mode} 权限：${justification}`
+		},
+		...approval.signal ? { signal: approval.signal } : {}
+	});
+	switch (outcome) {
+		case "allowed-once": return mode;
+		case "rejected": throw new Error(`the user rejected escalating this ${subject} to "${mode}"; it stays denied, so stop and explain instead of working around it`);
+		case "cancelled": throw new Error(`approval for escalating to "${mode}" was cancelled`);
+		case "unavailable": throw new Error(`sandbox escalation to "${mode}" requires approval, but no approval channel is available`);
+		default: return assertNever(outcome, "EscalationOutcome");
+	}
 }
 //#endregion
 //#region ../../../deepseek-harness/packages/core/tools/lib/index.js
@@ -5146,6 +5508,7 @@ var ToolArgsError = class extends HarnessError {
 function defineTool(options) {
 	const userExecute = options.execute;
 	const userFinalizeContent = options.finalizeContent;
+	const userProjectContent = options.projectContent;
 	const userRender = options.output.render;
 	const userPresentationMeta = options.output.presentationMeta;
 	const userPresentCall = options.presentCall;
@@ -5168,6 +5531,7 @@ function defineTool(options) {
 				return userPresentationMeta(args, value);
 			} } : {}
 		},
+		...options.deferLoading === true ? { deferLoading: options.deferLoading } : {},
 		...options.timeoutMs !== void 0 ? { timeoutMs: options.timeoutMs } : {},
 		async execute(args, exec) {
 			const violations = validate(args);
@@ -5175,6 +5539,7 @@ function defineTool(options) {
 			return userExecute(args, exec);
 		}
 	};
+	if (userProjectContent) tool.projectContent = (exec, result) => userProjectContent(exec, result);
 	if (userFinalizeContent) tool.finalizeContent = (exec, result) => userFinalizeContent(exec, result);
 	if (userPresentCall) tool.presentCall = (args) => {
 		if (validate(args).length > 0) return void 0;
@@ -5209,7 +5574,7 @@ const TYPESCRIPT_FLAVOR = {
 	description: "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.",
 	codeDescription: "The program: the body of an async TypeScript function."
 };
-/** Per-language `run_code` schema flavors (see {@link RunCodeFlavor}); one entry per {@link CodeSdkLanguage}. */
+/** Per-language `run_code` schema flavors (see {@link RunCodeFlavor}); one entry per {@link PtcSdkLanguage}. */
 const RUN_CODE_FLAVORS = {
 	typescript: TYPESCRIPT_FLAVOR,
 	python: {
@@ -5224,17 +5589,48 @@ const RUN_CODE_FLAVORS = {
 * can never drift.
 */
 const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION = "Clear, concise description of what this program does in active voice, 5-10 words (shown in the UI). Examples: \"Count TODO markers across packages\"; \"Read failing test and its fixture\"; \"Rename config key in every cordis.yml\".";
+const RUN_CODE_CONTROLS = {
+	timeoutMs: {
+		type: "number",
+		description: "Positive elapsed-time budget in milliseconds, capped by the deployment maximum."
+	},
+	sandbox_permissions: {
+		type: "string",
+		enum: [...ESCALATION_TARGETS],
+		description: "Wider sandbox mode for this complete program execution; requires justification and approval."
+	},
+	justification: {
+		type: "string",
+		description: "Reason this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request."
+	}
+};
+function controlParameters(runtime) {
+	if (runtime === void 0) return RUN_CODE_CONTROLS;
+	return {
+		...runtime.timeout === void 0 ? {} : { timeoutMs: {
+			...RUN_CODE_CONTROLS.timeoutMs,
+			description: `Positive elapsed-time budget in milliseconds, including nested tool and approval waits. Default ${runtime.timeout.defaultMs}; capped at ${runtime.timeout.maxMs}. Zero does not disable the deadline.`
+		} },
+		...runtime.sandboxMode === void 0 ? {} : {
+			sandbox_permissions: RUN_CODE_CONTROLS.sandbox_permissions,
+			justification: RUN_CODE_CONTROLS.justification
+		}
+	};
+}
+function escalationGuidance(runtime) {
+	return runtime?.sandboxMode === void 0 ? "" : " A sandbox escalation approves this complete program for one execution only. Nested tools retain their own policies and approvals. Request wider access only after evidence of a denial. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.";
+}
 /**
 * Resolve the {@link RunCodeFlavor} for the loaded runtime's language, read at
 * schema-emission time so the model-visible `run_code` schema always matches
 * the SDK section's language. `peekRuntime` returns `undefined` only when no
 * runtime is mounted, which reaches this function through definition readers
 * and `schemas()` — the doc-catalog harvest is the only shipped one, and none
-* of them feeds a model, because `wireSchemas` calls `requireCodeRuntime`
+* of them feeds a model, because `wireSchemas` calls `requirePtcRuntime`
 * before projecting — so that path degrades to {@link TYPESCRIPT_FLAVOR}. A
 * mounted runtime whose language has no flavor entry fails loud, exactly as
-* `requireCodeRuntime` rejects it at assembly. Keeping this table in step with
-* `SDK_RENDERERS` is the compiler's job ({@link CodeSdkLanguage}); what this
+* `requirePtcRuntime` rejects it at assembly. Keeping this table in step with
+* `SDK_RENDERERS` is the compiler's job ({@link PtcSdkLanguage}); what this
 * guard owns is the runtime-supplied language neither table knows, which never
 * yields a wrong-language schema for a real runtime.
 */
@@ -5403,7 +5799,8 @@ function createRunCodeTool(registry, options) {
 				type: "string",
 				required: true,
 				description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
-			}
+			},
+			...RUN_CODE_CONTROLS
 		},
 		output: {
 			schema: {
@@ -5415,12 +5812,37 @@ function createRunCodeTool(registry, options) {
 						required: true,
 						items: { type: "string" }
 					},
-					result: { type: "json" }
+					result: { type: "json" },
+					sandbox: {
+						type: "object",
+						additionalProperties: false,
+						properties: {
+							mode: {
+								type: "string",
+								required: true,
+								enum: [
+									"read-only",
+									"workspace-write",
+									"danger-full-access"
+								]
+							},
+							denied: {
+								type: "boolean",
+								required: true
+							},
+							enforcement: {
+								type: "string",
+								enum: ["full", "partial"]
+							}
+						}
+					}
 				}
 			},
 			render: (_args, value) => {
 				const rendered = value.result === void 0 ? "" : renderValue(value.result);
 				const parts = [value.logs.join("\n"), rendered].filter((part) => part.length > 0);
+				if (value.sandbox?.enforcement === "partial") parts.push("File sandbox enforcement is partial on this host.");
+				if (value.sandbox?.denied) parts.push(`The ${value.sandbox.mode} file sandbox denied an operation.${escalationGuidance(peekRuntime())}`);
 				return [{
 					type: "text",
 					text: parts.length > 0 ? parts.join("\n") : "(run_code completed with no output)"
@@ -5430,6 +5852,31 @@ function createRunCodeTool(registry, options) {
 		async execute(args, exec) {
 			if (args.description.trim().length === 0) throw new Error("invalid description: expected a non-empty string");
 			const runtime = requireRuntime();
+			validateEscalationArgs(args.sandbox_permissions, args.justification);
+			if (args.timeoutMs !== void 0 && runtime.timeout === void 0) throw new Error("timeoutMs is not available for this PTC runtime");
+			if (args.timeoutMs !== void 0 && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) throw new Error("invalid timeoutMs: expected a positive finite number");
+			const standingPolicy = runtime.sandboxMode === void 0 ? void 0 : options.resolveSandboxPolicy(exec);
+			let policy = standingPolicy;
+			if (args.sandbox_permissions !== void 0 && args.justification !== void 0) {
+				if (standingPolicy === void 0) throw new Error("sandbox_permissions is not available for this PTC runtime");
+				const approvedMode = await approveEscalation({
+					requestedMode: args.sandbox_permissions,
+					justification: args.justification,
+					effectiveMode: standingPolicy.mode,
+					subject: "program"
+				}, {
+					approver: options.peekApprover(),
+					agent: exec.agent,
+					callId: exec.callId,
+					toolName: RUN_CODE_NAME,
+					signal: exec.signal
+				});
+				policy = {
+					...standingPolicy,
+					mode: approvedMode
+				};
+			}
+			exec.signal.throwIfAborted();
 			const runController = new AbortController();
 			const onOuterAbort = () => {
 				runController.abort(exec.signal.reason);
@@ -5511,15 +5958,17 @@ function createRunCodeTool(registry, options) {
 				while (logWork.size > 0) await Promise.allSettled([...logWork]);
 			};
 			const runOver = () => runController.signal.aborted;
-			const binding = (name) => async (rawArgs) => {
+			const binding = (schema) => async (rawArgs) => {
+				const { name } = schema;
 				if (runOver()) throw new Error(`run_code run is over (${String(runController.signal.reason)}); ${name} not dispatched`);
 				const normalized = jsonNormalizeArgs(rawArgs);
 				const n = ++dispatches;
-				const subCallId = brandString(`${String(exec.callId)}:code:${n}`);
+				const subCallId = brandString(`${String(exec.callId)}:ptc:${n}`);
 				const input = {
 					callId: subCallId,
 					rootCallId: exec.rootCallId,
 					name,
+					schema,
 					arguments: normalized.dispatched,
 					...exec.agent ? { agent: exec.agent } : {},
 					parent: exec.token,
@@ -5547,13 +5996,14 @@ function createRunCodeTool(registry, options) {
 								isError: result.isError,
 								content: result.content
 							});
-							agent.session.append("tool/code-dispatch", {
+							agent.session.append("tool/ptc-dispatch", {
 								rootCallId: exec.rootCallId,
 								parentCallId: exec.callId,
 								subCallId,
 								name,
 								arguments: normalized.logged,
 								isError: result.isError,
+								...result.error?.info === void 0 ? {} : { error: result.error.info },
 								content: logged
 							});
 						})().finally(() => {
@@ -5569,7 +6019,7 @@ function createRunCodeTool(registry, options) {
 							reject(/* @__PURE__ */ new Error(`run_code run is over (${String(runController.signal.reason)}); ${name} tool call abandoned`));
 						},
 						async start() {
-							exec.agent?.session.append("tool/code-dispatch-start", {
+							exec.agent?.session.append("tool/ptc-dispatch-start", {
 								rootCallId: exec.rootCallId,
 								parentCallId: exec.callId,
 								subCallId,
@@ -5601,10 +6051,7 @@ function createRunCodeTool(registry, options) {
 							const result = parked.kind === "post-result" ? await scheduler.finalize(parked.exec, parked.result) : scheduler.finish(parked.exec, parked.result);
 							if (!result.isError && result.content.some((block) => block.type === "image")) exec.deferContext(createUserMessage({
 								content: result.content,
-								source: {
-									kind: "plugin",
-									plugin: "tools-code-mode"
-								}
+								source: { kind: "ptc-mode" }
 							}));
 							for (const context of result.additionalContexts ?? []) exec.deferContext(context);
 							if (result.concludesTurn) exec.concludeTurn();
@@ -5624,13 +6071,13 @@ function createRunCodeTool(registry, options) {
 				if (schema.name === "run_code") continue;
 				Object.defineProperty(functions, schema.name, {
 					enumerable: true,
-					value: binding(schema.name)
+					value: binding(deepFreeze(schema))
 				});
 			}
 			try {
 				let result;
 				try {
-					result = await runtime.run({
+					result = await runtime.run(runtime.resolve({
 						program: args.code,
 						bindings: [{
 							global: "tools",
@@ -5640,18 +6087,23 @@ function createRunCodeTool(registry, options) {
 								memberNameProperty: "toolName"
 							}
 						}],
-						signal: runController.signal
-					});
+						signal: runController.signal,
+						...exec.agent?.session.header.cwd !== void 0 ? { cwd: exec.agent.session.header.cwd } : {},
+						...policy !== void 0 ? { sandboxPolicy: policy } : {},
+						...args.timeoutMs !== void 0 ? { timeoutMs: args.timeoutMs } : {}
+					}));
 				} finally {
 					runController.abort("run_code settled");
 					await drainDispatches();
 				}
 				if (result.error) {
 					const logsText = result.logs.length > 0 ? `\nCaptured output:\n${result.logs.join("\n")}` : "";
-					throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${logsText}`);
+					const sandboxText = result.sandbox === void 0 ? "" : `\nFile sandbox: ${result.sandbox.mode}${result.sandbox.enforcement === void 0 ? "" : `; enforcement: ${result.sandbox.enforcement}`}${result.sandbox.denied ? "; operation denied" : ""}.`;
+					throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${logsText}${sandboxText}${result.sandbox?.denied ? escalationGuidance(runtime) : ""}`);
 				}
 				return {
 					logs: result.logs,
+					...result.sandbox === void 0 ? {} : { sandbox: result.sandbox },
 					...result.value !== void 0 ? { result: result.value } : {}
 				};
 			} finally {
@@ -5667,7 +6119,11 @@ function createRunCodeTool(registry, options) {
 	});
 	Object.defineProperty(definition, "description", {
 		enumerable: true,
-		get: () => resolveFlavor(peekRuntime).description
+		get: () => {
+			const runtime = peekRuntime();
+			const instructions = runtime?.executionInstructions;
+			return resolveFlavor(peekRuntime).description + (instructions ? ` ${instructions}` : "") + (runtime === void 0 ? "" : " The working directory is the Session's current directory.") + escalationGuidance(runtime);
+		}
 	});
 	Object.defineProperty(definition, "parameters", {
 		enumerable: true,
@@ -5681,7 +6137,8 @@ function createRunCodeTool(registry, options) {
 				type: "string",
 				required: true,
 				description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
-			}
+			},
+			...controlParameters(peekRuntime())
 		})
 	});
 	return definition;
@@ -5966,7 +6423,7 @@ function renderToolsSdk(schemas) {
 * PTC mode codegen — Python flavor. The pure projection from registered tool schemas to the
 * Python SDK text the model programs against under `runtime.language === 'python'`. Sibling of
 * {@link ./ts-types.ts | ts-types.ts}; the two files are two projections of the same registry
-* store, keyed by the loaded {@link @deepseek-ai/dsh-code-runtime#CodeRuntime.language | code
+* store, keyed by the loaded {@link @deepseek-ai/dsh-ptc-runtime#PtcRuntime.language | PTC
 * runtime's language}.
 *
 * Under `mode: 'ptc'` the native tool schemas are omitted from the request, so this generated
@@ -6653,17 +7110,17 @@ function renderToolsSdkPy(schemas) {
 */
 /**
 * Language → SDK-section renderer. The registry looks up the loaded
-* `ctx.codeRuntime.language` in this table when assembling the `tools:sdk`
+* `ctx.ptcRuntime.language` in this table when assembling the `tools:sdk`
 * section under a non-native mode; a runtime whose language is not a key
 * fails the assembly loudly (same idiom as `toolOrder` violations). Adding a
-* new backend language is three parallel edits — a {@link CodeSdkLanguage}
+* new backend language is three parallel edits — a {@link PtcSdkLanguage}
 * member, an entry here, and a `RUN_CODE_FLAVORS` entry in `ptc.ts` for
 * its `run_code` schema strings — plus the renderer function this table points
 * at. The `satisfies` clause pins this table's key set to that union, which
 * the flavor table is checked against too, so any of the three left out is a
 * typecheck failure. What no check reaches is the prose that names the values
-* instead of deriving them: the seam's `dsh-code-runtime` README pair, its
-* `CodeRuntime.language` JSDoc, and `docs/subsystems/code-runtime.md`
+* instead of deriving them: the seam's `dsh-ptc-runtime` README pair, its
+* `PtcRuntime.language` JSDoc, and `docs/subsystems/ptc-runtime.md`
 * with its zh pair, plus this package's own README pair and the
 * {@link Config.mode} JSDoc.
 */
@@ -6839,6 +7296,8 @@ function resolveMaxParallelSubCalls(value) {
 	cancellationStates = /* @__PURE__ */ new WeakMap();
 	/** Definition-owned final content transform snapshotted before policy begins. */
 	contentFinalizers = /* @__PURE__ */ new WeakMap();
+	/** Execution-prepared content installed before post-execute policy. */
+	contentProjectors = /* @__PURE__ */ new WeakMap();
 	layers = new ScopedLayers((scope) => new ToolLayer(scope), () => {
 		this.ctx.emit("tools/change");
 	});
@@ -6898,12 +7357,13 @@ function resolveMaxParallelSubCalls(value) {
 		return {
 			name: "tools:sdk",
 			order: this.ctx.systemPrompt.getSectionOrder("TOOLS_SDK"),
+			interpolate: false,
 			text: (context) => {
 				const mode = this.modeFor(context.scope);
 				if (mode === "native") return "";
-				const runtime = this.requireCodeRuntime(mode);
+				const runtime = this.requirePtcRuntime(mode);
 				const render = SDK_RENDERERS[runtime.language];
-				/* v8 ignore next -- requireCodeRuntime rejects an unknown language before this runs. */
+				/* v8 ignore next -- requirePtcRuntime rejects an unknown language before this runs. */
 				if (render === void 0) throw new Error(`dsh-tools: no SDK renderer for ${runtime.language}`);
 				return render(this.sdkSchemas(context.scope));
 			}
@@ -6932,10 +7392,16 @@ function resolveMaxParallelSubCalls(value) {
 	* and only for scopes whose mode actually presents it.
 	* @returns the shared transport definition.
 	*/
-	requireCodeTransport() {
+	requirePtcTransport() {
 		this.ptcTransport ??= createRunCodeTool(this, {
-			requireRuntime: () => this.requireCodeRuntime(this.defaultMode),
-			peekRuntime: () => this.ctx.get("codeRuntime"),
+			requireRuntime: () => this.requirePtcRuntime(this.defaultMode),
+			peekApprover: () => this.ctx.get("approval"),
+			resolveSandboxPolicy: (exec) => {
+				const policy = this.ctx.get("sandboxPolicy");
+				if (policy === void 0) throw new Error("dsh-tools: confined PTC runtime requires sandboxPolicy");
+				return policy.resolve(exec.agent === void 0 ? {} : { session: exec.agent.session });
+			},
+			peekRuntime: () => this.ctx.get("ptcRuntime"),
 			maxParallel: this.maxParallelSubCalls,
 			shapeDispatchLog: (dispatch) => this.shapeDispatchLog(dispatch)
 		});
@@ -6980,7 +7446,7 @@ function resolveMaxParallelSubCalls(value) {
 			schemas: [...view.visible.values()].map((definition) => this.schemaOf(definition, false)),
 			knownNames: [...view.knownNames]
 		};
-		this.requireCodeRuntime(mode);
+		this.requirePtcRuntime(mode);
 		const schemas = [...view.visible.values()].map((definition) => this.schemaOf(definition, false));
 		if (mode === "ptc") return {
 			schemas: schemas.filter((schema) => schema.name === RUN_CODE_NAME),
@@ -6992,10 +7458,10 @@ function resolveMaxParallelSubCalls(value) {
 		};
 	}
 	/**
-	* Resolve the code runtime or throw the actionable misconfiguration error.
+	* Resolve the PTC runtime or throw the actionable misconfiguration error.
 	* Read at use time (assembly / run_code execution), NOT via static
 	* `inject`: an inject entry would hold `ctx.tools` — and every tool plugin
-	* behind it — hostage to a code runtime existing even under `mode:
+	* behind it — hostage to a PTC runtime existing even under `mode:
 	* 'native'`.
 	*
 	* Assembly and `run_code` execution read separately, so the language is not
@@ -7003,12 +7469,11 @@ function resolveMaxParallelSubCalls(value) {
 	* reads return the same flavor — but a reload that swapped in a second
 	* language between them would hand a program written against one SDK to the
 	* other. Binding it is deferred until a second backend ships (the first
-	* point it is testable); rationale in the
-	* [language-dispatch note](../../../../.agents/notes/implemented/feature/2026-07-31-ptc-language-dispatch.md).
+	* point it is testable).
 	*/
-	requireCodeRuntime(mode) {
-		const runtime = this.ctx.get("codeRuntime");
-		if (!runtime) throw new Error(`dsh-tools: mode "${mode}" requires a code runtime — load a ctx.codeRuntime implementation (e.g. @deepseek-ai/dsh-code-runtime-worker-thread) or set tools mode to "native"`);
+	requirePtcRuntime(mode) {
+		const runtime = this.ctx.get("ptcRuntime");
+		if (!runtime) throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-node) or set tools mode to "native"`);
 		if (!Object.hasOwn(SDK_RENDERERS, runtime.language)) {
 			const known = Object.keys(SDK_RENDERERS).map((name) => JSON.stringify(name)).join(", ");
 			throw new Error(`dsh-tools: no SDK renderer registered for runtime language ${JSON.stringify(runtime.language)} (known: ${known})`);
@@ -7090,9 +7555,9 @@ function resolveMaxParallelSubCalls(value) {
 	* A restriction filters what a scope inherits — the global layer and every
 	* ancestor layer on its chain — and never what its OWN layer registers.
 	* That exemption is what a per-child capability filter has to keep intact:
-	* the delegation runtime registers a child's reporting and structured-output
-	* tools into the child's own layer, and a filter naming the capabilities the
-	* child may use must not strip the machinery it answers through.
+	* the delegation runtime registers a child's structured-output tool into the
+	* child's own layer, and a filter naming the capabilities the child may use
+	* must not strip the machinery it answers through.
 	*
 	* Reading the exempt set as "the global layer" instead of "not mine" held
 	* only while every model-facing tool sat in the host composition. Once
@@ -7122,7 +7587,7 @@ function resolveMaxParallelSubCalls(value) {
 			knownNames.add(name);
 			visible.set(name, definition);
 		}
-		if (this.modeFor(scope) !== "native") visible.set(RUN_CODE_NAME, this.requireCodeTransport());
+		if (this.modeFor(scope) !== "native") visible.set(RUN_CODE_NAME, this.requirePtcTransport());
 		return {
 			visible,
 			knownNames,
@@ -7183,13 +7648,14 @@ function resolveMaxParallelSubCalls(value) {
 	}
 	/** Project one definition onto the model-facing schema fields. */
 	schemaOf(definition, detachParameters) {
-		const { name, description, parameters } = definition;
+		const { name, description, parameters, deferLoading } = definition;
 		const detached = detachParameters ? snapshotJsonValue(parameters) : parameters;
 		if (detached === void 0) throw new Error(`tool "${name}" parameters must be lossless JSON before schema projection`);
 		return {
 			name,
 			description,
-			parameters: detached
+			parameters: detached,
+			...deferLoading === true ? { deferLoading } : {}
 		};
 	}
 	/**
@@ -7210,7 +7676,7 @@ function resolveMaxParallelSubCalls(value) {
 	}
 	/**
 	* Run the `tools/ptc-dispatch-log` waterfall over one settled sub-dispatch
-	* and return the content the bridge should log on `tool/code-dispatch`.
+	* and return the content the bridge should log on `tool/ptc-dispatch`.
 	* Contained: when a listener throws, the method logs the original settled
 	* content; that failure must not fail the dispatch or omit the settle event. Private:
 	* the ONE consumer is the `run_code` bridge this registry constructs, which
@@ -7293,6 +7759,7 @@ function resolveMaxParallelSubCalls(value) {
 			signal,
 			...agent !== void 0 ? { agent } : {},
 			...parent !== void 0 ? { parent } : {},
+			...exec.schema !== void 0 ? { schema: exec.schema } : {},
 			deferContext(context) {
 				deferredContexts.push(context);
 			},
@@ -7301,6 +7768,7 @@ function resolveMaxParallelSubCalls(value) {
 			}
 		};
 		const capturedFinalizer = visible?.finalizeContent?.bind(visible);
+		const capturedProjector = visible?.projectContent?.bind(visible);
 		const finalizerFor = () => collapsed && !signal.aborted ? void 0 : capturedFinalizer;
 		try {
 			const detached = snapshotJsonValue(exec.arguments);
@@ -7311,6 +7779,7 @@ function resolveMaxParallelSubCalls(value) {
 			};
 			this.deferredContexts.set(execution, deferredContexts);
 			this.contentFinalizers.set(execution, finalizerFor());
+			if (!collapsed) this.contentProjectors.set(execution, capturedProjector);
 			this.cancellationStates.set(execution, {
 				callerSignal: signal,
 				bodyInvoked: false
@@ -7375,7 +7844,13 @@ function resolveMaxParallelSubCalls(value) {
 				exec,
 				result: toolAbortedBeforeDispatchResult()
 			});
+			if (decision.kind === "cancel") return await next({
+				kind: "post-result",
+				exec,
+				result: toolAbortedBeforeDispatchResult()
+			});
 			const denialReason = decision.kind === "allow" ? this.guardReason(exec) : decision.reason;
+			const denialInfo = decision.kind === "deny" ? decision.info : void 0;
 			if (denialReason !== void 0) return await next({
 				kind: "post-result",
 				exec,
@@ -7385,7 +7860,10 @@ function resolveMaxParallelSubCalls(value) {
 						text: `Error: ${denialReason}`
 					}],
 					isError: true,
-					error: { message: denialReason }
+					error: {
+						message: denialReason,
+						...denialInfo === void 0 ? {} : { info: denialInfo }
+					}
 				})
 			});
 			if (this.callerCancelled(exec)) return await next({
@@ -7491,7 +7969,14 @@ function resolveMaxParallelSubCalls(value) {
 	*/
 	async finalizeScheduledExecution(exec, result) {
 		try {
-			const postResult = await this.postExecute(exec, result);
+			const project = this.contentProjectors.get(exec);
+			this.contentProjectors.delete(exec);
+			const content = project?.(exec, result);
+			const projected = content === void 0 ? result : this.markCanonical(exec, this.materializeFinalResult({
+				...result,
+				content
+			}));
+			const postResult = await this.postExecute(exec, projected);
 			return this.finishScheduledExecution(exec, this.callerCancelled(exec) && !postResult.isError ? this.cancellationResult(exec, postResult) : postResult);
 		} catch (error) {
 			return this.finishScheduledExecution(exec, toolErrorResult(error));
@@ -7583,6 +8068,7 @@ function resolveMaxParallelSubCalls(value) {
 			toolName: exec.name,
 			callId: exec.callId,
 			...ask.reason !== void 0 ? { reason: ask.reason } : {},
+			...ask.displayReason !== void 0 ? { displayReason: ask.displayReason } : {},
 			signal: exec.signal
 		});
 		switch (outcome) {
@@ -18751,7 +19237,9 @@ const Config = Schema.object({
 	injectGuidance: Schema.boolean().default(true)
 });
 /** 本包注入消息的来源插件标签。 */
-const PLUGIN_TAG = "dsh-email";
+const PRODUCER_KIND = "dsh-email";
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${PRODUCER_KIND}`;
 /** 从工具参数中取字符串：非字符串或缺失一律得到空串。 */
 function readOptionalString(value) {
 	return typeof value === "string" ? value : void 0;
@@ -18788,7 +19276,9 @@ function buildGuidance(config) {
 function guidanceAlreadyInjected(agent) {
 	return agent.session.surface.nodes.some((seq) => {
 		const event = agent.session.eventAt(seq);
-		return event?.type === "user/message" && event.data.source.kind === "plugin" && event.data.source.plugin === PLUGIN_TAG;
+		if (event?.type !== "user/message") return false;
+		const kind = event.data.source.kind;
+		return kind === PRODUCER_KIND || kind === MIGRATED_PRODUCER_KIND;
 	});
 }
 /** 把工具返回值以美化 JSON 文本呈现给模型。 */
@@ -18910,8 +19400,7 @@ function apply(ctx, config) {
 				text: buildGuidance(config)
 			}],
 			source: {
-				kind: "plugin",
-				plugin: PLUGIN_TAG,
+				kind: PRODUCER_KIND,
 				form: "instructions"
 			}
 		});
