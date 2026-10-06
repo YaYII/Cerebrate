@@ -80,15 +80,25 @@ const GUIDANCE = [
 ].join('\n')
 
 /** 本包注入消息的来源插件标签。 */
-const PLUGIN_TAG = 'dsh-web-search'
+const PRODUCER_KIND = 'dsh-web-search'
+
+/** 本包注入消息的生产者 kind（producer-owned source）。 */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-web-search': { kind: 'dsh-web-search'; form?: 'instructions' }
+  }
+}
+
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${PRODUCER_KIND}`
 
 /** 引导消息是否已存在于会话可见面。 */
 function guidanceAlreadyInjected(agent: Agent): boolean {
   return agent.session.surface.nodes.some((seq) => {
     const event = agent.session.eventAt(seq)
-    return event?.type === 'user/message'
-      && event.data.source.kind === 'plugin'
-      && event.data.source.plugin === PLUGIN_TAG
+    if (event?.type !== 'user/message') return false
+    const kind: string = event.data.source.kind
+    return kind === PRODUCER_KIND || kind === MIGRATED_PRODUCER_KIND
   })
 }
 
@@ -158,7 +168,7 @@ export function apply(ctx: Context, config: Config): void {
       signal.throwIfAborted()
       const guidance = createUserMessage({
         content: [{ type: 'text', text: GUIDANCE }],
-        source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+        source: { kind: PRODUCER_KIND, form: 'instructions' },
       })
       const lastClaimedIndex = decision.messages.findLastIndex(message => messages.includes(message))
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
