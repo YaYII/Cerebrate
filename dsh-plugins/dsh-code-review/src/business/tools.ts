@@ -10,7 +10,7 @@
 
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { detectToolchains, probeToolchain, resolveBin } from '../features/languages'
 import { runLint, runFormat } from '../features/lint'
 import { runBench, runProfile, saveArtifact } from '../features/bench'
