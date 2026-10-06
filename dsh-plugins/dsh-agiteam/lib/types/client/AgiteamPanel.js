@@ -21,8 +21,25 @@ const STATE_URL = '/plugins/agiteam/state';
 const AUDIT_URL = '/plugins/agiteam/audit';
 /** 校验端点。 */
 const VERIFY_URL = '/plugins/agiteam/verify';
+/** 任务板端点。 */
+const BOARD_URL = '/plugins/agiteam/tasks';
 /** 侧栏展开时对话区让位（body 属性）。 */
 const PANEL_DOCKED_ATTRIBUTE = 'data-agiteam-docked';
+/** 任务状态中文名。 */
+const TASK_STATUS_NAMES = {
+    open: '待处理',
+    claimed: '已认领',
+    in_progress: '进行中',
+    in_review: '待审批',
+    paused: '已暂停',
+    done: '已完成',
+    failed: '失败',
+    rejected: '已打回',
+};
+/** 任务状态 CSS 类。 */
+function taskStatusClass(status) {
+    return status;
+}
 /** 阶段中文名。 */
 const STAGE_NAMES = {
     requirement: '需求分析',
@@ -67,7 +84,8 @@ export function AgiteamPanel({ openSession }) {
     const [tab, setTab] = useState('projects');
     const [selected, setSelected] = useState('');
     const [verifyResult, setVerifyResult] = useState('');
-    // 轮询项目列表 + 选中项目快照
+    const [board, setBoard] = useState(null);
+    // 轮询项目列表 + 选中项目快照 + 任务板
     useEffect(() => {
         let cancelled = false;
         let inFlight = false;
@@ -92,6 +110,10 @@ export function AgiteamPanel({ openSession }) {
                     const res = await fetch(`${STATE_URL}?project=${encodeURIComponent(selected)}`, { cache: 'no-store' });
                     if (res.ok)
                         setSnapshot(await res.json());
+                    // 任务板
+                    const boardRes = await fetch(`${BOARD_URL}?project=${encodeURIComponent(selected)}`, { cache: 'no-store' });
+                    if (boardRes.ok)
+                        setBoard(await boardRes.json());
                 }
             }
             catch {
@@ -131,7 +153,7 @@ export function AgiteamPanel({ openSession }) {
     };
     const busy = snapshot?.stage !== 'done' && snapshot !== null;
     const current = snapshot;
-    return (_jsxs("div", { children: [_jsxs("button", { type: "button", className: "agiteam-pill", "data-open": open, onClick: () => setOpen(v => !v), "aria-label": "AGI \u56E2\u961F\u5F00\u53D1\u9762\u677F", title: open ? '收起面板' : '展开面板', children: [_jsx("span", { className: "agiteam-pill-dot", "data-busy": busy, "aria-hidden": "true" }), "AGI \u56E2\u961F"] }), open && (_jsxs("aside", { className: "agiteam-sidebar", children: [_jsxs("header", { className: "agiteam-head", children: [_jsxs("span", { className: "agiteam-title", children: ["AGI \u56E2\u961F\u5F00\u53D1", _jsx("span", { className: "agiteam-dot", "data-busy": busy, "aria-hidden": "true" })] }), _jsx("button", { type: "button", className: "agiteam-icon-btn", onClick: () => setOpen(false), "aria-label": "\u5173\u95ED", children: "\u2715" })] }), _jsxs("nav", { className: "agiteam-nav", "aria-label": "AGI \u56E2\u961F\u5F00\u53D1\u9762\u677F", children: [_jsx(NavItem, { active: tab === 'projects', icon: "\uD83D\uDCCB", label: "\u9879\u76EE", onClick: () => setTab('projects') }), _jsx(NavItem, { active: tab === 'matrix', icon: "\uD83D\uDD17", label: "\u8FFD\u6EAF\u77E9\u9635", onClick: () => setTab('matrix') }), _jsx(NavItem, { active: tab === 'audit', icon: "\uD83D\uDCDC", label: "\u5BA1\u8BA1\u65E5\u5FD7", count: current?.auditLog.length ?? 0, onClick: () => setTab('audit') }), _jsx(NavItem, { active: tab === 'verify', icon: "\uD83D\uDEE1\uFE0F", label: "\u6821\u9A8C", onClick: () => setTab('verify') })] }), _jsxs("div", { className: "agiteam-content", children: [tab === 'projects' && (_jsx(ProjectsView, { projects: projects, selected: selected, onSelect: setSelected, current: current })), tab === 'matrix' && current && (_jsx(MatrixView, { snapshot: current, onOpenSession: openSession })), tab === 'matrix' && !current && _jsx(EmptyState, { text: "\u8BF7\u5148\u5728\u300C\u9879\u76EE\u300D\u9875\u9009\u62E9\u9879\u76EE" }), tab === 'audit' && current && _jsx(AuditView, { snapshot: current }), tab === 'audit' && !current && _jsx(EmptyState, { text: "\u8BF7\u5148\u5728\u300C\u9879\u76EE\u300D\u9875\u9009\u62E9\u9879\u76EE" }), tab === 'verify' && (_jsx(VerifyView, { current: current, verifyResult: verifyResult, onVerify: runVerify }))] })] }))] }));
+    return (_jsxs("div", { children: [_jsxs("button", { type: "button", className: "agiteam-pill", "data-open": open, onClick: () => setOpen(v => !v), "aria-label": "AGI \u56E2\u961F\u5F00\u53D1\u9762\u677F", title: open ? '收起面板' : '展开面板', children: [_jsx("span", { className: "agiteam-pill-dot", "data-busy": busy, "aria-hidden": "true" }), "AGI \u56E2\u961F"] }), open && (_jsxs("aside", { className: "agiteam-sidebar", children: [_jsxs("header", { className: "agiteam-head", children: [_jsxs("span", { className: "agiteam-title", children: ["AGI \u56E2\u961F\u5F00\u53D1", _jsx("span", { className: "agiteam-dot", "data-busy": busy, "aria-hidden": "true" })] }), _jsx("button", { type: "button", className: "agiteam-icon-btn", onClick: () => setOpen(false), "aria-label": "\u5173\u95ED", children: "\u2715" })] }), _jsxs("nav", { className: "agiteam-nav", "aria-label": "AGI \u56E2\u961F\u5F00\u53D1\u9762\u677F", children: [_jsx(NavItem, { active: tab === 'projects', icon: "\uD83D\uDCCB", label: "\u9879\u76EE", onClick: () => setTab('projects') }), _jsx(NavItem, { active: tab === 'board', icon: "\uD83D\uDDC2\uFE0F", label: "\u4EFB\u52A1\u677F", count: board?.tasks.filter(t => t.status === 'in_review').length ?? 0, onClick: () => setTab('board') }), _jsx(NavItem, { active: tab === 'matrix', icon: "\uD83D\uDD17", label: "\u8FFD\u6EAF\u77E9\u9635", onClick: () => setTab('matrix') }), _jsx(NavItem, { active: tab === 'audit', icon: "\uD83D\uDCDC", label: "\u5BA1\u8BA1\u65E5\u5FD7", count: current?.auditLog.length ?? 0, onClick: () => setTab('audit') }), _jsx(NavItem, { active: tab === 'verify', icon: "\uD83D\uDEE1\uFE0F", label: "\u6821\u9A8C", onClick: () => setTab('verify') })] }), _jsxs("div", { className: "agiteam-content", children: [tab === 'projects' && (_jsx(ProjectsView, { projects: projects, selected: selected, onSelect: setSelected, current: current })), tab === 'board' && (_jsx(BoardView, { board: board, selected: selected, onOpenSession: openSession })), tab === 'matrix' && current && (_jsx(MatrixView, { snapshot: current, onOpenSession: openSession })), tab === 'matrix' && !current && _jsx(EmptyState, { text: "\u8BF7\u5148\u5728\u300C\u9879\u76EE\u300D\u9875\u9009\u62E9\u9879\u76EE" }), tab === 'audit' && current && _jsx(AuditView, { snapshot: current }), tab === 'audit' && !current && _jsx(EmptyState, { text: "\u8BF7\u5148\u5728\u300C\u9879\u76EE\u300D\u9875\u9009\u62E9\u9879\u76EE" }), tab === 'verify' && (_jsx(VerifyView, { current: current, verifyResult: verifyResult, onVerify: runVerify }))] })] }))] }));
 }
 /** 竖向导航项。 */
 function NavItem({ active, icon, label, count, onClick }) {
@@ -170,6 +192,20 @@ function VerifyView({ current, verifyResult, onVerify }) {
 /** 空态。 */
 function EmptyState({ text }) {
     return _jsx("div", { className: "agiteam-empty-state", children: text });
+}
+/** 任务板视图（taskboard 风格：列/卡片/审批状态）。 */
+function BoardView({ board, selected, onOpenSession }) {
+    if (!board)
+        return _jsx(EmptyState, { text: "\u8BF7\u5148\u5728\u300C\u9879\u76EE\u300D\u9875\u9009\u62E9\u9879\u76EE" });
+    const statuses = ['open', 'claimed', 'in_progress', 'in_review', 'paused', 'rejected', 'done', 'failed'];
+    const tasks = board.tasks;
+    const inReviewCount = tasks.filter(t => t.status === 'in_review').length;
+    return (_jsxs("div", { className: "agiteam-view agiteam-board-view", children: [_jsxs("div", { className: "agiteam-section-title", children: ["\u4EFB\u52A1\u677F \u00B7 ", board.projectName, inReviewCount > 0 && _jsxs("span", { className: "agiteam-review-badge", children: ["\u23F3 ", inReviewCount, " \u5F85\u5BA1\u6279"] })] }), _jsx("div", { className: "agiteam-board-columns", children: statuses.map(status => {
+                    const columnTasks = tasks.filter(t => t.status === status);
+                    if (columnTasks.length === 0)
+                        return null;
+                    return (_jsxs("div", { className: "agiteam-board-column", "data-status": status, children: [_jsxs("div", { className: "agiteam-board-col-head", children: [TASK_STATUS_NAMES[status] ?? status, _jsx("span", { className: "agiteam-board-count", children: columnTasks.length })] }), columnTasks.map(task => (_jsxs("div", { className: "agiteam-board-card", "data-status": status, children: [_jsx("div", { className: "agiteam-board-card-title", children: task.title }), _jsxs("div", { className: "agiteam-board-card-meta", children: [_jsx("span", { className: "agiteam-board-role", children: task.role }), _jsx("span", { className: "agiteam-board-time", children: relTime(task.updatedAt) })] }), status === 'in_review' && (_jsx("div", { className: "agiteam-board-suggestion", children: task.approvalSuggestion ? `💡 ${task.approvalSuggestion.slice(0, 60)}` : '⏳ 等待审批' })), status === 'paused' && task.pauseReason && (_jsxs("div", { className: "agiteam-board-pause", children: ["\u23F8 ", task.pauseReason.slice(0, 50)] })), status === 'rejected' && task.reviewComment && (_jsxs("div", { className: "agiteam-board-reject", children: ["\u21A9\uFE0F ", task.reviewComment.slice(0, 50)] })), task.sessionId && (_jsx("button", { type: "button", className: "agiteam-board-session", onClick: () => { void onOpenSession(task.sessionId); }, children: "\u6253\u5F00\u4F1A\u8BDD \u2192" }))] }, task.id)))] }, status));
+                }) }), tasks.length === 0 && _jsx(EmptyState, { text: "\u6682\u65E0\u4EFB\u52A1\uFF08\u9636\u6BB5\u6D41\u8F6C\u4F1A\u81EA\u52A8\u521B\u5EFA\uFF09" })] }));
 }
 /** 取路径 basename。 */
 function basename(path) {

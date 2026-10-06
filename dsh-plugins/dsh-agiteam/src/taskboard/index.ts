@@ -6,7 +6,7 @@ import { registerTaskboardTools } from './tool/index.js'
 import { TaskboardAutomationCoordinator } from './automation/index.js'
 import { HarnessTaskboardWorker } from './execution/index.js'
 import type {} from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-goal'
 import type {} from '@deepseek-ai/dsh-workspace'
 

@@ -172,7 +172,7 @@ export function runtimeFromCtx(ctx: Context, cwd: string): EngineRuntime {
         if (live && typeof live.followup === 'function') {
           live.followup(createUserMessage({
             content: [{ type: 'text', text: greeting }],
-            source: { kind: 'plugin', plugin: 'dsh-agiteam', form: 'instructions' },
+            source: { kind: 'dsh-agiteam', form: 'instructions' },
           }))
         }
         // 归属工作区
@@ -197,7 +197,7 @@ export function runtimeFromCtx(ctx: Context, cwd: string): EngineRuntime {
       if (!live || typeof live.followup !== 'function') return false
       live.followup(createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: 'dsh-agiteam', form: 'instructions' },
+        source: { kind: 'dsh-agiteam', form: 'instructions' },
       }))
       return true
     },

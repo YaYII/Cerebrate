@@ -187,7 +187,7 @@ export async function ensureRoleSession(
   const greet = (agent: { followup(msg: unknown): void }): void => {
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: greeting }],
-      source: { kind: 'plugin', plugin: 'dsh-agiteam', form: 'instructions' },
+      source: { kind: 'dsh-agiteam', form: 'instructions' },
     }))
   }
 

@@ -82,7 +82,7 @@ export function autoDriveRuntimeFromCtx(ctx: Context, cwd: string): AutoDriveRun
       if (live && typeof live.followup === 'function') {
         live.followup(createUserMessage({
           content: [{ type: 'text', text }],
-          source: { kind: 'plugin', plugin: 'dsh-agiteam', form: 'instructions' },
+          source: { kind: 'dsh-agiteam', form: 'instructions' },
         }))
         return true
       }
@@ -812,6 +812,6 @@ export function notifyOwnerSession(ctx: Context, project: ProjectRecord, message
   }
   owner.followup(createUserMessage({
     content: [{ type: 'text', text: message }],
-    source: { kind: 'plugin', plugin: 'dsh-agiteam', form: 'instructions' },
+    source: { kind: 'dsh-agiteam', form: 'instructions' },
   }))
 }

@@ -1,5 +1,5 @@
-import { n as Service, r as Schema, t as Context } from "./lib--7yKgOXA.js";
-import { a as ReasoningEffortId, c as assertNever, d as snapshotJsonValue, i as HarnessError, l as deepFreeze, n as ROLE_PRESET, o as createUserMessage, r as STAGE_ROLE, s as brandString, t as ROLE_NAMES, u as isJsonValue } from "./roles-CiXzf-WJ.js";
+import { n as Service, r as Schema, t as Context } from "./lib-DhsOnK-d.js";
+import { a as ReasoningEffortId, c as assertNever, d as snapshotJsonValue, i as HarnessError, l as deepFreeze, n as ROLE_PRESET, o as createUserMessage, r as STAGE_ROLE, s as brandString, t as ROLE_NAMES, u as isJsonValue } from "./roles-DSmMtEa-.js";
 import { i as reviewBackTo, r as nextStage, t as STAGE_NAMES } from "./stage-6kxWDxZR.js";
 import { a as verifyAuditChain, i as sha256Hex, n as makeAuditEntry, r as parseAuditLog } from "./audit-CJNju73G.js";
 import { createRequire } from "node:module";
@@ -284,6 +284,92 @@ function scopeTarget(base, key) {
 	} };
 	carrierKeys.set(carrier, key);
 	return carrier;
+}
+//#endregion
+//#region ../../../deepseek-harness/packages/sandbox/sandbox/lib/index.js
+/**
+* The escalation vocabulary and choreography shared by every sandbox-enforcing
+* tool family (`@deepseek-ai/dsh-tool-bash`, `@deepseek-ai/dsh-tool-fs`): the
+* strictly-wider ladder, the argument-pairing validation, the model-facing
+* denial/hint markers, and {@link approveEscalation} — the ordered fail-closed
+* sequence that resolves a `sandbox_permissions` request through a
+* user-approval channel BEFORE anything executes. One home keeps the two
+* families' approval ordering and verbatim error texts from drifting apart.
+*
+* The channel is a minimal STRUCTURAL function shape ({@link EscalationAsk}),
+* not the approval service type: the tool layer — which owns the agent, the
+* call id, and the tool name — closes over `ctx.approval.request(...)` and
+* hands the closure down, so this package never depends on the approval or
+* agent packages.
+*
+* @module dsh-sandbox/escalation
+*/
+/**
+* The strictly-wider table: what a call whose effective mode is the key may
+* escalate TO. Checked at EXECUTION, never baked into a tool schema — the
+* schema's enum is {@link ESCALATION_TARGETS}, because schemas are
+* registry-global while the effective mode is per-call truth.
+*/
+const WIDER_MODES = {
+	"read-only": ["workspace-write", "danger-full-access"],
+	"workspace-write": ["danger-full-access"]
+};
+/**
+* The closed escalation-target vocabulary — every mode a call could ever
+* escalate TO (`read-only` is the floor; nothing escalates to it). Advertised
+* whenever the mounted capability confines: cutting the enum down to the modes
+* wider than the composition's DEFAULT would strand a session whose effective
+* mode sits below it (a `danger-full-access` default would advertise nothing
+* while a narrower-switched session stays confined with no lever).
+*/
+const ESCALATION_TARGETS = ["workspace-write", "danger-full-access"];
+/**
+* Validate the escalation argument pairing a tool schema cannot express:
+* `sandbox_permissions` and `justification` travel together — an approval
+* prompt without a reason, or a reason driving nothing, is a malformed ask —
+* and the justification must be a non-empty sentence.
+* @param sandboxPermissions - the raw `sandbox_permissions` argument, if given.
+* @param justification - the raw `justification` argument, if given.
+*/
+function validateEscalationArgs(sandboxPermissions, justification) {
+	if (sandboxPermissions !== void 0 && justification === void 0) throw new Error("invalid escalation: sandbox_permissions requires a justification");
+	if (justification !== void 0 && sandboxPermissions === void 0) throw new Error("invalid escalation: justification is only valid together with sandbox_permissions");
+	if (justification !== void 0 && justification.trim().length === 0) throw new Error("invalid justification: expected a non-empty sentence");
+}
+/**
+* Resolve a sandbox permission request before execution. Repeating the call's
+* effective mode returns it without approval. A strictly wider mode requires
+* approval and applies only to this call. Narrower or unsupported targets,
+* missing approval services or agents for widening, and non-grant outcomes
+* throw before execution.
+* @param request - the escalation to judge (see {@link EscalationRequest}).
+* @param approval - the approval ingredients the tool holds (see {@link EscalationApproval}).
+* @returns the granted mode, consumed by the one call that asked.
+*/
+async function approveEscalation(request, approval) {
+	const { requestedMode: mode, effectiveMode, justification, subject } = request;
+	if (mode === effectiveMode) return effectiveMode;
+	if (!(WIDER_MODES[effectiveMode] ?? []).includes(mode)) throw new Error(`sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode`);
+	if (approval.approver === void 0) throw new Error(`sandbox escalation to "${mode}" requires approval, but no approval service is composed`);
+	if (approval.agent === void 0) throw new Error(`sandbox escalation to "${mode}" requires approval, but the call has no agent to route it through`);
+	const outcome = await approval.approver.request({
+		agent: approval.agent,
+		toolName: approval.toolName,
+		callId: approval.callId,
+		reason: `escalate sandbox to ${mode}: ${justification}`,
+		displayReason: {
+			en: `Allow this operation with ${mode} permissions: ${justification}`,
+			zh: `允许本次操作使用 ${mode} 权限：${justification}`
+		},
+		...approval.signal ? { signal: approval.signal } : {}
+	});
+	switch (outcome) {
+		case "allowed-once": return mode;
+		case "rejected": throw new Error(`the user rejected escalating this ${subject} to "${mode}"; it stays denied, so stop and explain instead of working around it`);
+		case "cancelled": throw new Error(`approval for escalating to "${mode}" was cancelled`);
+		case "unavailable": throw new Error(`sandbox escalation to "${mode}" requires approval, but no approval channel is available`);
+		default: return assertNever(outcome, "EscalationOutcome");
+	}
 }
 //#endregion
 //#region ../../../deepseek-harness/packages/core/tools/lib/index.js
@@ -1096,6 +1182,7 @@ var ToolArgsError = class extends HarnessError {
 function defineTool(options) {
 	const userExecute = options.execute;
 	const userFinalizeContent = options.finalizeContent;
+	const userProjectContent = options.projectContent;
 	const userRender = options.output.render;
 	const userPresentationMeta = options.output.presentationMeta;
 	const userPresentCall = options.presentCall;
@@ -1118,6 +1205,7 @@ function defineTool(options) {
 				return userPresentationMeta(args, value);
 			} } : {}
 		},
+		...options.deferLoading === true ? { deferLoading: options.deferLoading } : {},
 		...options.timeoutMs !== void 0 ? { timeoutMs: options.timeoutMs } : {},
 		async execute(args, exec) {
 			const violations = validate(args);
@@ -1125,6 +1213,7 @@ function defineTool(options) {
 			return userExecute(args, exec);
 		}
 	};
+	if (userProjectContent) tool.projectContent = (exec, result) => userProjectContent(exec, result);
 	if (userFinalizeContent) tool.finalizeContent = (exec, result) => userFinalizeContent(exec, result);
 	if (userPresentCall) tool.presentCall = (args) => {
 		if (validate(args).length > 0) return void 0;
@@ -1159,7 +1248,7 @@ const TYPESCRIPT_FLAVOR = {
 	description: "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.",
 	codeDescription: "The program: the body of an async TypeScript function."
 };
-/** Per-language `run_code` schema flavors (see {@link RunCodeFlavor}); one entry per {@link CodeSdkLanguage}. */
+/** Per-language `run_code` schema flavors (see {@link RunCodeFlavor}); one entry per {@link PtcSdkLanguage}. */
 const RUN_CODE_FLAVORS = {
 	typescript: TYPESCRIPT_FLAVOR,
 	python: {
@@ -1174,17 +1263,48 @@ const RUN_CODE_FLAVORS = {
 * can never drift.
 */
 const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION = "Clear, concise description of what this program does in active voice, 5-10 words (shown in the UI). Examples: \"Count TODO markers across packages\"; \"Read failing test and its fixture\"; \"Rename config key in every cordis.yml\".";
+const RUN_CODE_CONTROLS = {
+	timeoutMs: {
+		type: "number",
+		description: "Positive elapsed-time budget in milliseconds, capped by the deployment maximum."
+	},
+	sandbox_permissions: {
+		type: "string",
+		enum: [...ESCALATION_TARGETS],
+		description: "Wider sandbox mode for this complete program execution; requires justification and approval."
+	},
+	justification: {
+		type: "string",
+		description: "Reason this complete program needs wider access, shown to the user for approval. Use the language of the user’s current request."
+	}
+};
+function controlParameters(runtime) {
+	if (runtime === void 0) return RUN_CODE_CONTROLS;
+	return {
+		...runtime.timeout === void 0 ? {} : { timeoutMs: {
+			...RUN_CODE_CONTROLS.timeoutMs,
+			description: `Positive elapsed-time budget in milliseconds, including nested tool and approval waits. Default ${runtime.timeout.defaultMs}; capped at ${runtime.timeout.maxMs}. Zero does not disable the deadline.`
+		} },
+		...runtime.sandboxMode === void 0 ? {} : {
+			sandbox_permissions: RUN_CODE_CONTROLS.sandbox_permissions,
+			justification: RUN_CODE_CONTROLS.justification
+		}
+	};
+}
+function escalationGuidance(runtime) {
+	return runtime?.sandboxMode === void 0 ? "" : " A sandbox escalation approves this complete program for one execution only. Nested tools retain their own policies and approvals. Request wider access only after evidence of a denial. Earlier effects may already have completed: inspect them before explicitly retrying. Programs are never replayed automatically.";
+}
 /**
 * Resolve the {@link RunCodeFlavor} for the loaded runtime's language, read at
 * schema-emission time so the model-visible `run_code` schema always matches
 * the SDK section's language. `peekRuntime` returns `undefined` only when no
 * runtime is mounted, which reaches this function through definition readers
 * and `schemas()` — the doc-catalog harvest is the only shipped one, and none
-* of them feeds a model, because `wireSchemas` calls `requireCodeRuntime`
+* of them feeds a model, because `wireSchemas` calls `requirePtcRuntime`
 * before projecting — so that path degrades to {@link TYPESCRIPT_FLAVOR}. A
 * mounted runtime whose language has no flavor entry fails loud, exactly as
-* `requireCodeRuntime` rejects it at assembly. Keeping this table in step with
-* `SDK_RENDERERS` is the compiler's job ({@link CodeSdkLanguage}); what this
+* `requirePtcRuntime` rejects it at assembly. Keeping this table in step with
+* `SDK_RENDERERS` is the compiler's job ({@link PtcSdkLanguage}); what this
 * guard owns is the runtime-supplied language neither table knows, which never
 * yields a wrong-language schema for a real runtime.
 */
@@ -1353,7 +1473,8 @@ function createRunCodeTool(registry, options) {
 				type: "string",
 				required: true,
 				description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
-			}
+			},
+			...RUN_CODE_CONTROLS
 		},
 		output: {
 			schema: {
@@ -1365,12 +1486,37 @@ function createRunCodeTool(registry, options) {
 						required: true,
 						items: { type: "string" }
 					},
-					result: { type: "json" }
+					result: { type: "json" },
+					sandbox: {
+						type: "object",
+						additionalProperties: false,
+						properties: {
+							mode: {
+								type: "string",
+								required: true,
+								enum: [
+									"read-only",
+									"workspace-write",
+									"danger-full-access"
+								]
+							},
+							denied: {
+								type: "boolean",
+								required: true
+							},
+							enforcement: {
+								type: "string",
+								enum: ["full", "partial"]
+							}
+						}
+					}
 				}
 			},
 			render: (_args, value) => {
 				const rendered = value.result === void 0 ? "" : renderValue(value.result);
 				const parts = [value.logs.join("\n"), rendered].filter((part) => part.length > 0);
+				if (value.sandbox?.enforcement === "partial") parts.push("File sandbox enforcement is partial on this host.");
+				if (value.sandbox?.denied) parts.push(`The ${value.sandbox.mode} file sandbox denied an operation.${escalationGuidance(peekRuntime())}`);
 				return [{
 					type: "text",
 					text: parts.length > 0 ? parts.join("\n") : "(run_code completed with no output)"
@@ -1380,6 +1526,31 @@ function createRunCodeTool(registry, options) {
 		async execute(args, exec) {
 			if (args.description.trim().length === 0) throw new Error("invalid description: expected a non-empty string");
 			const runtime = requireRuntime();
+			validateEscalationArgs(args.sandbox_permissions, args.justification);
+			if (args.timeoutMs !== void 0 && runtime.timeout === void 0) throw new Error("timeoutMs is not available for this PTC runtime");
+			if (args.timeoutMs !== void 0 && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) throw new Error("invalid timeoutMs: expected a positive finite number");
+			const standingPolicy = runtime.sandboxMode === void 0 ? void 0 : options.resolveSandboxPolicy(exec);
+			let policy = standingPolicy;
+			if (args.sandbox_permissions !== void 0 && args.justification !== void 0) {
+				if (standingPolicy === void 0) throw new Error("sandbox_permissions is not available for this PTC runtime");
+				const approvedMode = await approveEscalation({
+					requestedMode: args.sandbox_permissions,
+					justification: args.justification,
+					effectiveMode: standingPolicy.mode,
+					subject: "program"
+				}, {
+					approver: options.peekApprover(),
+					agent: exec.agent,
+					callId: exec.callId,
+					toolName: RUN_CODE_NAME,
+					signal: exec.signal
+				});
+				policy = {
+					...standingPolicy,
+					mode: approvedMode
+				};
+			}
+			exec.signal.throwIfAborted();
 			const runController = new AbortController();
 			const onOuterAbort = () => {
 				runController.abort(exec.signal.reason);
@@ -1461,7 +1632,8 @@ function createRunCodeTool(registry, options) {
 				while (logWork.size > 0) await Promise.allSettled([...logWork]);
 			};
 			const runOver = () => runController.signal.aborted;
-			const binding = (name) => async (rawArgs) => {
+			const binding = (schema) => async (rawArgs) => {
+				const { name } = schema;
 				if (runOver()) throw new Error(`run_code run is over (${String(runController.signal.reason)}); ${name} not dispatched`);
 				const normalized = jsonNormalizeArgs(rawArgs);
 				const n = ++dispatches;
@@ -1470,6 +1642,7 @@ function createRunCodeTool(registry, options) {
 					callId: subCallId,
 					rootCallId: exec.rootCallId,
 					name,
+					schema,
 					arguments: normalized.dispatched,
 					...exec.agent ? { agent: exec.agent } : {},
 					parent: exec.token,
@@ -1504,6 +1677,7 @@ function createRunCodeTool(registry, options) {
 								name,
 								arguments: normalized.logged,
 								isError: result.isError,
+								...result.error?.info === void 0 ? {} : { error: result.error.info },
 								content: logged
 							});
 						})().finally(() => {
@@ -1551,10 +1725,7 @@ function createRunCodeTool(registry, options) {
 							const result = parked.kind === "post-result" ? await scheduler.finalize(parked.exec, parked.result) : scheduler.finish(parked.exec, parked.result);
 							if (!result.isError && result.content.some((block) => block.type === "image")) exec.deferContext(createUserMessage({
 								content: result.content,
-								source: {
-									kind: "plugin",
-									plugin: "tools-ptc"
-								}
+								source: { kind: "ptc-mode" }
 							}));
 							for (const context of result.additionalContexts ?? []) exec.deferContext(context);
 							if (result.concludesTurn) exec.concludeTurn();
@@ -1574,13 +1745,13 @@ function createRunCodeTool(registry, options) {
 				if (schema.name === "run_code") continue;
 				Object.defineProperty(functions, schema.name, {
 					enumerable: true,
-					value: binding(schema.name)
+					value: binding(deepFreeze(schema))
 				});
 			}
 			try {
 				let result;
 				try {
-					result = await runtime.run({
+					result = await runtime.run(runtime.resolve({
 						program: args.code,
 						bindings: [{
 							global: "tools",
@@ -1590,18 +1761,23 @@ function createRunCodeTool(registry, options) {
 								memberNameProperty: "toolName"
 							}
 						}],
-						signal: runController.signal
-					});
+						signal: runController.signal,
+						...exec.agent?.session.header.cwd !== void 0 ? { cwd: exec.agent.session.header.cwd } : {},
+						...policy !== void 0 ? { sandboxPolicy: policy } : {},
+						...args.timeoutMs !== void 0 ? { timeoutMs: args.timeoutMs } : {}
+					}));
 				} finally {
 					runController.abort("run_code settled");
 					await drainDispatches();
 				}
 				if (result.error) {
 					const logsText = result.logs.length > 0 ? `\nCaptured output:\n${result.logs.join("\n")}` : "";
-					throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${logsText}`);
+					const sandboxText = result.sandbox === void 0 ? "" : `\nFile sandbox: ${result.sandbox.mode}${result.sandbox.enforcement === void 0 ? "" : `; enforcement: ${result.sandbox.enforcement}`}${result.sandbox.denied ? "; operation denied" : ""}.`;
+					throw new CodeRunFailedError(`code run failed (${result.error.kind}): ${result.error.message}${logsText}${sandboxText}${result.sandbox?.denied ? escalationGuidance(runtime) : ""}`);
 				}
 				return {
 					logs: result.logs,
+					...result.sandbox === void 0 ? {} : { sandbox: result.sandbox },
 					...result.value !== void 0 ? { result: result.value } : {}
 				};
 			} finally {
@@ -1617,7 +1793,11 @@ function createRunCodeTool(registry, options) {
 	});
 	Object.defineProperty(definition, "description", {
 		enumerable: true,
-		get: () => resolveFlavor(peekRuntime).description
+		get: () => {
+			const runtime = peekRuntime();
+			const instructions = runtime?.executionInstructions;
+			return resolveFlavor(peekRuntime).description + (instructions ? ` ${instructions}` : "") + (runtime === void 0 ? "" : " The working directory is the Session's current directory.") + escalationGuidance(runtime);
+		}
 	});
 	Object.defineProperty(definition, "parameters", {
 		enumerable: true,
@@ -1631,7 +1811,8 @@ function createRunCodeTool(registry, options) {
 				type: "string",
 				required: true,
 				description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
-			}
+			},
+			...controlParameters(peekRuntime())
 		})
 	});
 	return definition;
@@ -1916,7 +2097,7 @@ function renderToolsSdk(schemas) {
 * PTC mode codegen — Python flavor. The pure projection from registered tool schemas to the
 * Python SDK text the model programs against under `runtime.language === 'python'`. Sibling of
 * {@link ./ts-types.ts | ts-types.ts}; the two files are two projections of the same registry
-* store, keyed by the loaded {@link @deepseek-ai/dsh-code-runtime#CodeRuntime.language | code
+* store, keyed by the loaded {@link @deepseek-ai/dsh-ptc-runtime#PtcRuntime.language | PTC
 * runtime's language}.
 *
 * Under `mode: 'ptc'` the native tool schemas are omitted from the request, so this generated
@@ -2603,17 +2784,17 @@ function renderToolsSdkPy(schemas) {
 */
 /**
 * Language → SDK-section renderer. The registry looks up the loaded
-* `ctx.codeRuntime.language` in this table when assembling the `tools:sdk`
+* `ctx.ptcRuntime.language` in this table when assembling the `tools:sdk`
 * section under a non-native mode; a runtime whose language is not a key
 * fails the assembly loudly (same idiom as `toolOrder` violations). Adding a
-* new backend language is three parallel edits — a {@link CodeSdkLanguage}
+* new backend language is three parallel edits — a {@link PtcSdkLanguage}
 * member, an entry here, and a `RUN_CODE_FLAVORS` entry in `ptc.ts` for
 * its `run_code` schema strings — plus the renderer function this table points
 * at. The `satisfies` clause pins this table's key set to that union, which
 * the flavor table is checked against too, so any of the three left out is a
 * typecheck failure. What no check reaches is the prose that names the values
-* instead of deriving them: the seam's `dsh-code-runtime` README pair, its
-* `CodeRuntime.language` JSDoc, and `docs/subsystems/code-runtime.md`
+* instead of deriving them: the seam's `dsh-ptc-runtime` README pair, its
+* `PtcRuntime.language` JSDoc, and `docs/subsystems/ptc-runtime.md`
 * with its zh pair, plus this package's own README pair and the
 * {@link Config.mode} JSDoc.
 */
@@ -2789,6 +2970,8 @@ function resolveMaxParallelSubCalls(value) {
 	cancellationStates = /* @__PURE__ */ new WeakMap();
 	/** Definition-owned final content transform snapshotted before policy begins. */
 	contentFinalizers = /* @__PURE__ */ new WeakMap();
+	/** Execution-prepared content installed before post-execute policy. */
+	contentProjectors = /* @__PURE__ */ new WeakMap();
 	layers = new ScopedLayers((scope) => new ToolLayer(scope), () => {
 		this.ctx.emit("tools/change");
 	});
@@ -2848,12 +3031,13 @@ function resolveMaxParallelSubCalls(value) {
 		return {
 			name: "tools:sdk",
 			order: this.ctx.systemPrompt.getSectionOrder("TOOLS_SDK"),
+			interpolate: false,
 			text: (context) => {
 				const mode = this.modeFor(context.scope);
 				if (mode === "native") return "";
-				const runtime = this.requireCodeRuntime(mode);
+				const runtime = this.requirePtcRuntime(mode);
 				const render = SDK_RENDERERS[runtime.language];
-				/* v8 ignore next -- requireCodeRuntime rejects an unknown language before this runs. */
+				/* v8 ignore next -- requirePtcRuntime rejects an unknown language before this runs. */
 				if (render === void 0) throw new Error(`dsh-tools: no SDK renderer for ${runtime.language}`);
 				return render(this.sdkSchemas(context.scope));
 			}
@@ -2882,10 +3066,16 @@ function resolveMaxParallelSubCalls(value) {
 	* and only for scopes whose mode actually presents it.
 	* @returns the shared transport definition.
 	*/
-	requireCodeTransport() {
+	requirePtcTransport() {
 		this.ptcTransport ??= createRunCodeTool(this, {
-			requireRuntime: () => this.requireCodeRuntime(this.defaultMode),
-			peekRuntime: () => this.ctx.get("codeRuntime"),
+			requireRuntime: () => this.requirePtcRuntime(this.defaultMode),
+			peekApprover: () => this.ctx.get("approval"),
+			resolveSandboxPolicy: (exec) => {
+				const policy = this.ctx.get("sandboxPolicy");
+				if (policy === void 0) throw new Error("dsh-tools: confined PTC runtime requires sandboxPolicy");
+				return policy.resolve(exec.agent === void 0 ? {} : { session: exec.agent.session });
+			},
+			peekRuntime: () => this.ctx.get("ptcRuntime"),
 			maxParallel: this.maxParallelSubCalls,
 			shapeDispatchLog: (dispatch) => this.shapeDispatchLog(dispatch)
 		});
@@ -2930,7 +3120,7 @@ function resolveMaxParallelSubCalls(value) {
 			schemas: [...view.visible.values()].map((definition) => this.schemaOf(definition, false)),
 			knownNames: [...view.knownNames]
 		};
-		this.requireCodeRuntime(mode);
+		this.requirePtcRuntime(mode);
 		const schemas = [...view.visible.values()].map((definition) => this.schemaOf(definition, false));
 		if (mode === "ptc") return {
 			schemas: schemas.filter((schema) => schema.name === RUN_CODE_NAME),
@@ -2942,10 +3132,10 @@ function resolveMaxParallelSubCalls(value) {
 		};
 	}
 	/**
-	* Resolve the code runtime or throw the actionable misconfiguration error.
+	* Resolve the PTC runtime or throw the actionable misconfiguration error.
 	* Read at use time (assembly / run_code execution), NOT via static
 	* `inject`: an inject entry would hold `ctx.tools` — and every tool plugin
-	* behind it — hostage to a code runtime existing even under `mode:
+	* behind it — hostage to a PTC runtime existing even under `mode:
 	* 'native'`.
 	*
 	* Assembly and `run_code` execution read separately, so the language is not
@@ -2955,9 +3145,9 @@ function resolveMaxParallelSubCalls(value) {
 	* other. Binding it is deferred until a second backend ships (the first
 	* point it is testable).
 	*/
-	requireCodeRuntime(mode) {
-		const runtime = this.ctx.get("codeRuntime");
-		if (!runtime) throw new Error(`dsh-tools: mode "${mode}" requires a code runtime — load a ctx.codeRuntime implementation (e.g. @deepseek-ai/dsh-code-runtime-worker-thread) or set tools mode to "native"`);
+	requirePtcRuntime(mode) {
+		const runtime = this.ctx.get("ptcRuntime");
+		if (!runtime) throw new Error(`dsh-tools: mode "${mode}" requires a PTC runtime — load a ctx.ptcRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-node) or set tools mode to "native"`);
 		if (!Object.hasOwn(SDK_RENDERERS, runtime.language)) {
 			const known = Object.keys(SDK_RENDERERS).map((name) => JSON.stringify(name)).join(", ");
 			throw new Error(`dsh-tools: no SDK renderer registered for runtime language ${JSON.stringify(runtime.language)} (known: ${known})`);
@@ -3071,7 +3261,7 @@ function resolveMaxParallelSubCalls(value) {
 			knownNames.add(name);
 			visible.set(name, definition);
 		}
-		if (this.modeFor(scope) !== "native") visible.set(RUN_CODE_NAME, this.requireCodeTransport());
+		if (this.modeFor(scope) !== "native") visible.set(RUN_CODE_NAME, this.requirePtcTransport());
 		return {
 			visible,
 			knownNames,
@@ -3132,13 +3322,14 @@ function resolveMaxParallelSubCalls(value) {
 	}
 	/** Project one definition onto the model-facing schema fields. */
 	schemaOf(definition, detachParameters) {
-		const { name, description, parameters } = definition;
+		const { name, description, parameters, deferLoading } = definition;
 		const detached = detachParameters ? snapshotJsonValue(parameters) : parameters;
 		if (detached === void 0) throw new Error(`tool "${name}" parameters must be lossless JSON before schema projection`);
 		return {
 			name,
 			description,
-			parameters: detached
+			parameters: detached,
+			...deferLoading === true ? { deferLoading } : {}
 		};
 	}
 	/**
@@ -3242,6 +3433,7 @@ function resolveMaxParallelSubCalls(value) {
 			signal,
 			...agent !== void 0 ? { agent } : {},
 			...parent !== void 0 ? { parent } : {},
+			...exec.schema !== void 0 ? { schema: exec.schema } : {},
 			deferContext(context) {
 				deferredContexts.push(context);
 			},
@@ -3250,6 +3442,7 @@ function resolveMaxParallelSubCalls(value) {
 			}
 		};
 		const capturedFinalizer = visible?.finalizeContent?.bind(visible);
+		const capturedProjector = visible?.projectContent?.bind(visible);
 		const finalizerFor = () => collapsed && !signal.aborted ? void 0 : capturedFinalizer;
 		try {
 			const detached = snapshotJsonValue(exec.arguments);
@@ -3260,6 +3453,7 @@ function resolveMaxParallelSubCalls(value) {
 			};
 			this.deferredContexts.set(execution, deferredContexts);
 			this.contentFinalizers.set(execution, finalizerFor());
+			if (!collapsed) this.contentProjectors.set(execution, capturedProjector);
 			this.cancellationStates.set(execution, {
 				callerSignal: signal,
 				bodyInvoked: false
@@ -3324,7 +3518,13 @@ function resolveMaxParallelSubCalls(value) {
 				exec,
 				result: toolAbortedBeforeDispatchResult()
 			});
+			if (decision.kind === "cancel") return await next({
+				kind: "post-result",
+				exec,
+				result: toolAbortedBeforeDispatchResult()
+			});
 			const denialReason = decision.kind === "allow" ? this.guardReason(exec) : decision.reason;
+			const denialInfo = decision.kind === "deny" ? decision.info : void 0;
 			if (denialReason !== void 0) return await next({
 				kind: "post-result",
 				exec,
@@ -3334,7 +3534,10 @@ function resolveMaxParallelSubCalls(value) {
 						text: `Error: ${denialReason}`
 					}],
 					isError: true,
-					error: { message: denialReason }
+					error: {
+						message: denialReason,
+						...denialInfo === void 0 ? {} : { info: denialInfo }
+					}
 				})
 			});
 			if (this.callerCancelled(exec)) return await next({
@@ -3440,7 +3643,14 @@ function resolveMaxParallelSubCalls(value) {
 	*/
 	async finalizeScheduledExecution(exec, result) {
 		try {
-			const postResult = await this.postExecute(exec, result);
+			const project = this.contentProjectors.get(exec);
+			this.contentProjectors.delete(exec);
+			const content = project?.(exec, result);
+			const projected = content === void 0 ? result : this.markCanonical(exec, this.materializeFinalResult({
+				...result,
+				content
+			}));
+			const postResult = await this.postExecute(exec, projected);
 			return this.finishScheduledExecution(exec, this.callerCancelled(exec) && !postResult.isError ? this.cancellationResult(exec, postResult) : postResult);
 		} catch (error) {
 			return this.finishScheduledExecution(exec, toolErrorResult(error));
@@ -3532,6 +3742,7 @@ function resolveMaxParallelSubCalls(value) {
 			toolName: exec.name,
 			callId: exec.callId,
 			...ask.reason !== void 0 ? { reason: ask.reason } : {},
+			...ask.displayReason !== void 0 ? { displayReason: ask.displayReason } : {},
 			signal: exec.signal
 		});
 		switch (outcome) {
@@ -3891,8 +4102,7 @@ function runtimeFromCtx(ctx, cwd) {
 						text: greeting
 					}],
 					source: {
-						kind: "plugin",
-						plugin: "dsh-agiteam",
+						kind: "dsh-agiteam",
 						form: "instructions"
 					}
 				}));
@@ -3918,8 +4128,7 @@ function runtimeFromCtx(ctx, cwd) {
 					text
 				}],
 				source: {
-					kind: "plugin",
-					plugin: "dsh-agiteam",
+					kind: "dsh-agiteam",
 					form: "instructions"
 				}
 			}));
@@ -4098,8 +4307,8 @@ async function executeStartProject(ctx, config, args) {
 	} catch (err) {
 		const original = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
 		try {
-			const { openAgiteamDomain, upsertProject, getProject } = await import("./store-CGxi4q_W.js");
-			const { autoDriveRuntimeFromCtx, ensureStageTask } = await import("./auto-drive-Dswz7wd8.js");
+			const { openAgiteamDomain, upsertProject, getProject } = await import("./store-Fp8tyrp9.js");
+			const { autoDriveRuntimeFromCtx, ensureStageTask } = await import("./auto-drive-CmPJkrfn.js");
 			const domain = await openAgiteamDomain(ctx);
 			if (getProject(domain, projectId)) return errorResult(`项目 ${projectId} 已存在（先查询 agiteam_status 或用其他 projectId）`);
 			const now = Date.now();
@@ -4128,7 +4337,7 @@ async function executeStartProject(ctx, config, args) {
 			await upsertProject(domain, project);
 			await ensureStageTask(domain, project, "requirement");
 			const rt = autoDriveRuntimeFromCtx(ctx, rootDir);
-			const { stageGreeting, wakeStageRole } = await import("./auto-drive-Dswz7wd8.js");
+			const { stageGreeting, wakeStageRole } = await import("./auto-drive-CmPJkrfn.js");
 			await wakeStageRole(domain, rt, project, "requirement", stageGreeting(project, "requirement", args.requirement));
 			return {
 				status: "ok",
@@ -4191,7 +4400,7 @@ async function executeStatus(ctx, config, args) {
 		}
 	} catch {}
 	try {
-		const { openAgiteamDomain, getProject, listTasks, listEntities, listAudit } = await import("./store-CGxi4q_W.js");
+		const { openAgiteamDomain, getProject, listTasks, listEntities, listAudit } = await import("./store-Fp8tyrp9.js");
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
 		if (!project) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
@@ -4238,8 +4447,8 @@ async function executeStatus(ctx, config, args) {
 /** 推进阶段（agiteam_advance：通过 或 打回）—— DB 版。 */
 async function executeAdvance(ctx, config, args) {
 	try {
-		const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-		const { autoDriveRuntimeFromCtx, autoAdvance, reviewDecision } = await import("./auto-drive-Dswz7wd8.js");
+		const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+		const { autoDriveRuntimeFromCtx, autoAdvance, reviewDecision } = await import("./auto-drive-CmPJkrfn.js");
 		const { isReviewStage } = await import("./stage-6kxWDxZR.js").then((n) => n.a);
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
@@ -4279,8 +4488,8 @@ async function executeAdvance(ctx, config, args) {
 /** 让指定角色 agent 执行一个任务（agiteam_task：分派工作给角色）—— DB 版。 */
 async function executeRoleTask(ctx, config, args) {
 	try {
-		const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-		const { autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+		const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+		const { autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 		const project = getProject(await openAgiteamDomain(ctx), args.projectId);
 		if (!project) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
 		const roleName = ROLE_NAMES[args.role] ?? args.role;
@@ -4328,7 +4537,7 @@ async function executeRoleTask(ctx, config, args) {
 /** 列出/读取阶段产物（agiteam_artifact：查看需求清单/功能清单/用例矩阵/验收报告）—— DB 版。 */
 async function executeReadArtifact(ctx, config, args) {
 	try {
-		const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
+		const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
 		const project = getProject(await openAgiteamDomain(ctx), args.projectId);
 		if (!project) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
 		const rel = {
@@ -4396,7 +4605,7 @@ async function executeRegister(ctx, config, args) {
 		return errorResult("detail 必须是合法 JSON 字符串");
 	}
 	try {
-		const { openAgiteamDomain, getProject, upsertEntity, appendAuditRecord, lastAudit } = await import("./store-CGxi4q_W.js");
+		const { openAgiteamDomain, getProject, upsertEntity, appendAuditRecord, lastAudit } = await import("./store-Fp8tyrp9.js");
 		const { makeAuditEntry } = await import("./audit-CJNju73G.js").then((n) => n.t);
 		const domain = await openAgiteamDomain(ctx);
 		if (!getProject(domain, args.projectId)) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
@@ -4544,8 +4753,8 @@ async function executeAutoDone(ctx, config, args) {
 			};
 		}
 	} catch {}
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { autoAdvance, autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { autoAdvance, autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
@@ -4586,8 +4795,8 @@ async function executeApprove(ctx, config, args) {
 			};
 		}
 	} catch {}
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { approveStage, autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { approveStage, autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
@@ -4626,8 +4835,8 @@ async function executeReject(ctx, config, args) {
 			};
 		}
 	} catch {}
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { rejectStage, autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { rejectStage, autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
@@ -4666,8 +4875,8 @@ async function executePause(ctx, config, args) {
 			};
 		}
 	} catch {}
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { pauseStage } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { pauseStage } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		if (!getProject(domain, args.projectId)) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
@@ -4702,8 +4911,8 @@ async function executeResume(ctx, config, args) {
 			};
 		}
 	} catch {}
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { resumeStage, autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { resumeStage, autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
@@ -4724,8 +4933,8 @@ async function executeResume(ctx, config, args) {
 * 提交到任务（in_review 或直接建议），但最终放行权在你。
 */
 async function executeAiApprove(ctx, config, args) {
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { aiApproveSuggestion } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { aiApproveSuggestion } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		if (!getProject(domain, args.projectId)) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
@@ -4745,7 +4954,7 @@ async function executeAiApprove(ctx, config, args) {
 * 任务板列表（agiteam_task_list）—— 查看项目任务板全部任务及状态。
 */
 async function executeTaskList(ctx, config, args) {
-	const { openAgiteamDomain, getProject, listTasks } = await import("./store-CGxi4q_W.js");
+	const { openAgiteamDomain, getProject, listTasks } = await import("./store-Fp8tyrp9.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		if (!getProject(domain, args.projectId)) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
@@ -4776,8 +4985,8 @@ async function executeTaskList(ctx, config, args) {
 * 通过则自动前进，打回则带意见返回上一阶段。
 */
 async function executeReview(ctx, config, args) {
-	const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
-	const { reviewDecision, autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+	const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
+	const { reviewDecision, autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 	try {
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
@@ -4801,15 +5010,15 @@ async function executeReview(ctx, config, args) {
 */
 async function executeNewRequirement(ctx, config, args) {
 	try {
-		const { openAgiteamDomain, getProject, upsertProject } = await import("./store-CGxi4q_W.js");
-		const { autoDriveRuntimeFromCtx } = await import("./auto-drive-Dswz7wd8.js");
+		const { openAgiteamDomain, getProject, upsertProject } = await import("./store-Fp8tyrp9.js");
+		const { autoDriveRuntimeFromCtx } = await import("./auto-drive-CmPJkrfn.js");
 		const domain = await openAgiteamDomain(ctx);
 		const project = getProject(domain, args.projectId);
 		if (!project) return errorResult(`项目 ${args.projectId} 不存在（先 agiteam_start）`);
 		const reqId = `R-${Object.keys(project.requirements ?? {}).length + 1}`;
 		const title = args.title ?? `需求 ${reqId}`;
 		const rt = autoDriveRuntimeFromCtx(ctx, project.cwd);
-		const { stageGreeting } = await import("./auto-drive-Dswz7wd8.js");
+		const { stageGreeting } = await import("./auto-drive-CmPJkrfn.js");
 		const greeting = stageGreeting(project, "requirement", `【新需求 ${reqId}】${title}\n${args.requirement}`);
 		try {
 			await rt.ensureRole(args.projectId, "requirement", project.cwd, greeting, reqId, {
@@ -5052,7 +5261,7 @@ async function runQoderTask(task, options) {
 async function executeQoderTask(ctx, config, args) {
 	let projectCwd = args.cwd;
 	try {
-		const { openAgiteamDomain, getProject } = await import("./store-CGxi4q_W.js");
+		const { openAgiteamDomain, getProject } = await import("./store-Fp8tyrp9.js");
 		const project = getProject(await openAgiteamDomain(ctx), args.projectId);
 		if (project && project.cwd) projectCwd = project.cwd;
 	} catch {}
@@ -5069,7 +5278,7 @@ async function executeQoderTask(ctx, config, args) {
 	let seq;
 	let hash;
 	try {
-		const { openAgiteamDomain, appendAuditRecord, lastAudit } = await import("./store-CGxi4q_W.js");
+		const { openAgiteamDomain, appendAuditRecord, lastAudit } = await import("./store-Fp8tyrp9.js");
 		const { makeAuditEntry } = await import("./audit-CJNju73G.js").then((n) => n.t);
 		const domain = await openAgiteamDomain(ctx);
 		const prev = lastAudit(domain, args.projectId);
@@ -5493,7 +5702,7 @@ function registerWebSurface(ctx, config, getRuntime) {
 * @returns TraceState 或 null（项目不存在）。
 */
 async function buildDbSnapshot(ctx, projectId) {
-	const { openAgiteamDomain, getProject, listEntities, listAudit } = await import("./store-CGxi4q_W.js");
+	const { openAgiteamDomain, getProject, listEntities, listAudit } = await import("./store-Fp8tyrp9.js");
 	const domain = await openAgiteamDomain(ctx);
 	const project = getProject(domain, projectId);
 	if (!project) return null;
@@ -5575,7 +5784,7 @@ async function rtExists(ctx, cwd, rel) {
 }
 /** 列出数据库中的全部项目（面板项目列表）。 */
 async function listDbProjects(ctx) {
-	const { openAgiteamDomain, listProjects } = await import("./store-CGxi4q_W.js");
+	const { openAgiteamDomain, listProjects } = await import("./store-Fp8tyrp9.js");
 	return listProjects(await openAgiteamDomain(ctx)).map((p) => ({
 		projectId: p.id,
 		projectName: p.name,
@@ -5584,7 +5793,7 @@ async function listDbProjects(ctx) {
 }
 /** 从数据库构建任务板快照（面板数据源）。 */
 async function buildBoardSnapshot(ctx, projectId) {
-	const { openAgiteamDomain, getProject, listTasks } = await import("./store-CGxi4q_W.js");
+	const { openAgiteamDomain, getProject, listTasks } = await import("./store-Fp8tyrp9.js");
 	const domain = await openAgiteamDomain(ctx);
 	const project = getProject(domain, projectId);
 	if (!project) return null;
@@ -5635,14 +5844,18 @@ const TEAM_GUIDANCE = [
 	"知识库落盘：项目配置 kbPath 后，阶段产物按规范自动写入团队知识库（需求清单.md/产品方案.md/测试用例.md/验收报告.md/评审记录.md）；角色完成后自动通知发起会话继续指挥。"
 ].join("\n");
 /** 本包注入消息的来源插件标签。 */
-const PLUGIN_TAG = "dsh-agiteam";
+const PRODUCER_KIND = "dsh-agiteam";
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${PRODUCER_KIND}`;
 /** 角色枚举（工具参数用）。 */
 const ROLE_ENUM = Object.keys(ROLE_NAMES);
 /** 引导消息是否已存在于会话可见面。 */
 function guidanceAlreadyInjected(agent) {
 	return agent.session.surface.nodes.some((seq) => {
 		const event = agent.session.eventAt(seq);
-		return event?.type === "user/message" && event.data.source.kind === "plugin" && event.data.source.plugin === PLUGIN_TAG;
+		if (event?.type !== "user/message") return false;
+		const kind = event.data.source.kind;
+		return kind === PRODUCER_KIND || kind === MIGRATED_PRODUCER_KIND;
 	});
 }
 /** 把工具返回值以美化 JSON 文本呈现给模型。 */
@@ -6322,7 +6535,7 @@ async function apply(ctx, config) {
 	for (const tool of Object.values(tools)) ctx.tools.register(tool);
 	registerWebSurface(ctx, toolConfig, () => runtimeFromCtx(ctx, process.cwd()));
 	ctx.effect(async () => {
-		const { openAgiteamDomain } = await import("./store-CGxi4q_W.js");
+		const { openAgiteamDomain } = await import("./store-Fp8tyrp9.js");
 		const domain = await openAgiteamDomain(ctx);
 		return () => {
 			domain.handle.close();
@@ -6339,8 +6552,7 @@ async function apply(ctx, config) {
 				text: TEAM_GUIDANCE
 			}],
 			source: {
-				kind: "plugin",
-				plugin: PLUGIN_TAG,
+				kind: PRODUCER_KIND,
 				form: "instructions"
 			}
 		});

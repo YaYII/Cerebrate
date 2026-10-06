@@ -5226,20 +5226,26 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		}
 		//#endregion
 		//#region src/generated/typert.remote-client.js
-		const _shengsheng_dsh_taskboard_taskboard_mutate_parameter_0$schema = object({
+		let _shengsheng_dsh_taskboard_taskboard_mutate_parameter_0$schema$value;
+		const _shengsheng_dsh_taskboard_taskboard_mutate_parameter_0$schema = () => _shengsheng_dsh_taskboard_taskboard_mutate_parameter_0$schema$value ??= object({
 			"endpoint": string().readonly(),
 			"payloadJson": string().readonly()
 		});
-		const _shengsheng_dsh_taskboard_taskboard_mutate_result$schema = object({
+		let _shengsheng_dsh_taskboard_taskboard_mutate_result$schema$value;
+		const _shengsheng_dsh_taskboard_taskboard_mutate_result$schema = () => _shengsheng_dsh_taskboard_taskboard_mutate_result$schema$value ??= object({
 			"ok": boolean().readonly(),
 			"valueJson": string().readonly().optional(),
 			"errorCode": string().readonly().optional(),
 			"errorMessage": string().readonly().optional()
 		});
-		const _shengsheng_dsh_taskboard_taskboard_snapshot_parameter_0$schema = union([_undefined(), string()]);
-		const _shengsheng_dsh_taskboard_taskboard_snapshot_result$schema = string();
-		const _shengsheng_dsh_taskboard_taskboard_taskDetail_parameter_0$schema = string();
-		const _shengsheng_dsh_taskboard_taskboard_taskDetail_result$schema = string();
+		let _shengsheng_dsh_taskboard_taskboard_snapshot_parameter_0$schema$value;
+		const _shengsheng_dsh_taskboard_taskboard_snapshot_parameter_0$schema = () => _shengsheng_dsh_taskboard_taskboard_snapshot_parameter_0$schema$value ??= union([_undefined(), string()]);
+		let _shengsheng_dsh_taskboard_taskboard_snapshot_result$schema$value;
+		const _shengsheng_dsh_taskboard_taskboard_snapshot_result$schema = () => _shengsheng_dsh_taskboard_taskboard_snapshot_result$schema$value ??= string();
+		let _shengsheng_dsh_taskboard_taskboard_taskDetail_parameter_0$schema$value;
+		const _shengsheng_dsh_taskboard_taskboard_taskDetail_parameter_0$schema = () => _shengsheng_dsh_taskboard_taskboard_taskDetail_parameter_0$schema$value ??= string();
+		let _shengsheng_dsh_taskboard_taskboard_taskDetail_result$schema$value;
+		const _shengsheng_dsh_taskboard_taskboard_taskDetail_result$schema = () => _shengsheng_dsh_taskboard_taskboard_taskDetail_result$schema$value ??= string();
 		const TYPERT_REMOTE = {
 			package: "@shengsheng/dsh-taskboard",
 			descriptors: [
@@ -5257,13 +5263,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 						codec: {
 							mode: "strict",
 							typeSymbol: "@shengsheng/dsh-taskboard/domain#TaskboardRemoteMutationRequest",
-							schema: _shengsheng_dsh_taskboard_taskboard_mutate_parameter_0$schema
+							create: _shengsheng_dsh_taskboard_taskboard_mutate_parameter_0$schema
 						}
 					}],
 					result: {
 						mode: "strict",
 						typeSymbol: "@shengsheng/dsh-taskboard/domain#TaskboardRemoteMutationResult",
-						schema: _shengsheng_dsh_taskboard_taskboard_mutate_result$schema
+						create: _shengsheng_dsh_taskboard_taskboard_mutate_result$schema
 					},
 					sourceLocation: {
 						"file": "packages/taskboard/src/service/index.ts",
@@ -5286,13 +5292,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 						codec: {
 							mode: "strict",
 							typeSymbol: "@shengsheng/dsh-taskboard#taskboard/snapshot:projectId",
-							schema: _shengsheng_dsh_taskboard_taskboard_snapshot_parameter_0$schema
+							create: _shengsheng_dsh_taskboard_taskboard_snapshot_parameter_0$schema
 						}
 					}],
 					result: {
 						mode: "strict",
 						typeSymbol: "@shengsheng/dsh-taskboard#taskboard/snapshot:result",
-						schema: _shengsheng_dsh_taskboard_taskboard_snapshot_result$schema
+						create: _shengsheng_dsh_taskboard_taskboard_snapshot_result$schema
 					},
 					sourceLocation: {
 						"file": "packages/taskboard/src/service/index.ts",
@@ -5314,13 +5320,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 						codec: {
 							mode: "strict",
 							typeSymbol: "@shengsheng/dsh-taskboard#taskboard/taskDetail:taskId",
-							schema: _shengsheng_dsh_taskboard_taskboard_taskDetail_parameter_0$schema
+							create: _shengsheng_dsh_taskboard_taskboard_taskDetail_parameter_0$schema
 						}
 					}],
 					result: {
 						mode: "strict",
 						typeSymbol: "@shengsheng/dsh-taskboard#taskboard/taskDetail:result",
-						schema: _shengsheng_dsh_taskboard_taskboard_taskDetail_result$schema
+						create: _shengsheng_dsh_taskboard_taskboard_taskDetail_result$schema
 					},
 					sourceLocation: {
 						"file": "packages/taskboard/src/service/index.ts",
