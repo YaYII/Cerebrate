@@ -81,3 +81,14 @@ node_modules/
 
 # ───────── 配置备份文件（*.bak-时间戳）─────────
 *.bak-*
+
+# ── 2026-10-06 新增：本地实验与敏感数据目录（严禁提交，本仓库为公开仓库）──
+# crawler-lab：爬虫实验（含企业核查报告、小说数据、865MB vendor 副本）
+dsh-plugins/crawler-lab/
+# company-osint：企业情报档案（含公司尽调结果），属敏感数据
+dsh-plugins/company-osint/
+# ai-fetch：网页抓取工具（含 vendor），待整理后再决定是否入库
+dsh-plugins/ai-fetch/
+# 工具本地配置与生成产物
+dsh-plugins/.commandcode/
+dsh-plugins/*/.code-review/
