@@ -154,7 +154,17 @@ export const Config: z<Config> = z.object({
 })
 
 /** 本包注入消息的来源插件标签。 */
-const PLUGIN_TAG = 'dsh-mail-bridge'
+const PRODUCER_KIND = 'dsh-mail-bridge'
+
+/** 本包注入消息的生产者 kind（producer-owned source）。 */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-mail-bridge': { kind: 'dsh-mail-bridge'; form?: 'instructions' }
+  }
+}
+
+/** 旧版 V3 会话消息迁移后的 kind；识别它以免升级后的会话重复注入。 */
+const MIGRATED_PRODUCER_KIND = `plugin:${PRODUCER_KIND}`
 
 /** 宿主 agents 服务的最小结构（收口窄接口，便于测试）。 */
 interface MailAgent {
@@ -454,7 +464,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
         model: prepared.config.model,
         messages: [createUserMessage({
           content: [{ type: 'text', text: classifyPrompt(mail) }],
-          source: { kind: 'plugin' as const, plugin: PLUGIN_TAG, form: 'instructions' as const },
+          source: { kind: PRODUCER_KIND, form: 'instructions' },
         })],
       }
       let answer = ''
@@ -473,7 +483,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
     if (agents === undefined) return false
     const message = createUserMessage({
       content: [{ type: 'text', text: prompt }],
-      source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+      source: { kind: PRODUCER_KIND, form: 'instructions' },
     })
     const live = agents.get(sessionId)
     if (live !== undefined) {
@@ -541,7 +551,7 @@ function createRuntime(ctx: Context, config: Config): BridgeRuntime {
       persist()
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: mailPrompt(mail, tag, role) }],
-        source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+        source: { kind: PRODUCER_KIND, form: 'instructions' },
       }))
       // 挂到工作区，否则分身虽然建好了，却在侧边栏里完全看不见——
       // 用户会以为「发邮件没任何反应」，而实际分身正在后台干活（实测踩过）。
@@ -1051,7 +1061,7 @@ export function apply(ctx: Context, config: Config): void {
       guidedAgents.add(agent)
       const guidance = createUserMessage({
         content: [{ type: 'text', text: buildGuidance() }],
-        source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+        source: { kind: PRODUCER_KIND, form: 'instructions' },
       })
       const lastClaimedIndex = decision.messages.findLastIndex(message => messages.includes(message))
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
@@ -1080,7 +1090,7 @@ export function apply(ctx: Context, config: Config): void {
         type: 'text',
         text: overLimit ? stepLimitNotice(step, limit) : progressNotice(step),
       }],
-      source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+      source: { kind: PRODUCER_KIND, form: 'instructions' },
     })
     return { kind: 'enter', messages: [...decision.messages, notice] }
   })
