@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { runArchChecks } from '../features/checks'
 import { fingerprintProject, diffFingerprints } from '../features/fingerprint'
 import { qualityReport } from '../features/metrics'
