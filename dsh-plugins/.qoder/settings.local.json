@@ -24,7 +24,9 @@
       "Bash(cat /tmp/v41b.txt 2>/dev/null | python3 -m json.tool 2>/dev/null | head -30)",
       "Bash(docker exec dshagent-app sh -c 'curl -s -m 5 http://llm-gateway:4000/health/liveliness' 2>&1; echo; echo \"---dsh 视角模型枚举---\"; docker exec dshagent-app sh -c 'curl -s -m 5 http://llm-gateway:4000/v1/models -H \"Authorization: Bearer $LITELLM_MASTER_KEY\"' 2>&1 | head -c 600)",
       "Bash(docker exec dshagent-app node -e \"\nconst base='http://llm-gateway:4000';\n\\(async\\(\\)=>{\n  const h=await fetch\\(base+'/health/liveliness'\\); console.log\\('liveliness:', \\(await h.text\\(\\)\\).trim\\(\\)\\);\n  const r=await fetch\\(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+process.env.LITELLM_MASTER_KEY},body:JSON.stringify\\({model:'deepseek-v4.1-flash',messages:[{role:'user',content:'只回复三个字：连通了'}],max_tokens:100}\\)}\\);\n  const d=await r.json\\(\\);\n  const c=d.choices?.[0]?.message?.content ?? JSON.stringify\\(d\\).slice\\(0,200\\);\n  console.log\\('chat:', r.status, '| model:', d.model, '| 回复:', \\(c||''\\).trim\\(\\)\\);\n}\\)\\(\\).catch\\(e=>console.log\\('ERR:', e.message\\)\\);\n\" 2>&1)",
-      "Bash(/home/as-workstation01/.local/bin/llm-gateway accounts 2>&1)"
+      "Bash(/home/as-workstation01/.local/bin/llm-gateway accounts 2>&1)",
+      "Bash(ls /home/as-workstation01/Documents/project/ 2>/dev/null; echo \"---\"; ls /home/as-workstation01/ | head -30)",
+      "Bash(ls -d ~/llm-gateway ~/Documents/project/llm-gateway ~/Documents/project/Cerebrate/llm-gateway 2>/dev/null; find ~/Documents/project -maxdepth 3 -iname \"*litellm*\" -not -path \"*/node_modules/*\" 2>/dev/null | head -20)"
     ]
   }
 }
