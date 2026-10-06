@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 
@@ -40,7 +40,7 @@ async function setup(): Promise<Context> {
 function execute(ctx: Context, toolName: string, args: unknown, callId = 1) {
   return ctx.tools.execute({
     signal: testToolSignal,
-    callId: CallId(`call-${callId}`),
+    callId: ToolCallId(`call-${callId}`),
     name: toolName,
     arguments: args,
   })

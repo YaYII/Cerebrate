@@ -4,7 +4,7 @@
  * Talks directly to a Cerebrate Brain Server over its REST API and registers
  * native `cerebrate_*` tools, so swarm memory participates in the agent loop
  * without an MCP translation hop. Memory-first guidance folds a
- * `plugin`-sourced instructions message into the first agent step telling the
+ * producer-owned instructions message into the first agent step telling the
  * model to consult team memory before acting and to contribute back after
  * solving a problem — team memory is shared across every member, not per-agent.
  *
@@ -17,7 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'memory-cerebrate'
@@ -150,8 +150,27 @@ const MEMORY_GUIDANCE = [
   '个人偏好用 cerebrate_recall / cerebrate_remember；规模统计用 cerebrate_stats。',
 ].join('\n')
 
-/** Message-source plugin tag this package's injections carry. */
-const PLUGIN_TAG = 'memory-cerebrate'
+/** Producer kind this package's guidance injections declare. */
+const PRODUCER_KIND = 'memory-cerebrate'
+
+/**
+ * Released V3 rows carrying this package's guidance migrate to this producer
+ * kind (`plugin:` plus the original plugin name); recognizing it keeps an
+ * upgraded session from receiving the guidance a second time.
+ */
+const MIGRATED_PRODUCER_KIND = `plugin:${PRODUCER_KIND}`
+
+/** Producer-owned source of one memory-guidance injection. */
+interface MemoryGuidanceSource {
+  kind: 'memory-cerebrate'
+  form: 'instructions'
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'memory-cerebrate': MemoryGuidanceSource
+  }
+}
 
 /**
  * Whether the guidance message already lives in the session's visible surface,
@@ -162,9 +181,9 @@ const PLUGIN_TAG = 'memory-cerebrate'
 function guidanceAlreadyInjected(agent: Agent): boolean {
   return agent.session.surface.nodes.some((seq) => {
     const event = agent.session.eventAt(seq)
-    return event?.type === 'user/message'
-      && event.data.source.kind === 'plugin'
-      && event.data.source.plugin === PLUGIN_TAG
+    if (event?.type !== 'user/message') return false
+    const kind: string = event.data.source.kind
+    return kind === PRODUCER_KIND || kind === MIGRATED_PRODUCER_KIND
   })
 }
 
@@ -369,7 +388,7 @@ export function apply(ctx: Context, config: Config): void {
       signal.throwIfAborted()
       const guidance = createUserMessage({
         content: [{ type: 'text', text: MEMORY_GUIDANCE }],
-        source: { kind: 'plugin', plugin: PLUGIN_TAG, form: 'instructions' },
+        source: { kind: PRODUCER_KIND, form: 'instructions' },
       })
       const lastClaimedIndex = decision.messages.findLastIndex(message => messages.includes(message))
       return { kind: 'enter', messages: decision.messages.toSpliced(lastClaimedIndex + 1, 0, guidance) }
