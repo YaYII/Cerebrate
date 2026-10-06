@@ -111,7 +111,7 @@ async function driveBuild(handle: AgentHandle, task: string): Promise<BuildResul
   try {
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: task }],
-      source: { kind: 'plugin', plugin: 'dsh-project-wiki' },
+      source: { kind: 'dsh-project-wiki' },
     }))
     await agent.whenIdle()
     const outcome = extractOutcome(agent)
